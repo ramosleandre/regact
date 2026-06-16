@@ -67,6 +67,10 @@ run-exp:  ## Research run (Hydra overrides via ARGS=...)
 run-kaggle:  ## Competition run (flags via ARGS=...)
 	$(PYTHON) -m $(PKG).run_kaggle $(ARGS)
 
+.PHONY: debug
+debug:  ## Run a per-block debug smoke script: make debug D=block2_env
+	PYTHONPATH=src $(PYTHON) debug/$(D).py
+
 # ── housekeeping ─────────────────────────────────────────────────────────────
 .PHONY: clean
 clean:  ## Remove caches and build artifacts
