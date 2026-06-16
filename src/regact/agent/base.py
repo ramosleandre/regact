@@ -73,9 +73,6 @@ def build_agent(config: AgentConfig) -> CodeAgent:
 
         return AlanAgent()
     if config.name is AgentName.CLAUDE:
-        # Adapter lands in Block 9; the import is deferred so the registry compiles now.
-        from regact.agent.claude_adapter import ClaudeAgent  # type: ignore[import-not-found]
-
-        agent: CodeAgent = ClaudeAgent()
-        return agent
+        # The Claude CLI adapter lands in Block 9; until then selecting it is an error.
+        raise NotImplementedError("the 'claude' agent adapter arrives in Block 9")
     raise ValueError(f"unknown agent {config.name!r}")

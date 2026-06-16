@@ -1,4 +1,5 @@
-PYTHON ?= python3.12
+# Prefer the project venv so gates use the pinned ruff/mypy/pytest, not PATH's.
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3.12)
 PKG := regact
 
 .DEFAULT_GOAL := help
@@ -16,28 +17,28 @@ install:  ## Editable install with dev extras (py3.12)
 # ── quality gates ────────────────────────────────────────────────────────────
 .PHONY: lint
 lint:  ## Ruff lint
-	ruff check src tests
+	$(PYTHON) -m ruff check src tests
 
 .PHONY: format
 format:  ## Ruff format + autofix
-	ruff format src tests
-	ruff check --fix src tests
+	$(PYTHON) -m ruff format src tests
+	$(PYTHON) -m ruff check --fix src tests
 
 .PHONY: typecheck
 typecheck:  ## mypy
-	mypy src
+	$(PYTHON) -m mypy src
 
 .PHONY: test
 test:  ## Unit tests (no LLM, no game)
-	pytest -m "not integration and not slow" -q
+	$(PYTHON) -m pytest -m "not integration and not slow" -q
 
 .PHONY: test-int
 test-int:  ## Integration tests (scripted agent + fake env, no LLM)
-	pytest -m integration -q
+	$(PYTHON) -m pytest -m integration -q
 
 .PHONY: test-all
 test-all:  ## All tests
-	pytest -q
+	$(PYTHON) -m pytest -q
 
 .PHONY: check
 check: lint typecheck test  ## The CI gate: lint + typecheck + unit tests
