@@ -1,0 +1,9 @@
+# Ruff handles lint + format pre-commit. mypy runs in CI / `make typecheck`
+# (it needs the package installed, which doesn't fit a fast pre-commit hook).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
