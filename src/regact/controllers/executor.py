@@ -23,8 +23,13 @@ from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
 
 
-class EvalExecutor:
-    """Evaluate the controller in ``solution.py`` and return a result."""
+class ControllerExecutor:
+    """Evaluate the controller in ``solution.py`` and return a result.
+
+    Controller-specific (it loads ``solution.py`` and runs a controller), hence
+    the ``Controller`` prefix and the ``controllers/`` home — distinct from the
+    agnostic ``EnvClient`` it drives.
+    """
 
     def __init__(self, env: EnvClient) -> None:
         self._env = env

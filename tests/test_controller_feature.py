@@ -1,24 +1,53 @@
-"""Tests for ControllerFeature: templates, prompt, tools wiring, teardown hook, registry."""
+"""Tests for ControllerFeature: templates, prompt, tools wiring, teardown hook, registry.
 
+RunDeps carries the agnostic EnvClient (not a controller executor); the feature
+builds its own ControllerExecutor from it. So these wire a real client over a
+TestClient + FakeNativeEnv — no LLM, no real game.
+"""
+
+import json
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 from regact.config.schema import Lifecycle
+from regact.env.lifecycle import MultiInstancePolicy
+from regact.env.renderer import RawRenderer
+from regact.env.server import EnvServer
+from regact.env.session import EnvSession
+from regact.envclient.client import EnvClient
 from regact.features.base import FeatureContext, HookPhase, RunDeps, build_features
 from regact.features.controller import ControllerFeature, FinalizeControllerHook
-from regact.obs.result import EvalResult
 from regact.session.state import ExperimentState
+from regact.testing.fakes import FakeNativeEnv
 from regact.tools.exit_task import ExitTask
 from regact.tools.submit_solution import SubmitSolution
 from regact.workspace.bootstrap import Workspace
 
+# A controller that always steps forward reaches the corridor goal in 3 moves.
+_FORWARD = """\
+class Controller:
+    def act(self, obs):
+        return 1
 
-class _FakeExecutor:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
 
-    def run(self, **kwargs: object) -> EvalResult:
-        self.calls.append(kwargs)
-        return EvalResult(task="t", aggregate={"success_rate": 1.0})
+def get_controller():
+    return Controller()
+"""
+
+
+def _client() -> EnvClient:
+    server = EnvServer()
+    server.register(
+        "g",
+        EnvSession(
+            make_native=lambda: FakeNativeEnv(goal=3),
+            key="g",
+            renderer=RawRenderer(),
+            lifecycle=MultiInstancePolicy(),
+        ),
+    )
+    return EnvClient(TestClient(server.app), "g")
 
 
 def _ctx() -> FeatureContext:
@@ -28,9 +57,9 @@ def _ctx() -> FeatureContext:
 def _deps(tmp_path: Path) -> RunDeps:
     return RunDeps(
         experiment=ExperimentState(
-            problem_name="grid", task_name="lvl1", n_eval_episodes=2, n_videos=0
+            problem_name="grid", task_name="g", n_eval_episodes=2, n_videos=0
         ),
-        executor=_FakeExecutor(),  # type: ignore[arg-type]
+        env_client=_client(),
         lifecycle=Lifecycle.MULTI_INSTANCE,
         solution_path=str(tmp_path / "solution.py"),
         submissions_dir=str(tmp_path / "submissions"),
@@ -70,12 +99,13 @@ def test_controller_hook_is_teardown_finalize(tmp_path: Path) -> None:
 
 
 async def test_finalize_hook_rescores_existing_solution(tmp_path: Path) -> None:
-    (tmp_path / "solution.py").write_text("def get_controller():\n    return None\n")
+    (tmp_path / "solution.py").write_text(_FORWARD)
     deps = _deps(tmp_path)
     result = await ControllerFeature().hooks(deps)[0].run()
     assert result is not None
-    # It drove the executor and wrote the official "final" result.
-    assert deps.executor.calls[0]["output_path"].endswith("submissions/final/results.json")  # type: ignore[union-attr]
+    # It scored the final solution and wrote the official "final" result.
+    final = json.loads((tmp_path / "submissions" / "final" / "results.json").read_text())
+    assert final["aggregate"]["success_rate"] == 1.0
     assert deps.experiment.last_submission_results is not None
 
 
@@ -83,7 +113,7 @@ async def test_finalize_hook_skips_when_no_solution(tmp_path: Path) -> None:
     deps = _deps(tmp_path)  # no solution.py on disk
     result = await ControllerFeature().hooks(deps)[0].run()
     assert result is None
-    assert deps.executor.calls == []
+    assert not (tmp_path / "submissions" / "final").exists()
 
 
 def test_build_features_resolves_controller() -> None:

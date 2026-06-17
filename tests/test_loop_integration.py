@@ -1,7 +1,7 @@
 """Integration: the whole pipeline on doubles (ScriptedAgent + FakeNativeEnv).
 
 No LLM, no real game. Builds the full stack — env server behind a TestClient, an
-EvalExecutor, the ControllerFeature tools — drives ``run_session`` with a scripted
+ControllerExecutor, the ControllerFeature tools — drives ``run_session`` with a scripted
 agent, and checks the on-disk artifacts (transcript.jsonl, experiment_state.json,
 results.json) plus the error-path exits.
 """
@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from regact.agent.events import AgentError, TextDelta, ToolCall, TurnComplete
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import Lifecycle, LimitsConfig
-from regact.controllers.executor import EvalExecutor
 from regact.env.lifecycle import MultiInstancePolicy
 from regact.env.renderer import RawRenderer
 from regact.env.server import EnvServer
@@ -74,7 +73,7 @@ class _Stack:
         if tools is None:
             deps = RunDeps(
                 experiment=self.experiment,
-                executor=EvalExecutor(client),
+                env_client=client,
                 lifecycle=Lifecycle.MULTI_INSTANCE,
                 solution_path=str(self.workdir / "solution.py"),
                 submissions_dir=str(self.workdir / "submissions"),

@@ -1,7 +1,7 @@
 """The unified submit tool.
 
 One tool for both regimes. It hands the agent's ``solution.py`` to the
-``EvalExecutor``; the executor's behaviour (N episodes vs level boundary) follows
+``ControllerExecutor``; its behaviour (N episodes vs level boundary) follows
 the run's lifecycle. There is no second "SubmitSolutionCompetition" class.
 Provided by ``ControllerFeature``. The executor lands in Block 6; it is referenced
 by its contract (``run(...) -> EvalResult``) and imported only for typing.
@@ -13,7 +13,7 @@ import os
 from typing import Any
 
 from regact.config.schema import Lifecycle
-from regact.controllers.executor import EvalExecutor
+from regact.controllers.executor import ControllerExecutor
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -24,7 +24,7 @@ class SubmitSolution(Tool):
     def __init__(
         self,
         experiment: ExperimentState,
-        executor: EvalExecutor,
+        executor: ControllerExecutor,
         *,
         solution_path: str,
         submissions_dir: str,

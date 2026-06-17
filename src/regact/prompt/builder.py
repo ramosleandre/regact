@@ -1,9 +1,9 @@
 """Prompt assembly.
 
 Assembly logic only — no prompt text lives here. The static system prompt is in
-``prompt/system.md``; each problem's framing comes from its ``prompt_fragment``;
-each feature contributes a fragment. To change wording, edit the markdown (or the
-problem/feature), not this file. Empty sections are dropped.
+``prompt/system.md``; the game section comes from ``problem.build_prompt`` (built
+per task and info level); each feature contributes a fragment. To change wording,
+edit the markdown (or the problem/feature), not this file. Empty sections dropped.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from regact.config.schema import InfoMode
 from regact.features.base import Feature, FeatureContext
 
 if TYPE_CHECKING:
@@ -31,17 +32,16 @@ class PromptBuilder:
         problem: BaseProblem,
         task_name: str,
         features: list[Feature],
+        *,
+        info_mode: InfoMode = InfoMode.INFORMATIVE,
     ) -> str:
-        """Layer: problem fragment + per-feature fragments. Empty sections are dropped."""
+        """Layer: the game prompt + per-feature fragments. Empty sections are dropped."""
         ctx = FeatureContext(
             problem_name=problem.name,
             task_name=task_name,
             workdir="",
         )
-        sections: list[str] = [
-            f"# Task\n\nGame: **{problem.name}** — task: **{task_name}**.",
-            problem.prompt_fragment(task_name),
-        ]
+        sections: list[str] = [problem.build_prompt(task_name, info_mode=info_mode)]
         for feature in features:
             fragment = feature.prompt_fragment(ctx)
             if fragment:

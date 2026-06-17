@@ -37,7 +37,7 @@ async def test_exit_task_sets_flag() -> None:
 
 
 class _FakeExecutor:
-    """Stand-in for the Block 6 EvalExecutor: records the call, returns a fixed result."""
+    """Stand-in for the Block 6 ControllerExecutor: records the call, returns a fixed result."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -144,8 +144,8 @@ def test_workspace_writes_feature_templates(tmp_path: Path) -> None:
 class _StubProblem:
     name = "grid"
 
-    def prompt_fragment(self, task_name: str) -> str:
-        return f"You are playing grid task {task_name}."
+    def build_prompt(self, task_name: str, *, info_mode: object) -> str:
+        return f"# Game: grid\n\nYou are playing grid task {task_name}."
 
 
 def test_prompt_builder_system_and_first_message() -> None:

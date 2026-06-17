@@ -16,18 +16,23 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from regact.config.schema import Lifecycle
-from regact.controllers.executor import EvalExecutor
+from regact.envclient.client import EnvClient
 from regact.obs.result import EvalResult
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
+from regact.workspace.templates import TemplateFile
 
-
-@dataclass
-class TemplateFile:
-    """A file dropped into the agent's workdir at a relative path."""
-
-    relpath: str  # e.g. "code_library/world_model.py"
-    content: str  # rendered template body (signatures the agent fills)
+__all__ = [
+    "EvalResult",
+    "Feature",
+    "FeatureContext",
+    "Hook",
+    "HookPhase",
+    "RunDeps",
+    "TemplateFile",
+    "build_features",
+    "register_feature",
+]
 
 
 @dataclass
@@ -46,10 +51,14 @@ class RunDeps:
     Distinct from :class:`FeatureContext`: these exist only once a run is live, so
     they feed the runtime side of a feature (``tools`` and ``hooks``), never the
     static rendering side. The feature reads them; it never stores them.
+
+    Carries the **agnostic** ``EnvClient`` (not a controller executor) — a
+    controller feature builds its own ``ControllerExecutor`` from it, so this base
+    type stays free of controller-specific imports.
     """
 
     experiment: ExperimentState
-    executor: EvalExecutor
+    env_client: EnvClient
     lifecycle: Lifecycle
     solution_path: str
     submissions_dir: str

@@ -12,10 +12,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from regact.config.schema import ObsMode
+from regact.config.schema import InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer
+
+if TYPE_CHECKING:
+    from regact.envclient.obs import Obs
+    from regact.workspace.templates import TemplateFile
 
 
 class BaseProblem(ABC):
@@ -42,9 +46,31 @@ class BaseProblem(ABC):
         """Optional per-step milestone detector for the wrapper."""
         return None
 
+    def helper_templates(self, task_name: str) -> list[TemplateFile]:
+        """Game-specific helper files dropped into the agent's workdir.
+
+        Distinct from a feature's templates: these are problem-specific (e.g. ARC's
+        action-id constants + ``complex_action`` builder). They must be import-free —
+        the agent never imports the game library. Default: none.
+        """
+        return []
+
+    def render_frame(self, obs: Obs) -> Any | None:
+        """Colorize one observation into an RGB frame for video, or ``None``.
+
+        Used only when the ControllerExecutor records a submitted controller's episodes
+        (never for the agent's own exploration scripts). Default: no video.
+        """
+        return None
+
     @abstractmethod
-    def compute_episode_metrics(self, env: Any) -> dict[str, Any]:
-        """Per-episode metrics (success/steps/reward | levels_completed, ...)."""
+    def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
+        """Per-episode metrics from generic episode data only.
+
+        Takes the universal :class:`Obs` (carrying ``reward``/``is_done``/``info``)
+        and the step count — never a controller-specific rollout type — so the
+        problem layer stays agnostic of how the episode was produced.
+        """
         ...
 
     @abstractmethod
@@ -53,8 +79,8 @@ class BaseProblem(ABC):
         ...
 
     @abstractmethod
-    def prompt_fragment(self, task_name: str) -> str:
-        """The game-family description shown to the agent."""
+    def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
+        """The game prompt for the first message, built per task and info level."""
         ...
 
     @abstractmethod

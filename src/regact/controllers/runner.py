@@ -3,7 +3,7 @@
 ``run_controller`` is the low-level loop: it calls ``controller.act(obs)`` and
 applies the action via the env client, step after step, until the env is done or
 ``max_steps`` is reached. It returns a :class:`RunSummary`. It is deliberately
-agnostic about lifecycle and aggregation — that lives in the ``EvalExecutor``,
+agnostic about lifecycle and aggregation — that lives in the ``ControllerExecutor``,
 which calls this once per episode. The env is always reached through the HTTP
 client, never imported.
 """

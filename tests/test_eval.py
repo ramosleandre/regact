@@ -1,4 +1,4 @@
-"""Tests for run_controller + EvalExecutor: drive a controller over HTTP, score it.
+"""Tests for run_controller + ControllerExecutor: drive a controller over HTTP, score it.
 
 No LLM: a trivial controller is written to a temp solution.py and evaluated against
 FakeNativeEnv behind the in-process TestClient.
@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from regact.config.schema import Lifecycle
-from regact.controllers.executor import EvalExecutor
+from regact.controllers.executor import ControllerExecutor
 from regact.controllers.runner import run_controller
 from regact.env.lifecycle import MultiInstancePolicy
 from regact.env.renderer import RawRenderer
@@ -91,7 +91,7 @@ def _write_solution(tmp_path: Path, body: str) -> str:
 
 
 def test_executor_scores_a_solution(tmp_path: Path) -> None:
-    executor = EvalExecutor(_client())
+    executor = ControllerExecutor(_client())
     out = str(tmp_path / "results.json")
     result = executor.run(
         task_name="corridor",
@@ -109,7 +109,7 @@ def test_executor_scores_a_solution(tmp_path: Path) -> None:
 
 
 def test_executor_single_instance_runs_one_episode(tmp_path: Path) -> None:
-    executor = EvalExecutor(_client())
+    executor = ControllerExecutor(_client())
     result = executor.run(
         task_name="corridor",
         solution_path=_write_solution(tmp_path, _FORWARD_SOLUTION),
@@ -122,7 +122,7 @@ def test_executor_single_instance_runs_one_episode(tmp_path: Path) -> None:
 
 
 def test_executor_catches_controller_exception(tmp_path: Path) -> None:
-    executor = EvalExecutor(_client())
+    executor = ControllerExecutor(_client())
     result = executor.run(
         task_name="corridor",
         solution_path=_write_solution(tmp_path, _BROKEN_SOLUTION),
@@ -136,7 +136,7 @@ def test_executor_catches_controller_exception(tmp_path: Path) -> None:
 
 
 def test_executor_flags_missing_factory(tmp_path: Path) -> None:
-    executor = EvalExecutor(_client())
+    executor = ControllerExecutor(_client())
     result = executor.run(
         task_name="corridor",
         solution_path=_write_solution(tmp_path, _NO_FACTORY_SOLUTION),

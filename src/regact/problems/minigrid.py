@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from regact.config.schema import ObsMode
+from regact.config.schema import InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
@@ -104,12 +104,12 @@ class MiniGridProblem(BaseProblem):
             )
         return MiniGridRenderer()
 
-    def compute_episode_metrics(self, env: Any) -> dict[str, Any]:
-        """``env`` is the server-side WrappedEnv after one episode."""
-        reward = env.last_reward or 0.0
+    def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
+        """Generic inputs only: terminated-with-reward = success (truncation is not)."""
+        reward = final_obs.reward or 0.0
         return {
-            "success": bool(env.last_terminated and reward > 0),
-            "steps": env.action_count,
+            "success": bool(final_obs.is_done and reward > 0),
+            "steps": steps,
             "reward": reward,
         }
 
@@ -124,7 +124,14 @@ class MiniGridProblem(BaseProblem):
             "mean_reward": sum(e.get("reward", 0.0) for e in episodes) / n,
         }
 
-    def prompt_fragment(self, task_name: str) -> str:
+    def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
+        if info_mode is InfoMode.MINIMAL:
+            return (
+                f"# Game: MiniGrid ({task_name})\n\n"
+                "Discover the rules by interaction. Inspect `obs.frame` and "
+                "`obs.available_actions` from your own scripts with `make_env()`; "
+                "the framework tells you nothing more about this task."
+            )
         return _PROMPT.read_text(encoding="utf-8").replace("{task}", task_name)
 
     def config_kwargs(self) -> dict[str, Any]:

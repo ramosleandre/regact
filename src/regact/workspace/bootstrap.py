@@ -13,6 +13,7 @@ import os
 
 from regact.config.schema import Lifecycle
 from regact.features.base import Feature, FeatureContext
+from regact.workspace.templates import TemplateFile
 
 # ``make_env`` connects to the env server the loop launched. The server URL and
 # game id are baked in at bootstrap so the workdir is self-contained. Under
@@ -76,8 +77,9 @@ class Workspace:
         env_base_url: str,
         game_id: str,
         lifecycle: Lifecycle,
+        helper_templates: list[TemplateFile] | None = None,
     ) -> None:
-        """Create the agnostic base layout, then drop every feature's templates."""
+        """Create the agnostic base, then drop problem helpers + every feature's templates."""
         os.makedirs(self.root, exist_ok=True)
         for sub in ("code_library", "knowledge_base", "framework"):
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
@@ -88,6 +90,10 @@ class Workspace:
             "framework/make_env.py",
             template.format(base_url=env_base_url, game_id=game_id),
         )
+
+        # Problem-specific helpers (e.g. ARC action constants) — import-free.
+        for file in helper_templates or []:
+            self._write(file.relpath, file.content)
 
         ctx = FeatureContext(
             problem_name=problem_name,

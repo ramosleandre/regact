@@ -7,7 +7,8 @@ always. ``make_env`` needs the ``minigrid`` extra, so it is gated with
 
 import pytest
 
-from regact.config.schema import ObsMode
+from regact.config.schema import InfoMode, ObsMode
+from regact.envclient.obs import Obs
 from regact.problems.base import BaseProblem, build_problem
 from regact.problems.minigrid import MiniGridProblem, MiniGridRenderer
 
@@ -38,10 +39,18 @@ def test_minigrid_config_kwargs_roundtrip() -> None:
     assert rebuilt.config_kwargs() == kwargs
 
 
-def test_minigrid_prompt_fragment_names_the_task() -> None:
-    fragment = MiniGridProblem().prompt_fragment("MiniGrid-Empty-5x5-v0")
-    assert "MiniGrid-Empty-5x5-v0" in fragment
-    assert "available_actions" in fragment
+def test_minigrid_build_prompt_informative_describes_actions() -> None:
+    prompt = MiniGridProblem().build_prompt("MiniGrid-Empty-5x5-v0", info_mode=InfoMode.INFORMATIVE)
+    assert "MiniGrid-Empty-5x5-v0" in prompt
+    assert "available_actions" in prompt
+    assert "turn left" in prompt  # informative describes what actions do
+
+
+def test_minigrid_build_prompt_minimal_hides_action_meaning() -> None:
+    prompt = MiniGridProblem().build_prompt("MiniGrid-Empty-5x5-v0", info_mode=InfoMode.MINIMAL)
+    assert "MiniGrid-Empty-5x5-v0" in prompt
+    assert "Discover the rules" in prompt
+    assert "turn left" not in prompt  # minimal does not spell out the actions
 
 
 def test_minigrid_obs_renderer_rejects_unsupported_mode() -> None:
@@ -62,6 +71,15 @@ def test_minigrid_renderer_makes_obs_json_safe() -> None:
     )
     assert obs.frame == {"image": [1, 2, 3], "direction": 0}
     assert obs.available_actions == [0, 1, 2]
+
+
+def test_minigrid_compute_episode_metrics_from_generic_obs() -> None:
+    problem = MiniGridProblem()
+    won = problem.compute_episode_metrics(Obs(frame=None, reward=1.0, is_done=True), steps=4)
+    assert won == {"success": True, "steps": 4, "reward": 1.0}
+    # Truncation (is_done but no reward) is not a success.
+    lost = problem.compute_episode_metrics(Obs(frame=None, reward=0.0, is_done=True), steps=10)
+    assert lost == {"success": False, "steps": 10, "reward": 0.0}
 
 
 def test_minigrid_metrics_aggregate() -> None:

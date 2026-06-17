@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 
+from regact.controllers.executor import ControllerExecutor
 from regact.features.base import (
     Feature,
     FeatureContext,
@@ -123,7 +124,8 @@ class FinalizeControllerHook(Hook):
         deps = self._deps
         if not os.path.exists(deps.solution_path):
             return None  # nothing was ever written; nothing to finalize
-        result = deps.executor.run(
+        executor = ControllerExecutor(deps.env_client)
+        result = executor.run(
             task_name=deps.experiment.task_name,
             solution_path=deps.solution_path,
             output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
@@ -151,9 +153,10 @@ class ControllerFeature(Feature):
         return _PROMPT_FRAGMENT
 
     def tools(self, deps: RunDeps) -> list[Tool]:
+        executor = ControllerExecutor(deps.env_client)
         submit = SubmitSolution(
             deps.experiment,
-            deps.executor,
+            executor,
             solution_path=deps.solution_path,
             submissions_dir=deps.submissions_dir,
             task_name=deps.experiment.task_name,

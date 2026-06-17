@@ -27,6 +27,13 @@ class ObsMode(StrEnum):
     # ascii / structured / vlm_caption land with their renderers (Later).
 
 
+class InfoMode(StrEnum):
+    """How much the prompt tells the agent about the task."""
+
+    INFORMATIVE = "informative"  # full description (obs, actions, goal)
+    MINIMAL = "minimal"  # the agent discovers the rules by interaction
+
+
 class Execution(StrEnum):
     SEQUENTIAL = "sequential"
     PARALLEL = "parallel"
@@ -45,6 +52,7 @@ class ProblemConfig:
     name: str  # the problem family, e.g. "arc_agi" (iterates its games)
     lifecycle: Lifecycle = Lifecycle.MULTI_INSTANCE
     obs_mode: ObsMode = ObsMode.RAW
+    info_mode: InfoMode = InfoMode.INFORMATIVE
     seed: int | None = None  # ignored by deterministic envs (ARC)
 
 
