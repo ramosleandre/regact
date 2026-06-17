@@ -13,15 +13,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from regact.config.schema import Lifecycle
+from regact.eval.executor import EvalExecutor
 from regact.obs.result import EvalResult
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
-
-if TYPE_CHECKING:
-    from regact.eval.executor import EvalExecutor
 
 
 @dataclass
