@@ -13,7 +13,7 @@ import os
 from typing import Any
 
 from regact.config.schema import Lifecycle
-from regact.eval.executor import EvalExecutor
+from regact.controllers.executor import EvalExecutor
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext, ToolOutput
 

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from regact.config.schema import Lifecycle
-from regact.eval.executor import EvalExecutor
+from regact.controllers.executor import EvalExecutor
 from regact.obs.result import EvalResult
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
