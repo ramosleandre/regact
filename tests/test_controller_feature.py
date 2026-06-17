@@ -1,10 +1,10 @@
-"""Tests for ControllerFeature: templates, prompt, tools wiring, eval hook, registry."""
+"""Tests for ControllerFeature: templates, prompt, tools wiring, teardown hook, registry."""
 
 from pathlib import Path
 
 from regact.config.schema import Lifecycle
-from regact.features.base import FeatureContext, RunDeps, build_features
-from regact.features.controller import ControllerEvalHook, ControllerFeature
+from regact.features.base import FeatureContext, HookPhase, RunDeps, build_features
+from regact.features.controller import ControllerFeature, FinalizeControllerHook
 from regact.obs.result import EvalResult
 from regact.session.state import ExperimentState
 from regact.tools.exit_task import ExitTask
@@ -13,7 +13,11 @@ from regact.workspace.bootstrap import Workspace
 
 
 class _FakeExecutor:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
     def run(self, **kwargs: object) -> EvalResult:
+        self.calls.append(kwargs)
         return EvalResult(task="t", aggregate={"success_rate": 1.0})
 
 
@@ -59,11 +63,27 @@ def test_controller_tools_wired_with_run_deps(tmp_path: Path) -> None:
     assert {t.name for t in tools} == {"SubmitSolution", "ExitTask"}
 
 
-def test_controller_eval_hook_is_shadow_replay(tmp_path: Path) -> None:
-    hooks = ControllerFeature().eval_hooks(_deps(tmp_path))
-    assert len(hooks) == 1 and isinstance(hooks[0], ControllerEvalHook)
-    result = hooks[0].verify(workdir="/tmp/wd", session=object())
-    assert result.aggregate == {"flagged": False}
+def test_controller_hook_is_teardown_finalize(tmp_path: Path) -> None:
+    hooks = ControllerFeature().hooks(_deps(tmp_path))
+    assert len(hooks) == 1 and isinstance(hooks[0], FinalizeControllerHook)
+    assert hooks[0].phase is HookPhase.TEARDOWN
+
+
+async def test_finalize_hook_rescores_existing_solution(tmp_path: Path) -> None:
+    (tmp_path / "solution.py").write_text("def get_controller():\n    return None\n")
+    deps = _deps(tmp_path)
+    result = await ControllerFeature().hooks(deps)[0].run()
+    assert result is not None
+    # It drove the executor and wrote the official "final" result.
+    assert deps.executor.calls[0]["output_path"].endswith("submissions/final/results.json")  # type: ignore[union-attr]
+    assert deps.experiment.last_submission_results is not None
+
+
+async def test_finalize_hook_skips_when_no_solution(tmp_path: Path) -> None:
+    deps = _deps(tmp_path)  # no solution.py on disk
+    result = await ControllerFeature().hooks(deps)[0].run()
+    assert result is None
+    assert deps.executor.calls == []
 
 
 def test_build_features_resolves_controller() -> None:

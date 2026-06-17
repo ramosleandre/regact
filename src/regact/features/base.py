@@ -1,11 +1,11 @@
 """The feature/extension model.
 
 A ``Feature`` is a self-contained capability the agent uses or builds. It bundles
-up to four parts: workdir templates, a prompt fragment, tools, and an eval/verify
-hook. A run selects a set of features; the bootstrap, prompt builder, tool
-surface, and eval assemble themselves from that set. New features add a file here
-and register a name; the core is untouched. Features are independent — there is
-no dependency graph; ``controller`` is always present as the base.
+four parts: workdir templates, a prompt fragment, tools, and hooks. A run selects
+a set of features; the bootstrap, prompt builder, tool surface, and teardown
+assemble themselves from that set. New features add a file here and register a
+name; the core is untouched. Features are independent — there is no dependency
+graph; ``controller`` is always present as the base.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from regact.config.schema import Lifecycle
 from regact.controllers.executor import EvalExecutor
@@ -43,8 +44,8 @@ class RunDeps:
     """Run-scoped dependencies the orchestrator owns and hands to a feature.
 
     Distinct from :class:`FeatureContext`: these exist only once a run is live, so
-    they feed the runtime side of a feature (``tools`` and ``eval_hooks``), never
-    the static rendering side. The feature reads them; it never stores them.
+    they feed the runtime side of a feature (``tools`` and ``hooks``), never the
+    static rendering side. The feature reads them; it never stores them.
     """
 
     experiment: ExperimentState
@@ -56,18 +57,32 @@ class RunDeps:
     max_moves: int = 400
 
 
-class EvalHook(ABC):
-    """A verification run by the framework against the agent's deliverable."""
+class HookPhase(StrEnum):
+    """When the loop fires a hook. Only points the loop actually observes (env
+    steps live behind HTTP, so they are not loop phases)."""
+
+    TEARDOWN = "teardown"  # session end, on every non-aborted exit path
+    # POST_SUBMIT lands with the anti-cheat scan (Block 10).
+
+
+class Hook(ABC):
+    """Framework-run work the loop fires at a phase (re-score, verify, scan…).
+
+    A hook captures whatever it needs via ``Feature.hooks(deps)``, so ``run`` takes
+    no arguments. It returns an :class:`EvalResult` to record, or ``None``.
+    """
+
+    phase: HookPhase
 
     @abstractmethod
-    def verify(self, *, workdir: str, session: object) -> EvalResult: ...
+    async def run(self) -> EvalResult | None: ...
 
 
 class Feature(ABC):
     """A composable capability.
 
     Static side (``templates``, ``prompt_fragment``) takes a
-    :class:`FeatureContext`; runtime side (``tools``, ``eval_hooks``) takes
+    :class:`FeatureContext`; runtime side (``tools``, ``hooks``) takes
     :class:`RunDeps` supplied by the orchestrator. The feature stays stateless.
     """
 
@@ -89,8 +104,8 @@ class Feature(ABC):
         ...
 
     @abstractmethod
-    def eval_hooks(self, deps: RunDeps) -> list[EvalHook]:
-        """Framework-run verification hooks (e.g. shadow-replay anti-cheat)."""
+    def hooks(self, deps: RunDeps) -> list[Hook]:
+        """Framework-run hooks fired by the loop at their phase (finalize, verify…)."""
         ...
 
 

@@ -70,6 +70,7 @@ class _Stack:
         self.experiment = ExperimentState(
             problem_name="p", task_name="g", n_eval_episodes=1, n_videos=0
         )
+        self.hooks: list = []
         if tools is None:
             deps = RunDeps(
                 experiment=self.experiment,
@@ -80,7 +81,9 @@ class _Stack:
                 n_episodes=1,
                 max_moves=10,
             )
-            tools = ControllerFeature().tools(deps)
+            feature = ControllerFeature()
+            tools = feature.tools(deps)
+            self.hooks = feature.hooks(deps)
         self.tools = tools
         self.transcript = TranscriptWriter(str(self.logs / "transcript.jsonl"))
         self.logger = RunLogger(str(self.logs), task="g")
@@ -99,6 +102,7 @@ class _Stack:
                 limits=self.limits,
                 state_path=self.state_path,
                 cwd=str(self.workdir),
+                hooks=self.hooks,
                 stop=stop,
             )
         finally:
@@ -130,6 +134,22 @@ async def test_full_pipeline_submit_then_exit(tmp_path: Path) -> None:
     assert "ToolCall" in types and "ToolResult" in types
     results = json.loads((stack.workdir / "submissions" / "0" / "results.json").read_text())
     assert results["aggregate"]["success_rate"] == 1.0
+    # The teardown hook also re-scored the final solution.
+    final = json.loads((stack.workdir / "submissions" / "final" / "results.json").read_text())
+    assert final["aggregate"]["success_rate"] == 1.0
+
+
+async def test_teardown_finalizes_when_agent_exits_without_resubmitting(tmp_path: Path) -> None:
+    """The agent exits having never called SubmitSolution; finalize still scores solution.py."""
+    stack = _Stack(tmp_path)
+    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), TurnComplete()]])
+    reason = await stack.run(agent)
+
+    assert reason == "agent_exit"
+    assert stack.experiment.submission_count == 0  # never submitted during the run
+    # ...yet the official final result exists from the teardown hook.
+    final = json.loads((stack.workdir / "submissions" / "final" / "results.json").read_text())
+    assert final["aggregate"]["success_rate"] == 1.0
 
 
 async def test_pipeline_stops_on_backend_error(tmp_path: Path) -> None:

@@ -7,12 +7,14 @@ mirrors everything to the canonical ``transcript.jsonl``, and stops on the agent
 request, a limit, an interrupt, a backend error, or a crash.
 
 It is deliberately agnostic of controllers/games/eval: it only knows agents,
-framework tools, limits, and writers. A controller's final evaluation is a
-caller concern (it happens through the submit tool during the run, or via the
-entry-point wiring), so this module imports neither the executor nor a problem.
+framework tools, hooks, limits, and writers — all generic interfaces. It imports
+neither the executor nor a problem. Feature-specific teardown work (e.g. re-scoring
+the final solution) arrives as :class:`Hook` objects it fires by phase, the same
+way feature ``tools`` arrive as :class:`Tool` objects it executes on demand.
 
 The function stays short; each responsibility is its own helper:
-  ``_decide_stop`` (pure) · ``_run_turn`` · ``_dispatch_event`` · ``_execute_framework_tool``.
+  ``_decide_stop`` (pure) · ``_run_turn`` · ``_dispatch_event`` ·
+  ``_execute_framework_tool`` · ``_run_teardown_hooks``.
 """
 
 from __future__ import annotations
@@ -23,12 +25,17 @@ from dataclasses import dataclass
 from regact.agent.base import CodeAgent
 from regact.agent.events import AgentError, AgentEvent, ToolCall, ToolResult
 from regact.config.schema import LimitsConfig
+from regact.features.base import Hook, HookPhase
 from regact.obs.errors import ErrorCategory, LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.signals import StopSignal
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext
+
+# Exit reasons for which the run is aborted: teardown hooks (re-score, verify)
+# would operate on a broken session, so they are skipped.
+_ABORTED_REASONS = frozenset({"interrupted", "loop_crash"})
 
 _KEEP_ALIVE_MESSAGE = (
     "Continue working. Submit again to re-measure your approach to win the game, "
@@ -68,6 +75,7 @@ async def run_session(
     limits: LimitsConfig,
     state_path: str,
     cwd: str,
+    hooks: list[Hook] | None = None,
     stop: StopSignal | None = None,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
@@ -112,9 +120,31 @@ async def run_session(
         turns += 1
         message = _KEEP_ALIVE_MESSAGE
 
+    await _run_teardown_hooks(hooks or [], reason, ctx)
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_end", phase="teardown", reason=reason)
     experiment.save(state_path)
     return reason
+
+
+async def _run_teardown_hooks(hooks: list[Hook], reason: str, ctx: _LoopContext) -> None:
+    """Fire TEARDOWN hooks unless the run was aborted; a hook fault never aborts teardown."""
+    if reason in _ABORTED_REASONS:
+        return
+    for hook in hooks:
+        if hook.phase is not HookPhase.TEARDOWN:
+            continue
+        try:
+            await hook.run()
+        except Exception as exc:
+            ctx.logger.log(
+                LogComponent.EVAL,
+                "ERROR",
+                "hook_failed",
+                phase="teardown",
+                error_category=ErrorCategory.EVAL_HARNESS,
+                hook=type(hook).__name__,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
 
 def _decide_stop(

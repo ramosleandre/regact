@@ -3,17 +3,21 @@
 Owns everything controller-specific: it scaffolds ``base_controller.py``, an
 example controller, and the ``solution.py`` stub; explains the controller
 contract in the prompt; provides the ``SubmitSolution`` and ``ExitTask`` tools
-(wired with the run's executor + experiment); and ships a shadow-replay eval hook.
+(wired with the run's executor + experiment); and ships a teardown hook that
+re-scores the final ``solution.py`` as the official result.
 ``make_env.py`` is NOT here — it is env/lifecycle-specific, written by the
 workspace base.
 """
 
 from __future__ import annotations
 
+import os
+
 from regact.features.base import (
-    EvalHook,
     Feature,
     FeatureContext,
+    Hook,
+    HookPhase,
     RunDeps,
     TemplateFile,
     register_feature,
@@ -101,16 +105,34 @@ and call **ExitTask** when you are done.
 """
 
 
-class ControllerEvalHook(EvalHook):
-    """Shadow-replay: re-run the kept controller on a fresh, differently-seeded env.
+class FinalizeControllerHook(Hook):
+    """Teardown: re-score the *final* ``solution.py`` as the official result.
 
-    A behavioural anti-cheat check (a seed-hardcoded policy fails it). The real
-    replay logic lands with the anti-cheat harness (Block 10); for now it is a
-    no-op that reports nothing flagged so the seam exists and the loop can call it.
+    Guards against the common failure where the agent edits ``solution.py`` and
+    exits (or runs out of turns) without re-submitting, so the last numbered
+    submission no longer reflects the file on disk. The loop fires this on every
+    non-aborted exit path; the result is written to ``submissions/final``.
     """
 
-    def verify(self, *, workdir: str, session: object) -> EvalResult:
-        return EvalResult(task="shadow_replay", aggregate={"flagged": False})
+    phase = HookPhase.TEARDOWN
+
+    def __init__(self, deps: RunDeps) -> None:
+        self._deps = deps
+
+    async def run(self) -> EvalResult | None:
+        deps = self._deps
+        if not os.path.exists(deps.solution_path):
+            return None  # nothing was ever written; nothing to finalize
+        result = deps.executor.run(
+            task_name=deps.experiment.task_name,
+            solution_path=deps.solution_path,
+            output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
+            lifecycle=deps.lifecycle,
+            n_episodes=deps.n_episodes,
+            max_moves=deps.max_moves,
+        )
+        deps.experiment.last_submission_results = result.to_json()
+        return result
 
 
 class ControllerFeature(Feature):
@@ -141,8 +163,9 @@ class ControllerFeature(Feature):
         )
         return [submit, ExitTask(deps.experiment)]
 
-    def eval_hooks(self, deps: RunDeps) -> list[EvalHook]:
-        return [ControllerEvalHook()]
+    def hooks(self, deps: RunDeps) -> list[Hook]:
+        # ShadowReplayHook (anti-cheat) joins this list in Block 10.
+        return [FinalizeControllerHook(deps)]
 
 
 register_feature(ControllerFeature.name, ControllerFeature)

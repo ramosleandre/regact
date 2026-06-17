@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from regact.config.schema import Lifecycle
-from regact.features.base import EvalHook, Feature, FeatureContext, RunDeps, TemplateFile
+from regact.features.base import Feature, FeatureContext, Hook, RunDeps, TemplateFile
 from regact.obs.result import EvalResult
 from regact.prompt.builder import PromptBuilder
 from regact.session.state import ExperimentState
@@ -124,7 +124,7 @@ class _StubFeature(Feature):
     def tools(self, deps: RunDeps) -> list[Tool]:
         return []
 
-    def eval_hooks(self, deps: RunDeps) -> list[EvalHook]:
+    def hooks(self, deps: RunDeps) -> list[Hook]:
         return []
 
 
