@@ -1,7 +1,7 @@
 """Tests for the controller-rollout summary."""
 
+from regact.controllers.summary import ControllerRun, ControllerSummary, MilestoneEvent
 from regact.envclient.obs import Obs
-from regact.features.controllers.run_summary import ControllerRun, MilestoneEvent, RunSummary
 
 
 def test_milestones_flatten_depth_first() -> None:
@@ -14,7 +14,7 @@ def test_milestones_flatten_depth_first() -> None:
             MilestoneEvent(step=5, description="b"),
         ],
     )
-    summary = RunSummary(
+    summary = ControllerSummary(
         stop_kind="env_done",
         stop_reason="win",
         total_steps=5,
@@ -25,7 +25,7 @@ def test_milestones_flatten_depth_first() -> None:
 
 
 def test_repr_is_compact() -> None:
-    summary = RunSummary(
+    summary = ControllerSummary(
         stop_kind="max_steps",
         stop_reason="cap",
         total_steps=10,

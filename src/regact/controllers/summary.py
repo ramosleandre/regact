@@ -1,9 +1,9 @@
 """The value returned by a controller rollout.
 
-Returned by ``run_controller(env, ctrl, ...)`` (controller-feature machinery, not
-the agnostic agent loop). Renders a compact digest; the full per-step trace is
-written to disk and referenced by path, so inspection works whether or not the
-process persists between calls.
+Returned by ``run_controller(env, ctrl, ...)``. Controller-specific (hence the
+``Controller`` prefix and the ``controllers/`` home), not the agnostic agent loop.
+Renders a compact digest; the full per-step trace is written to disk and
+referenced by path, so inspection works whether or not the process persists.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class ControllerRun:
 
 
 @dataclass
-class RunSummary:
+class ControllerSummary:
     """Outcome of a controller rollout."""
 
     stop_kind: str  # "env_done" | "max_steps" | "controller_stop"
@@ -64,6 +64,6 @@ class RunSummary:
 
     def __repr__(self) -> str:
         return (
-            f"RunSummary(stop={self.stop_kind}, total_steps={self.total_steps}, "
+            f"ControllerSummary(stop={self.stop_kind}, total_steps={self.total_steps}, "
             f"milestones={len(self.milestones)})"
         )

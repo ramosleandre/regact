@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from regact.config.schema import InfoMode, ObsMode
-from regact.env.renderer import ObsRenderer
+from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, register_problem
@@ -21,26 +21,15 @@ _PROMPT = Path(__file__).parent / "prompts" / "minigrid.md"
 _DEFAULT_ENV_ID = "MiniGrid-Empty-5x5-v0"
 
 
-def _jsonify(value: Any) -> Any:
-    """Make a native observation JSON-safe (numpy arrays -> nested lists)."""
-    if hasattr(value, "tolist"):  # numpy array / scalar
-        return value.tolist()
-    if isinstance(value, dict):
-        return {k: _jsonify(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonify(v) for v in value]
-    return value
-
-
 class MiniGridRenderer(ObsRenderer):
     """Pass the MiniGrid obs through, made JSON-safe; actions come from info."""
 
     def render(self, native_obs: object, info: dict[str, Any] | None) -> Obs:
         info = info or {}
         return Obs(
-            frame=_jsonify(native_obs),
+            frame=jsonify(native_obs),
             available_actions=list(info.get("available_actions", [])),
-            info={k: _jsonify(v) for k, v in info.items()},
+            info={k: jsonify(v) for k, v in info.items()},
         )
 
 

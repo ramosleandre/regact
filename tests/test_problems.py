@@ -24,11 +24,6 @@ def test_build_problem_unknown_raises() -> None:
         build_problem("nope", {})
 
 
-def test_build_problem_arc_is_deferred() -> None:
-    with pytest.raises(NotImplementedError, match="Block 8b"):
-        build_problem("arc_agi", {})
-
-
 def test_minigrid_config_kwargs_roundtrip() -> None:
     problem = MiniGridProblem(env_id="MiniGrid-DoorKey-5x5-v0", fully_obs=True)
     kwargs = problem.config_kwargs()

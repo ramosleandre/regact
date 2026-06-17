@@ -14,6 +14,21 @@ from typing import Any
 from regact.envclient.obs import Obs
 
 
+def jsonify(value: Any) -> Any:
+    """Make a native observation JSON-safe (numpy arrays/scalars -> nested lists).
+
+    Shared by renderers whose native obs holds numpy data (MiniGrid images, ARC
+    frame grids), so it survives the HTTP boundary as plain JSON.
+    """
+    if hasattr(value, "tolist"):  # numpy array / scalar
+        return value.tolist()
+    if isinstance(value, dict):
+        return {k: jsonify(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonify(v) for v in value]
+    return value
+
+
 class ObsRenderer(ABC):
     """Turn a native observation into an agent-facing ``Obs``."""
 

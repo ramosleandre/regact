@@ -69,7 +69,18 @@ ignore_missing_imports = true
 
 # Optional game/agent backends, imported lazily; not present in a base install.
 [[tool.mypy.overrides]]
-module = ["gymnasium", "gymnasium.*", "minigrid", "minigrid.*", "alancode", "alancode.*"]
+module = [
+    "gymnasium",
+    "gymnasium.*",
+    "minigrid",
+    "minigrid.*",
+    "alancode",
+    "alancode.*",
+    "arc_agi",
+    "arc_agi.*",
+    "arcengine",
+    "arcengine.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

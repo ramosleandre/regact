@@ -1,0 +1,301 @@
+"""ARC-AGI-3 problem.
+
+Wraps the ``arc-agi`` arcade in OFFLINE mode: games are loaded from a local
+``environnement/`` directory (committed, no API key), server-side. The agent only
+ever sees the normalized :class:`Obs` over HTTP and sends JSON int/dict actions;
+the gym shim here maps them to native ``GameAction`` — so the agent never imports
+the game library. ``arc_agi``/``arcengine`` are imported lazily inside ``make_env``
+(and the shim), so this module imports cleanly without the ``arc`` extra.
+
+Lifecycle is enforced elsewhere: ARC runs ``single_instance`` (one make per game,
+RESET is a level reset), guarded by ``SingleInstancePolicy`` — not here.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+from regact.config.schema import InfoMode, ObsMode
+from regact.env.renderer import ObsRenderer, jsonify
+from regact.envclient.obs import Obs
+from regact.obs.errors import ErrorCategory, RegactError
+from regact.problems.arc_agi.tasks import ArcAgiTask, discover_tasks
+from regact.problems.base import BaseProblem, register_problem
+from regact.workspace.templates import TemplateFile
+
+logger = logging.getLogger(__name__)
+
+_PROMPT = Path(__file__).parents[1] / "prompts" / "arc_agi.md"
+_DEFAULT_DIR = os.environ.get("ARC_ENVIRONMENTS_DIR", "environnement")
+
+
+# --------------------------------------------------------------------------- #
+# Server-side gym shim: JSON int/dict actions -> native GameAction
+# --------------------------------------------------------------------------- #
+class _ArcGymShim:
+    """Adapt an arc ``EnvironmentWrapper`` to the gym-like interface WrappedEnv drives.
+
+    ``step`` accepts what the agent sends as JSON: an int action id, or a dict
+    ``{"action": id, "data": {"x", "y"}}`` for the click action (ACTION6). Both are
+    mapped to a native ``GameAction`` here, so the conversion stays server-side.
+    """
+
+    def __init__(self, arc_env: Any) -> None:
+        from arcengine import GameAction, GameState
+
+        self._env = arc_env
+        self._GameAction = GameAction
+        self._GameState = GameState
+        self._last: Any = None
+
+    def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
+        obs = self._env.reset()
+        self._last = obs
+        return obs, self._info(obs)
+
+    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        game_action, data = self._decode(action)
+        obs = self._env.step(game_action, data=data)
+        if obs is not None:
+            self._last = obs
+        reward, terminated = self._outcome(obs)
+        return obs, reward, terminated, False, self._info(obs)
+
+    def render(self) -> Any:
+        """The most recent frame grid (for video); None if unavailable."""
+        frame = getattr(self._last, "frame", None)
+        if not frame:
+            return None
+        return frame[-1] if isinstance(frame, (list, tuple)) else frame
+
+    def close(self) -> None:
+        """No-op — the Arcade owns the env lifecycle."""
+
+    def _decode(self, action: Any) -> tuple[Any, dict[str, Any] | None]:
+        if isinstance(action, dict):
+            return self._GameAction.from_id(int(action["action"])), action.get("data")
+        return self._GameAction.from_id(int(action)), None
+
+    def _outcome(self, obs: Any) -> tuple[float, bool]:
+        if obs is None:
+            return 0.0, False
+        if obs.state == self._GameState.WIN:
+            return 1.0, True
+        if obs.state == self._GameState.GAME_OVER:
+            return 0.0, True
+        return 0.0, False
+
+    def _info(self, obs: Any) -> dict[str, Any]:
+        if obs is None:
+            return {}
+        return {
+            "available_actions": list(getattr(obs, "available_actions", [])),
+            "state": obs.state.name if getattr(obs, "state", None) is not None else None,
+            "levels_completed": getattr(obs, "levels_completed", 0),
+            "win_levels": getattr(obs, "win_levels", 0),
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Renderer: native FrameDataRaw -> JSON-safe Obs (no arc import needed)
+# --------------------------------------------------------------------------- #
+class ArcRenderer(ObsRenderer):
+    """Turn the native frame (list of 64x64 int grids) into a JSON-safe ``Obs``.
+
+    Import-free: it reads ``native_obs.frame`` and the scalar metadata the shim
+    already placed in ``info``, so it needs no arc library to construct.
+    """
+
+    def render(self, native_obs: object, info: dict[str, Any] | None) -> Obs:
+        info = dict(info or {})
+        frame = getattr(native_obs, "frame", native_obs)
+        return Obs(
+            frame=jsonify(frame),
+            available_actions=list(info.get("available_actions", [])),
+            info=info,
+        )
+
+
+def _milestone_detector(env: Any) -> list[str]:
+    """Emit a milestone on level completion / WIN / GAME_OVER (reads the wrapper's obs)."""
+    last_info = (getattr(env, "last_obs", None) and env.last_obs.info) or {}
+    prev_info = (getattr(env, "prev_obs", None) and env.prev_obs.info) or {}
+    out: list[str] = []
+    cur = last_info.get("levels_completed", 0)
+    if cur > prev_info.get("levels_completed", 0):
+        out.append(f"level completed ({cur}/{last_info.get('win_levels', '?')})")
+    state = last_info.get("state")
+    if state == "WIN":
+        out.append("game won")
+    elif state == "GAME_OVER":
+        out.append("game over")
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Prompt fragments (text reused from GameAgents, observation section adapted to
+# the normalized Obs the agent actually sees over HTTP).
+# --------------------------------------------------------------------------- #
+_KEYBOARD_ACTIONS = (
+    "Directional actions are integer ids (see `obs.available_actions`): typically "
+    "ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right. Return the id directly "
+    "from `act()` (e.g. `return ACTION4`)."
+)
+_CLICK_ACTIONS = (
+    "Click action: ACTION6 needs x,y coordinates (0-63). Return a dict "
+    '`{"action": 6, "data": {"x": 32, "y": 32}}` — or use `complex_action(x, y)` '
+    "from `code_library/arc_agi_helper.py`."
+)
+
+_HELPER = '''\
+"""ARC-AGI helpers (import-free): action ids + the click-action builder.
+
+Use these with the env client in your scripts and controller, e.g.::
+
+    from framework.make_env import make_env
+    from code_library.arc_agi_helper import ACTION4, complex_action
+    env = make_env()
+    obs = env.step(ACTION4)              # a directional action
+    obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)
+
+Valid ids for the current game are in ``obs.available_actions``. ACTION6 is click.
+"""
+
+RESET = 0
+ACTION1 = 1
+ACTION2 = 2
+ACTION3 = 3
+ACTION4 = 4
+ACTION5 = 5
+ACTION6 = 6  # click — needs coordinates
+ACTION7 = 7
+
+
+def complex_action(x: int, y: int) -> dict:
+    """Payload for the click action: ``env.step(complex_action(x, y))``."""
+    return {"action": ACTION6, "data": {"x": x, "y": y}}
+'''
+
+
+def _actions_for_tags(tags: tuple[str, ...]) -> str:
+    tagset = set(tags)
+    if tagset == {"click"}:
+        return _CLICK_ACTIONS
+    if tagset == {"keyboard"}:
+        return _KEYBOARD_ACTIONS
+    return _KEYBOARD_ACTIONS + "\n\n" + _CLICK_ACTIONS
+
+
+class ArcAgiProblem(BaseProblem):
+    """ARC-AGI-3 as a regact problem (offline, local game data)."""
+
+    name = "arc_agi"
+
+    def __init__(
+        self,
+        *,
+        environments_dir: str = _DEFAULT_DIR,
+        operation_mode: str = "offline",
+    ) -> None:
+        self._dir = environments_dir
+        self._operation_mode = operation_mode
+        self._arcade: Any = None
+        self._tasks: dict[str, ArcAgiTask] = discover_tasks(environments_dir)
+        logger.info(
+            "ArcAgiProblem: %d games discovered in %r (mode=%s)",
+            len(self._tasks),
+            environments_dir,
+            operation_mode,
+        )
+
+    def _arcade_instance(self) -> Any:
+        if self._arcade is None:
+            import arc_agi
+
+            self._arcade = arc_agi.Arcade(
+                operation_mode=arc_agi.OperationMode(self._operation_mode),
+                environments_dir=self._dir,
+            )
+        return self._arcade
+
+    def _task(self, task_name: str) -> ArcAgiTask:
+        try:
+            return self._tasks[task_name]
+        except KeyError:
+            raise RegactError(
+                ErrorCategory.EVAL_HARNESS,
+                f"unknown ARC game {task_name!r}; known: {sorted(self._tasks)}",
+            ) from None
+
+    def make_env(self, task_name: str) -> Any:
+        task = self._task(task_name)
+        arc_env = self._arcade_instance().make(task.game_id)
+        if arc_env is None:
+            raise RegactError(
+                ErrorCategory.ENV_RUNTIME,
+                f"Arcade.make({task.game_id!r}) returned None (check environments_dir)",
+            )
+        return _ArcGymShim(arc_env)
+
+    def get_task_names(self) -> list[str]:
+        return list(self._tasks)
+
+    def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
+        if mode is not ObsMode.RAW:
+            raise RegactError(
+                ErrorCategory.ENV_RUNTIME, f"arc_agi: obs_mode {mode!r} not supported yet"
+            )
+        return ArcRenderer()
+
+    def milestone_detector(self, task_name: str) -> Any:
+        return _milestone_detector
+
+    def helper_templates(self, task_name: str) -> list[TemplateFile]:
+        return [TemplateFile("code_library/arc_agi_helper.py", _HELPER)]
+
+    def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
+        info = final_obs.info or {}
+        return {
+            "success": info.get("state") == "WIN",
+            "steps": steps,
+            "levels_completed": info.get("levels_completed", 0),
+            "win_levels": info.get("win_levels", 0),
+        }
+
+    def aggregate_episode_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
+        if not episodes:
+            return {"n_episodes": 0, "success_rate": 0.0, "mean_levels_completed": 0.0}
+        n = len(episodes)
+        return {
+            "n_episodes": n,
+            "success_rate": sum(bool(e.get("success")) for e in episodes) / n,
+            "mean_levels_completed": sum(e.get("levels_completed", 0) for e in episodes) / n,
+        }
+
+    def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
+        task = self._task(task_name)
+        if info_mode is InfoMode.MINIMAL:
+            return (
+                f"# Game: ARC-AGI-3 ({task.title})\n\n"
+                "Discover the rules by interaction. Inspect `obs.frame` and "
+                "`obs.available_actions` from your own scripts with `make_env()`; "
+                "the framework tells you nothing more about this task."
+            )
+        parts = [_PROMPT.read_text(encoding="utf-8").replace("{task}", task.title)]
+        parts.append(f"**Game id**: `{task.game_id}`")
+        if task.win_levels is not None:
+            parts.append(f"**Levels to win**: {task.win_levels}")
+        if task.baseline_actions:
+            total = sum(task.baseline_actions)
+            parts.append(f"**Human baseline**: {total} actions total.")
+        parts.append("## Actions\n\n" + _actions_for_tags(task.tags))
+        return "\n\n".join(parts)
+
+    def config_kwargs(self) -> dict[str, Any]:
+        return {"environments_dir": self._dir, "operation_mode": self._operation_mode}
+
+
+register_problem("arc_agi", lambda kwargs: ArcAgiProblem(**kwargs))

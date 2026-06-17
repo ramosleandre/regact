@@ -26,9 +26,5 @@ htmlcov/
 experiments/
 _local/
 
-# Downloaded game data (server-side only; never reachable by the agent)
-environnement/
-environment/
-
 # OS
 .DS_Store
