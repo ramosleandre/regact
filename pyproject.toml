@@ -67,6 +67,11 @@ mypy_path = "src"
 module = ["regact.problems.base", "regact.agent.claude_adapter"]
 ignore_missing_imports = true
 
+# Optional game/agent backends, imported lazily; not present in a base install.
+[[tool.mypy.overrides]]
+module = ["gymnasium", "gymnasium.*", "minigrid", "minigrid.*", "alancode", "alancode.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

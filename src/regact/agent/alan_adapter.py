@@ -45,7 +45,7 @@ class AlanAgent(CodeAgent):
         tools: list[Tool] | None = None,
         env: dict[str, str] | None = None,
     ) -> None:
-        from alancode import AlanCodeAgent  # type: ignore[import-not-found]
+        from alancode import AlanCodeAgent
 
         self._tools = list(tools) if tools is not None else []
         self._agent = AlanCodeAgent(
