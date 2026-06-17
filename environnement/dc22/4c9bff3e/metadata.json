@@ -1,0 +1,18 @@
+{
+  "game_id": "dc22-fdcac232",
+  "title": "DC22",
+  "default_fps": 15,
+  "tags": [
+    "keyboard_click"
+  ],
+  "baseline_actions": [
+    59,
+    102,
+    67,
+    98,
+    324,
+    578
+  ],
+  "local_dir": "environment_files/dc22/4c9bff3e",
+  "date_downloaded": "2026-04-27T13:01:36.187454+00:00"
+}
