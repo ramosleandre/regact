@@ -39,6 +39,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/regact"]
+# Ship prompt/template markdown alongside the package (read at runtime).
+artifacts = ["*.md"]
 
 # Editable installs add src/ to sys.path (simple .pth), so adding/moving modules
 # never requires a reinstall.
@@ -59,6 +61,11 @@ strict = true
 explicit_package_bases = true
 namespace_packages = true
 mypy_path = "src"
+
+# Modules referenced only as forward-refs by earlier blocks; they land later.
+[[tool.mypy.overrides]]
+module = ["regact.eval.executor", "regact.problems.base", "regact.agent.claude_adapter"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
