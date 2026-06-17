@@ -67,7 +67,9 @@ mypy_path = "src"
 module = ["regact.problems.base", "regact.agent.claude_adapter"]
 ignore_missing_imports = true
 
-# Optional game/agent backends, imported lazily; not present in a base install.
+# Optional, untyped game/agent backends, imported lazily. Treat as Any whether or
+# not they are installed (follow_imports=skip), so strict checks (no-untyped-call)
+# stay consistent across machines (CI without the extras, dev with them).
 [[tool.mypy.overrides]]
 module = [
     "gymnasium",
@@ -82,6 +84,8 @@ module = [
     "arcengine.*",
 ]
 ignore_missing_imports = true
+follow_imports = "skip"
+follow_untyped_imports = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

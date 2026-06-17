@@ -17,7 +17,7 @@ from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, register_problem
 
-_PROMPT = Path(__file__).parent / "prompts" / "minigrid.md"
+_PROMPT = Path(__file__).parents[1] / "prompts" / "minigrid.md"
 _DEFAULT_ENV_ID = "MiniGrid-Empty-5x5-v0"
 
 
