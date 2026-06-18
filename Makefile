@@ -57,8 +57,8 @@ prompt:  ## Show the assembled prompt for a task (GAME=...)
 	$(PYTHON) -m $(PKG).prompt show --problem $(GAME)
 
 .PHONY: viz
-viz:  ## Launch the experiment visualizer
-	$(PYTHON) -m $(PKG).viz
+viz:  ## Launch the experiment visualizer: make viz EXP=experiments/<run> [PORT=8030]
+	PYTHONPATH=src $(PYTHON) -m $(PKG).viz.app --experiment $(EXP) --port $(or $(PORT),8030)
 
 .PHONY: run-exp
 run-exp:  ## Research run (Hydra overrides via ARGS=...)
