@@ -1,0 +1,6 @@
+name: minigrid
+lifecycle: multi_instance
+obs_mode: raw
+info_mode: informative
+kwargs:
+  env_id: MiniGrid-Empty-5x5-v0

@@ -1,0 +1,7 @@
+name: arc_agi
+lifecycle: single_instance
+obs_mode: raw
+info_mode: informative
+kwargs:
+  operation_mode: offline
+  environments_dir: environnement

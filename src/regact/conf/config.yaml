@@ -1,16 +1,12 @@
-# Default research config. Override on the CLI, e.g.:
-#   python -m regact.run_exp problem.name=arc_agi agent.name=claude \
-#       problem.lifecycle=single_instance
-agent:
-  name: scripted
-  model: null
-problem:
-  name: minigrid
-  lifecycle: multi_instance
-  obs_mode: raw
-  info_mode: informative
-  kwargs:
-    env_id: MiniGrid-Empty-5x5-v0
+# Default research config. Pick groups + override fields on the CLI, e.g.:
+#   python -m regact.run_exp agent=claude problem=arc_agi
+#   python -m regact.run_exp agent=codex problem=minigrid agent.args.reasoning_effort=high
+defaults:
+  - agent: scripted
+  - problem: minigrid
+  - _self_
+
+task_names: []          # empty = all games of the problem; e.g. 'task_names=[ls20]'
 features:
   - controller
 execution: sequential
