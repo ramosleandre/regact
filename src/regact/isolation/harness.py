@@ -39,18 +39,18 @@ class AntiCheatHarness:
 
 
 def claude_deny_settings(workdir: str, policy: SecurityPolicy | None = None) -> dict[str, Any]:
-    """Build a Claude Code ``settings.json`` confining file access to ``workdir``.
+    """Build a Claude Code ``settings.json`` that denies reading the game data.
 
-    Denies reads/writes outside the workdir and any path mentioning forbidden
-    substrings (the game data). This is the native, pre-blocking layer; the scan
-    is the safety net behind it.
+    Denies any path whose segments include a forbidden substring (the on-disk
+    games), wherever it lives — using ``**/<name>/**`` so it matches regardless of
+    the absolute location. Crucially it does NOT blanket-deny reads: the agent must
+    stay free to read and edit its own workdir, or it cannot work. The HTTP boundary
+    (no game object) and the submit-time AST scan are the other two layers.
     """
     policy = policy or default_policy()
-    deny = [f"Read(//{sub}/**)" for sub in sorted(policy.forbidden_path_substrings) if sub != ".."]
-    deny += ["Read(/**)"]  # deny absolute reads outside the workdir (allow rules scope to cwd)
-    return {
-        "permissions": {
-            "deny": deny,
-            "additionalDirectories": [],  # only the workdir (cwd) is allowed
-        }
-    }
+    deny: list[str] = []
+    for sub in sorted(policy.forbidden_path_substrings):
+        if sub == "..":
+            continue
+        deny.append(f"Read(**/{sub}/**)")
+    return {"permissions": {"deny": deny}}

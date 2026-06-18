@@ -56,11 +56,13 @@ def test_harness_scan_file(tmp_path: Path) -> None:
     assert AntiCheatHarness().scan_file(str(sol))
 
 
-def test_claude_deny_settings_confines_reads() -> None:
-    settings = claude_deny_settings("/tmp/wd")
-    deny = settings["permissions"]["deny"]
-    assert any("environnement" in rule for rule in deny)
-    assert "Read(/**)" in deny
+def test_claude_deny_settings_blocks_game_data_not_the_workdir() -> None:
+    deny = claude_deny_settings("/tmp/wd")["permissions"]["deny"]
+    # The game data is denied wherever it lives...
+    assert "Read(**/environnement/**)" in deny
+    # ...but reads are NOT blanket-denied (that would cripple the agent's own workdir).
+    assert "Read(/**)" not in deny
+    assert all("/**)" in rule and rule != "Read(/**)" for rule in deny)
 
 
 def test_executor_blocks_a_cheating_solution(tmp_path: Path) -> None:
