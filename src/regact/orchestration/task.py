@@ -27,6 +27,7 @@ from regact.orchestration.loop import run_session
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
 from regact.session.state import ExperimentState
+from regact.tools.base import Tool
 from regact.workspace.bootstrap import Workspace
 
 
@@ -111,8 +112,18 @@ async def run_task(
         tools = [tool for feature in features for tool in feature.tools(deps)]
         hooks = [hook for feature in features for hook in feature.hooks(deps)]
 
-        builder = PromptBuilder()
         agent = agent or build_agent(config.agent)
+        # Where framework tools are executed depends on the backend:
+        #   native_tools (scripted/Alan): the loop executes them on ToolCall events.
+        #   client_cli (Claude/codex): the control server executes them; the workdir
+        #   CLI hits it, and the loop only observes the agent's stream.
+        if agent.capabilities().control_actions == "client_cli":
+            server.bind_control(task_name, tools, cwd=workdir)
+            loop_tools: list[Tool] = []
+        else:
+            loop_tools = tools
+
+        builder = PromptBuilder()
         await agent.start(
             cwd=workdir,
             model=config.agent.model,
@@ -134,7 +145,7 @@ async def run_task(
                 agent,
                 experiment=experiment,
                 first_message=first_message,
-                tools=tools,
+                tools=loop_tools,
                 transcript=transcript,
                 logger=logger,
                 limits=config.limits,

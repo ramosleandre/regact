@@ -62,6 +62,37 @@ def make_env(record_frames: bool = False):
 '''
 
 
+# A tiny workdir CLI a subprocess agent runs to invoke a framework tool over the
+# control channel, e.g. ``python framework/control.py SubmitSolution``. Native
+# agents (Alan) don't use it; it is harmless to ship for them. URL/game baked in
+# via replace (the body has literal braces, so str.format is unsafe here).
+_CONTROL_CLI = '''\
+"""Invoke a framework tool over the control channel (e.g. SubmitSolution, ExitTask).
+
+Usage:  python framework/control.py <ToolName> ['<json-input>']
+"""
+
+import json
+import sys
+
+import httpx
+
+_URL = "__BASE_URL__/control/__GAME_ID__/tool"
+
+
+def main() -> None:
+    name = sys.argv[1] if len(sys.argv) > 1 else ""
+    payload = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+    response = httpx.post(_URL, json={"name": name, "input": payload}, timeout=300.0)
+    response.raise_for_status()
+    print(json.dumps(response.json()))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 class Workspace:
     """The agent's working directory."""
 
@@ -89,6 +120,10 @@ class Workspace:
         self._write(
             "framework/make_env.py",
             template.format(base_url=env_base_url, game_id=game_id),
+        )
+        self._write(
+            "framework/control.py",
+            _CONTROL_CLI.replace("__BASE_URL__", env_base_url).replace("__GAME_ID__", game_id),
         )
 
         # Problem-specific helpers (e.g. ARC action constants) — import-free.

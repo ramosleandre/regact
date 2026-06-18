@@ -9,6 +9,7 @@ by its contract (``run(...) -> EvalResult``) and imported only for typing.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -65,7 +66,11 @@ class SubmitSolution(Tool):
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "results.json")
 
-        result = self._executor.run(
+        # Run the (synchronous) executor off the event loop: when this tool is
+        # invoked from the control server, the executor's sync EnvClient must reach
+        # the same server, so the loop has to stay free to answer it.
+        result = await asyncio.to_thread(
+            self._executor.run,
             task_name=self._task_name,
             solution_path=self._solution_path,
             output_path=output_path,
