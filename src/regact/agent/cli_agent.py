@@ -26,6 +26,8 @@ from regact.agent.events import AgentError, AgentEvent
 from regact.obs.errors import ErrorCategory
 from regact.tools.base import Tool
 
+_STDOUT_LINE_LIMIT = 64 * 1024 * 1024
+
 
 class _CliAgent(CodeAgent):
     """Base for subprocess CLI agents; subclasses override the three hooks below."""
@@ -73,8 +75,9 @@ class _CliAgent(CodeAgent):
             cwd=self._cwd or None,
             stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
-            stderr=None,  # inherit: surfaces CLI errors to our logs without buffer deadlock
+            stderr=None,
             env={**os.environ, **self._env_overrides},
+            limit=_STDOUT_LINE_LIMIT,
         )
         self._proc = proc
         if stdin_data is not None and proc.stdin is not None:
