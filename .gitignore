@@ -28,3 +28,5 @@ _local/
 
 # OS
 .DS_Store
+
+outputs/*
