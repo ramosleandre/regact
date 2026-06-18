@@ -73,6 +73,11 @@ def build_agent(config: AgentConfig) -> CodeAgent:
 
         return AlanAgent()
     if config.name is AgentName.CLAUDE:
-        # The Claude CLI adapter lands in Block 9; until then selecting it is an error.
-        raise NotImplementedError("the 'claude' agent adapter arrives in Block 9")
+        from regact.agent.claude_adapter import ClaudeAgent
+
+        return ClaudeAgent()
+    if config.name is AgentName.CODEX:
+        from regact.agent.codex_adapter import CodexAgent
+
+        return CodexAgent()
     raise ValueError(f"unknown agent {config.name!r}")

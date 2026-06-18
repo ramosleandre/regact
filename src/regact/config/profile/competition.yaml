@@ -1,0 +1,21 @@
+# Competition profile (Kaggle): ARC-AGI-3, offline local games, one make per game.
+# Loaded by `run_kaggle --config .../competition.yaml`.
+agent:
+  name: claude
+problem:
+  name: arc_agi
+  lifecycle: single_instance
+  obs_mode: raw
+  info_mode: informative
+  kwargs:
+    operation_mode: offline
+    environments_dir: environnement
+features:
+  - controller
+execution: parallel
+parallel_workers: 4
+limits:
+  keep_alive: 150
+  max_moves: 2500
+output_root: experiments
+experiment_name: competition

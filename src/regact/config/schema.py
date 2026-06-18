@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 
 class AgentName(StrEnum):
     ALAN = "alan"
     CLAUDE = "claude"
+    CODEX = "codex"
     SCRIPTED = "scripted"  # deterministic backend for tests
 
 
@@ -54,6 +56,7 @@ class ProblemConfig:
     obs_mode: ObsMode = ObsMode.RAW
     info_mode: InfoMode = InfoMode.INFORMATIVE
     seed: int | None = None  # ignored by deterministic envs (ARC)
+    kwargs: dict[str, Any] = field(default_factory=dict)  # problem-specific ctor args
 
 
 @dataclass
