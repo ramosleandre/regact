@@ -1,0 +1,6 @@
+# Claude Code CLI (subscription auth by default).
+name: claude
+model: sonnet            # e.g. "opus" / "sonnet" / "claude-opus-4-8"
+args:
+  permission_mode: bypassPermissions   # headless: no interactive prompts (deny-list still applies)
+  effort: low                       # low | medium | high | xhigh | max

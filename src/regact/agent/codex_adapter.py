@@ -36,7 +36,18 @@ class CodexAgent(_CliAgent):
         argv = ["codex"]
         if self._model:
             argv += ["-m", self._model]
-        argv += ["--dangerously-bypass-approvals-and-sandbox", "exec"]
+        if self._args.get("reasoning_effort"):
+            argv += ["-c", f"model_reasoning_effort={self._args['reasoning_effort']}"]
+        # Default: bypass approvals + sandbox so the agent can reach the localhost
+        # env/control server (codex's own sandbox would block it); our path scan +
+        # the HTTP boundary are the confinement. Override via agent.args.sandbox /
+        # agent.args.ask_for_approval if you want codex's native sandbox instead.
+        if self._args.get("sandbox"):
+            argv += ["--sandbox", str(self._args["sandbox"])]
+            argv += ["--ask-for-approval", str(self._args.get("ask_for_approval", "never"))]
+        else:
+            argv += ["--dangerously-bypass-approvals-and-sandbox"]
+        argv += ["exec"]
         if self._session_id is not None:
             argv += ["resume", self._session_id]
         argv += ["--cd", self._cwd or ".", "--json"]

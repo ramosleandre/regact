@@ -8,6 +8,8 @@ Resume across turns uses the session id Claude reports in its ``init`` event.
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 from regact.agent.capabilities import Capabilities
@@ -21,11 +23,20 @@ from regact.agent.events import (
     ToolResult,
     TurnComplete,
 )
+from regact.isolation.harness import claude_deny_settings
 from regact.obs.errors import ErrorCategory
 
 
 class ClaudeAgent(_CliAgent):
     """``CodeAgent`` backed by the headless Claude Code CLI."""
+
+    def _configure_workdir(self) -> None:
+        # Native confinement: a .claude/settings.json deny-list keeps Claude's file
+        # tools inside the workdir (it cannot read the game data outside it).
+        settings_dir = os.path.join(self._cwd, ".claude")
+        os.makedirs(settings_dir, exist_ok=True)
+        with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
+            json.dump(claude_deny_settings(self._cwd), handle, indent=2)
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -39,6 +50,12 @@ class ClaudeAgent(_CliAgent):
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["claude", "-p", message, "--output-format", "stream-json", "--verbose"]
+        # Headless: skip the interactive permission prompt (it would hang). The
+        # .claude/settings.json deny-list + the HTTP boundary remain the confinement
+        # (deny rules still apply). Override via agent.args.permission_mode.
+        argv += ["--permission-mode", str(self._args.get("permission_mode", "bypassPermissions"))]
+        if self._args.get("effort"):
+            argv += ["--effort", str(self._args["effort"])]
         if self._session_id is not None:
             argv += ["--resume", self._session_id]
         elif self._system_prompt:

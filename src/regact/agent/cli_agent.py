@@ -30,7 +30,8 @@ from regact.tools.base import Tool
 class _CliAgent(CodeAgent):
     """Base for subprocess CLI agents; subclasses override the three hooks below."""
 
-    def __init__(self) -> None:
+    def __init__(self, args: dict[str, object] | None = None) -> None:
+        self._args = dict(args or {})  # backend-specific CLI params (mode, effort, …)
         self._cwd: str = ""
         self._model: str | None = None
         self._system_prompt: str | None = None
@@ -56,6 +57,10 @@ class _CliAgent(CodeAgent):
         self._model = model
         self._system_prompt = system_prompt
         self._env_overrides = dict(env or {})
+        self._configure_workdir()
+
+    def _configure_workdir(self) -> None:
+        """Write any backend-native confinement config into the workdir. Default: none."""
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
         if self._pending:
