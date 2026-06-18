@@ -47,6 +47,7 @@ class AgentConfig:
     model: str | None = None
     base_url: str | None = None  # None => use the CLI's own auth (e.g. Claude subscription)
     api_key: str | None = None
+    args: dict[str, Any] = field(default_factory=dict)  # backend-specific CLI params
 
 
 @dataclass

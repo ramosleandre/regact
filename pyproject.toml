@@ -40,7 +40,7 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/regact"]
 # Ship prompt/template markdown alongside the package (read at runtime).
-artifacts = ["*.md", "*.yaml"]
+artifacts = ["**/*.md", "**/*.yaml"]
 
 # Editable installs add src/ to sys.path (simple .pth), so adding/moving modules
 # never requires a reinstall.

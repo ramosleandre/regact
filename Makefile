@@ -69,8 +69,8 @@ run-kaggle:  ## Competition run (flags via ARGS=...)
 	$(PYTHON) -m $(PKG).run_kaggle $(ARGS)
 
 .PHONY: debug
-debug:  ## Run a per-block debug smoke script: make debug D=block2_env
-	PYTHONPATH=src $(PYTHON) debug/$(D).py
+debug:  ## Run a per-block debug smoke script: make debug D=block2_env [ARGS=...]
+	PYTHONPATH=src $(PYTHON) debug/$(D).py $(ARGS)
 
 # ── housekeeping ─────────────────────────────────────────────────────────────
 .PHONY: clean

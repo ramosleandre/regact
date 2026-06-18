@@ -31,6 +31,13 @@ from regact.tools.base import Tool
 from regact.workspace.bootstrap import Workspace
 
 
+def _regact_src_dir() -> str:
+    """Absolute path of the dir containing the ``regact`` package (for subprocess imports)."""
+    import regact
+
+    return os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+
+
 def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
     if lifecycle is Lifecycle.SINGLE_INSTANCE:
         return SingleInstancePolicy()
@@ -131,7 +138,9 @@ async def run_task(
             api_key=config.agent.api_key,
             system_prompt=builder.build_system_prompt(),
             tools=tools,
-            env={"PYTHONPATH": "src"},
+            # The agent's subprocess scripts (cwd=workdir) must import regact; give
+            # them the absolute src dir so it works whether or not regact is installed.
+            env={"PYTHONPATH": _regact_src_dir()},
         )
         first_message = builder.build_first_message(
             problem, task_name, features, info_mode=config.problem.info_mode

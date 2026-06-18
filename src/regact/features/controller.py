@@ -103,6 +103,12 @@ def get_controller() -> Controller:
 `code_library/base_controller.py` holds the contract; `example_controller.py`
 shows a trivial policy. When ready, call **SubmitSolution** to score it, iterate,
 and call **ExitTask** when you are done.
+
+### Rules
+
+Win by interacting with the environment through `make_env()` only. Do not import
+the game library, do not read files outside your working directory, and do not use
+`inspect`/`importlib` or hardcode answers — submissions that do are rejected.
 """
 
 

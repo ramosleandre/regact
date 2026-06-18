@@ -35,6 +35,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             model=agent.get("model"),
             base_url=agent.get("base_url"),
             api_key=agent.get("api_key"),
+            args=dict(agent.get("args") or {}),
         ),
         problem=ProblemConfig(
             name=str(problem["name"]),

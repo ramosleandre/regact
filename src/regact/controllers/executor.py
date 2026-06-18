@@ -19,6 +19,8 @@ from typing import Any
 from regact.config.schema import Lifecycle
 from regact.controllers.runner import run_controller
 from regact.envclient.client import EnvClient
+from regact.isolation.policy import default_policy
+from regact.isolation.scan import scan_file
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
 
@@ -45,6 +47,19 @@ class ControllerExecutor:
         max_moves: int = 400,
     ) -> EvalResult:
         """Drive the controller via the env client and persist the result."""
+        # Anti-cheat: statically scan the controller before its module body runs,
+        # so a solution that imports the game lib / escape hatch never executes.
+        violations = scan_file(solution_path, default_policy())
+        if violations:
+            result = EvalResult(
+                task=task_name,
+                error="anti-cheat: " + "; ".join(violations),
+                error_category=ErrorCategory.AGENT_SOLUTION,
+                executor="in_process",
+            )
+            _write(output_path, result)
+            return result
+
         try:
             factory = _load_controller_factory(solution_path)
         except Exception as exc:  # import / attribute / syntax error in agent code
