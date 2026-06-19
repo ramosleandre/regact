@@ -9,6 +9,7 @@ from regact.config.schema import (
     ProblemConfig,
     RunConfig,
 )
+from regact.security.runtime import SandboxRuntime
 
 
 def test_run_config_defaults() -> None:
@@ -23,7 +24,7 @@ def test_run_config_defaults() -> None:
     assert cfg.problem.obs_mode is ObsMode.RAW
     assert cfg.limits.keep_alive > 0
     assert cfg.limits.max_moves > 0
-    assert cfg.security.anticheat is True
+    assert cfg.security.runtime is SandboxRuntime.AUTO
 
 
 def test_enum_string_values() -> None:

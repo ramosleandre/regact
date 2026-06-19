@@ -8,6 +8,7 @@ from typing import Any
 from regact.agent.events import ToolCall
 from regact.config.schema import LimitsConfig
 from regact.orchestration.loop import _decide_stop, _execute_framework_tool, _LoopContext
+from regact.security.policy import default_policy
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
 _LIMITS = LimitsConfig(keep_alive=3, max_moves=10, walltime_s=None)
@@ -84,6 +85,7 @@ def _ctx(logger: Any) -> _LoopContext:
         transcript=None,  # type: ignore[arg-type]
         logger=logger,
         cwd="/tmp",
+        policy=default_policy(),
     )
 
 

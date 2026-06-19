@@ -56,7 +56,6 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         security=SecurityConfig(
             runtime=SandboxRuntime(sec.get("runtime", SandboxRuntime.AUTO)),
             deny_egress=bool(sec.get("deny_egress", False)),
-            anticheat=bool(sec.get("anticheat", True)),
             runtime_opts=dict(sec.get("runtime_opts") or {}),
         ),
         experiment_name=data.get("experiment_name"),

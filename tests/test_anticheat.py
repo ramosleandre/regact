@@ -94,3 +94,36 @@ def test_executor_blocks_a_cheating_solution(tmp_path: Path) -> None:
     assert result.error is not None and "anti-cheat" in result.error
     assert result.episodes == []  # never executed the cheating module
     assert "anti-cheat" in json.loads(out.read_text())["error"]
+
+
+def test_loop_flags_and_counts_cheat_attempts(tmp_path: Path) -> None:
+    """A tool call reaching for the game data is counted + logged, never blocked."""
+    from regact.agent.events import ToolCall
+    from regact.obs.logger import RunLogger
+    from regact.orchestration.loop import _flag_suspicious_call, _LoopContext
+    from regact.session.state import ExperimentState
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    exp = ExperimentState(problem_name="p", task_name="t", n_eval_episodes=1, n_videos=0)
+    with RunLogger(str(logs), task="t") as logger:
+        ctx = _LoopContext(
+            agent=None,  # type: ignore[arg-type]
+            experiment=exp,
+            tools_by_name={},
+            transcript=None,  # type: ignore[arg-type]
+            logger=logger,
+            cwd="",
+            policy=default_policy(),
+        )
+        _flag_suspicious_call(ToolCall("1", "Bash", {"command": "ls code_library"}), ctx)
+        assert exp.cheat_attempts == 0  # a benign call is not flagged
+        _flag_suspicious_call(ToolCall("2", "Bash", {"command": "cat ../environnement/x.py"}), ctx)
+        assert exp.cheat_attempts >= 1  # reaching for the game data is counted
+
+    events = [
+        json.loads(line)
+        for line in (logs / "events.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert any(e["event"] == "cheat_attempt" for e in events)

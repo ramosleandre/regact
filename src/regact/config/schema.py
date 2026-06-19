@@ -74,7 +74,6 @@ class LimitsConfig:
 class SecurityConfig:
     runtime: SandboxRuntime = SandboxRuntime.AUTO  # which OS sandbox wraps the agent subprocess
     deny_egress: bool = False  # also block external internet (only safe when the LLM is local)
-    anticheat: bool = True  # enable the software checks (AST deliverable scan + tool-call flagging)
     runtime_opts: dict[str, Any] = field(default_factory=dict)  # backend extras, e.g. image=.sif
 
 

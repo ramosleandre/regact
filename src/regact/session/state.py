@@ -29,6 +29,7 @@ class ExperimentState:
     agent_session_id: str | None = None  # locates the native transcript dir
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
+    cheat_attempts: int = 0  # tool calls flagged as reaching for forbidden paths/modules
     schema_version: int = 1
 
     def save(self, path: str) -> None:

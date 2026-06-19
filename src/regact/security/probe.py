@@ -17,6 +17,7 @@ import contextlib
 import json
 import os
 import socket
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 
@@ -110,14 +111,22 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workdir", default=tempfile.mkdtemp(prefix="regact_probe_"))
     parser.add_argument("--secret", default=os.environ.get("REGACT_PROBE_SECRET"))
     parser.add_argument("--no-egress", action="store_true", help="skip the external-egress check")
+    parser.add_argument(
+        "--sandbox", action="store_true", help="re-run this probe inside the detected OS sandbox"
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
     secret = args.secret
     if not secret:
-        fd, secret = tempfile.mkstemp(suffix="_game_secret.py")
-        os.write(fd, b"WINNING = [3, 1, 2, 0]  # the game answer\n")
-        os.close(fd)
+        # the stand-in secret lives in its own dir, so --sandbox can forbid that dir
+        # without touching the workdir or the rest of the temp tree.
+        secret = os.path.join(tempfile.mkdtemp(prefix="regact_probe_secret_"), "game_secret.py")
+        with open(secret, "w", encoding="utf-8") as handle:
+            handle.write("WINNING = [3, 1, 2, 0]  # the game answer\n")
+
+    if args.sandbox:
+        return _rerun_sandboxed(args.workdir, secret, no_egress=args.no_egress, as_json=args.json)
 
     results = run_probe(workdir=args.workdir, secret_path=secret, check_egress=not args.no_egress)
     if args.json:
@@ -125,6 +134,26 @@ def _main(argv: list[str] | None = None) -> int:
     else:
         print(format_report(results))
     return 0 if all(r.defended for r in results) else 1
+
+
+def _rerun_sandboxed(workdir: str, secret: str, *, no_egress: bool, as_json: bool) -> int:
+    """Re-exec this probe inside the auto-detected sandbox, forbidding the secret's dir."""
+    import subprocess
+
+    import regact
+    from regact.security.runtime import detect, wrap_argv
+
+    src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+    child = [sys.executable, "-m", "regact.security.probe"]
+    child += ["--workdir", workdir, "--secret", secret]
+    if no_egress:
+        child.append("--no-egress")
+    if as_json:
+        child.append("--json")
+    argv = wrap_argv(
+        detect(), child, workdir=workdir, allow_read=[src], forbid_read=[os.path.dirname(secret)]
+    )
+    return subprocess.run(argv, env={**os.environ, "PYTHONPATH": src}, check=False).returncode
 
 
 if __name__ == "__main__":

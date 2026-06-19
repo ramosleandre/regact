@@ -132,3 +132,50 @@ def test_seatbelt_blocks_the_secret_end_to_end() -> None:
         forbid_read=[forbid],
     )
     assert subprocess.run(argv_ok, capture_output=True).returncode == 0
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("sandbox-exec") is None,
+    reason="seatbelt end-to-end runs on macOS only",
+)
+def test_task_style_wiring_hides_game_but_keeps_workdir(tmp_path: Path) -> None:
+    """Mirror task.py's layout: a game dir as a sibling of src, the workdir nested under
+    experiments/. Forbidding the game by name must hide it while the workdir (and the
+    in-repo source) stay readable — the regression the repo-root forbid bug introduced.
+    """
+    (tmp_path / "src").mkdir()
+    games = tmp_path / "environnement"
+    games.mkdir()
+    (games / "g.py").write_text("ANSWER = 1\n")
+    wd = tmp_path / "experiments" / "run" / "workdir"
+    wd.mkdir(parents=True)
+    (wd / "solution.py").write_text("x = 1\n")
+
+    allow = [str(tmp_path / "src")]
+    forbid = [str(games)]  # what task.py computes from the policy's game-dir names
+    read = "import sys; open(sys.argv[1]).read()"
+
+    blocked = subprocess.run(
+        wrap_argv(
+            SandboxRuntime.SEATBELT,
+            [sys.executable, "-c", read, str(games / "g.py")],
+            workdir=str(wd),
+            allow_read=allow,
+            forbid_read=forbid,
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert blocked.returncode != 0 and "PermissionError" in blocked.stderr  # game hidden
+
+    ok = subprocess.run(
+        wrap_argv(
+            SandboxRuntime.SEATBELT,
+            [sys.executable, "-c", read, str(wd / "solution.py")],
+            workdir=str(wd),
+            allow_read=allow,
+            forbid_read=forbid,
+        ),
+        capture_output=True,
+    )
+    assert ok.returncode == 0  # the workdir (under experiments/) stays readable (R1)

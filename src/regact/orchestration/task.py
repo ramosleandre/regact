@@ -26,6 +26,7 @@ from regact.orchestration.env_transport import EnvConnection, serve_env
 from regact.orchestration.loop import run_session
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
+from regact.security.policy import default_policy
 from regact.security.runtime import make_wrapper
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
@@ -131,15 +132,23 @@ async def run_task(
         else:
             loop_tools = tools
 
-        # Confine the agent's subprocess to its workdir and the regact source it imports;
-        # paths outside (the rest of the repo) are absent from its filesystem view.
-        # In-process agents ignore this; subprocess (CLI) agents run wrapped.
+        # Confine the agent's subprocess to its workdir and the regact source it imports.
+        # On allow-by-default backends (macOS) deny the game-data directories by name —
+        # never the repo root, which holds the venv and source the agent needs; allowlist
+        # backends (bwrap/apptainer) bind only the allowed paths, so everything else is
+        # absent regardless. In-process agents ignore this; CLI agents run wrapped.
         src_dir = _regact_src_dir()
+        repo_root = os.path.dirname(src_dir)
+        game_dirs = [
+            os.path.join(repo_root, name)
+            for name in sorted(default_policy().forbidden_path_substrings)
+            if name != ".." and os.path.isdir(os.path.join(repo_root, name))
+        ]
         runtime_wrap = make_wrapper(
             config.security.runtime,
             workdir=workdir,
             allow_read=[src_dir],
-            forbid_read=[os.path.dirname(src_dir)],  # the repo: src + environnement + experiments
+            forbid_read=game_dirs,
             deny_egress=config.security.deny_egress,
             image=config.security.runtime_opts.get("image"),
         )

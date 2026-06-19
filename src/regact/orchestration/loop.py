@@ -30,6 +30,8 @@ from regact.obs.errors import ErrorCategory, LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.signals import StopSignal
+from regact.security.detection import flag_tool_call
+from regact.security.policy import SecurityPolicy, default_policy
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext
 
@@ -53,6 +55,7 @@ class _LoopContext:
     transcript: TranscriptWriter
     logger: RunLogger
     cwd: str
+    policy: SecurityPolicy  # for flagging (not blocking) suspicious tool calls
 
 
 @dataclass
@@ -86,6 +89,7 @@ async def run_session(
         transcript=transcript,
         logger=logger,
         cwd=cwd,
+        policy=default_policy(),
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -191,6 +195,7 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
 async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOutcome) -> None:
     """Route one event: execute framework tools, record backend errors, else observe."""
     if isinstance(event, ToolCall):
+        _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution
             result = await _execute_framework_tool(tool, event, ctx)
@@ -206,6 +211,26 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             message=event.message,
         )
         outcome.error_category = event.category
+
+
+def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
+    """Log (never block) a tool call whose arguments reach for a forbidden path/module.
+
+    The OS sandbox is what enforces confinement; this only records the attempt as a
+    forensic signal — a count on the run state + a WARNING line — so the analyst can
+    see whether and how the agent tried to cheat.
+    """
+    flags = flag_tool_call(call.name, call.input, ctx.policy)
+    if not flags:
+        return
+    ctx.experiment.cheat_attempts += len(flags)
+    ctx.logger.log(
+        LogComponent.AGENT,
+        "WARNING",
+        "cheat_attempt",
+        tool=call.name,
+        flags=flags,
+    )
 
 
 async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:

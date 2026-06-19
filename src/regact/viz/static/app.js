@@ -85,7 +85,8 @@ async function renderOverview(name) {
     kpi("Output tokens", fmt(m.tokens.output), `cache ${fmt(m.tokens.cache_read)}`),
     kpi("Levels", `${m.best_levels ?? "—"}`, `final ${m.final_levels ?? "—"}`),
     kpi("Success", pct(m.success_rate)),
-    kpi("Thinking", fmt(m.thinking_chars) + " ch"));
+    kpi("Thinking", fmt(m.thinking_chars) + " ch"),
+    kpi("Cheat attempts", m.cheat_attempts ?? 0));
   wrap.append(kpis, barChart("Tool calls", m.tool_histogram));
   if (m.submission_trajectory.length) wrap.append(trajectory(m.submission_trajectory));
   shell(name, "", wrap);
