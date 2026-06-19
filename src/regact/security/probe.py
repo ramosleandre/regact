@@ -17,6 +17,7 @@ import contextlib
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 from dataclasses import asdict, dataclass
@@ -56,6 +57,29 @@ def _can_connect(host: str, port: int) -> tuple[bool, str]:
         return False, type(exc).__name__
 
 
+def _can_write(path: str) -> tuple[bool, str]:
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("x")
+    except OSError as exc:
+        return False, type(exc).__name__
+    with contextlib.suppress(OSError):
+        os.unlink(path)
+    return True, "wrote"
+
+
+def _child_can_read(path: str) -> tuple[bool, str]:
+    """Spawn a child process that reads ``path`` — it must inherit the restriction."""
+    code = "import sys; open(sys.argv[1]).read()"
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code, path], capture_output=True, timeout=15, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, type(exc).__name__
+    return result.returncode == 0, "child read it" if result.returncode == 0 else "child denied"
+
+
 def _check(inv: Invariant, name: str, intent: str, attacked: bool, detail: str) -> CheckResult:
     defended = (not attacked) if intent == "deny" else attacked
     return CheckResult(str(inv), name, intent, defended, detail)
@@ -74,6 +98,8 @@ def run_probe(
         with contextlib.suppress(OSError), open(own, "w", encoding="utf-8") as handle:
             handle.write("# the agent's own work\n")
 
+    game_dir = os.path.dirname(os.path.realpath(secret_path))
+    home = os.path.expanduser("~")
     out: list[CheckResult] = []
 
     def add(inv: Invariant, name: str, intent: str, probe: tuple[bool, str]) -> None:
@@ -81,14 +107,19 @@ def run_probe(
 
     # R1 (allow): the agent must be able to work in its own workdir.
     add(Invariant.R1_WORKDIR, "read own workdir", "allow", _can_read(own))
-    # R2 (deny): read the game / climb out / enumerate must fail.
+    # R2 (deny): read / enumerate the game, or escape to an unrelated location.
     add(Invariant.R2_SECRET, "A1 open(game secret)", "deny", _can_read(secret_path))
-    parent = os.path.dirname(os.path.realpath(workdir))
-    add(Invariant.R2_SECRET, "A8 list parent (other experiments)", "deny", _can_list(parent))
-    add(Invariant.R2_SECRET, "A1 absolute path outside allowlist", "deny", _can_read("/etc/passwd"))
+    add(Invariant.R2_SECRET, "A8 list the game directory", "deny", _can_list(game_dir))
+    add(Invariant.R2_SECRET, "A8 reach the user home dir", "deny", _can_list(home))
+    # R3 (deny): writing outside the workdir (here, into the game dir) must fail.
+    wrote = _can_write(os.path.join(game_dir, ".probe_write"))
+    add(Invariant.R3_WRITE, "R3 write outside the workdir", "deny", wrote)
     # R5 (deny): external egress must fail (scored runs).
     if check_egress:
         add(Invariant.R5_EGRESS, "E1 external internet egress", "deny", _can_connect(*external))
+    # R6 (deny): a child process inherits the restriction.
+    child = _child_can_read(secret_path)
+    add(Invariant.R6_NO_ESCAPE, "G1 child reads the game secret", "deny", child)
 
     return out
 
