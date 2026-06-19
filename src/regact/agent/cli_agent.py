@@ -19,7 +19,7 @@ import asyncio
 import json
 import os
 from abc import abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from regact.agent.base import CodeAgent
 from regact.agent.events import AgentError, AgentEvent
@@ -38,6 +38,7 @@ class _CliAgent(CodeAgent):
         self._model: str | None = None
         self._system_prompt: str | None = None
         self._env_overrides: dict[str, str] = {}
+        self._runtime_wrap: Callable[[list[str]], list[str]] | None = None
         self._session_id: str | None = None
         self._pending: list[str] = []  # messages queued by inject(), prepended next turn
         self._proc: asyncio.subprocess.Process | None = None
@@ -52,6 +53,7 @@ class _CliAgent(CodeAgent):
         system_prompt: str | None,
         tools: list[Tool] | None = None,
         env: dict[str, str] | None = None,
+        runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
         # CLI agents default to their own auth (e.g. the Claude subscription);
         # base_url/api_key are only forwarded by a subclass that needs them.
@@ -59,6 +61,7 @@ class _CliAgent(CodeAgent):
         self._model = model
         self._system_prompt = system_prompt
         self._env_overrides = dict(env or {})
+        self._runtime_wrap = runtime_wrap
         self._configure_workdir()
 
     def _configure_workdir(self) -> None:
@@ -70,6 +73,8 @@ class _CliAgent(CodeAgent):
             self._pending.clear()
 
         argv, stdin_data = self._command(message)
+        if self._runtime_wrap is not None:
+            argv = self._runtime_wrap(argv)  # run the whole CLI process inside the OS sandbox
         proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=self._cwd or None,

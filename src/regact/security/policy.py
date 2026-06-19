@@ -1,9 +1,9 @@
-"""The anti-cheat policy: what agent code must not do.
+"""The declarative anti-cheat policy: imports, calls, and path substrings to flag.
 
-A single declarative policy, owned by the harness and translated by each adapter
-to its backend's native enforcement. Forbidden imports/calls catch attempts to
-reach the game object or escape the HTTP boundary from the submitted controller;
-forbidden path substrings catch attempts to read the game data on disk.
+A single declarative policy consumed by two non-enforcing layers: the AST scan
+(``scan.py``, applied by a feature to its agent-authored deliverable) and the
+tool-call flagger (``detection.py``, which only logs/flags). OS-level confinement is
+provided by ``runtime.py``; these lists are defense-in-depth and observability.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class SecurityPolicy:
-    """What the agent's submitted code and tool calls are not allowed to do."""
+    """What the agent's submitted code and tool calls are flagged for."""
 
     forbidden_imports: frozenset[str] = field(default_factory=frozenset)
     forbidden_calls: frozenset[str] = field(default_factory=frozenset)

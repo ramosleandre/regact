@@ -1,8 +1,12 @@
 """Tests for the HTTP env boundary (server <-> client), via FastAPI TestClient."""
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
+
+try:  # starlette's TestClient prefers httpx2 when it is installed
+    from httpx2 import HTTPStatusError
+except ImportError:
+    from httpx import HTTPStatusError
 
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
 from regact.env.renderer import RawRenderer
@@ -54,14 +58,14 @@ def test_http_episode_to_goal() -> None:
 
 def test_unknown_game_404() -> None:
     client = _client(_server(MultiInstancePolicy()), game_id="nope")
-    with pytest.raises(httpx.HTTPStatusError) as exc:
+    with pytest.raises(HTTPStatusError) as exc:
         client.reset()
     assert exc.value.response.status_code == 404
 
 
 def test_step_before_reset_409() -> None:
     client = _client(_server(MultiInstancePolicy()))
-    with pytest.raises(httpx.HTTPStatusError) as exc:
+    with pytest.raises(HTTPStatusError) as exc:
         client.step(1)
     assert exc.value.response.status_code == 409
 

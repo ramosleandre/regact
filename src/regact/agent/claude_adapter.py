@@ -23,8 +23,22 @@ from regact.agent.events import (
     ToolResult,
     TurnComplete,
 )
-from regact.isolation.harness import claude_deny_settings
 from regact.obs.errors import ErrorCategory
+from regact.security.policy import SecurityPolicy, default_policy
+
+
+def claude_deny_settings(workdir: str, policy: SecurityPolicy | None = None) -> dict[str, Any]:
+    """Claude-native defense-in-depth: deny Claude's file tools from reading game data.
+
+    Backend-specific (Claude's ``.claude/settings.json``), so it lives with the adapter,
+    like codex's ``--sandbox`` flags and Alan's PreToolUse hook live with theirs; the
+    generic ``security/`` layer stays backend-agnostic. It governs only Claude's native
+    Read tool, never arbitrary code the agent runs, so it is defense-in-depth on top of
+    the OS sandbox, not a substitute for it.
+    """
+    policy = policy or default_policy()
+    deny = [f"Read(**/{sub}/**)" for sub in sorted(policy.forbidden_path_substrings) if sub != ".."]
+    return {"permissions": {"deny": deny}}
 
 
 class ClaudeAgent(_CliAgent):

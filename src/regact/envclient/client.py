@@ -20,7 +20,7 @@ from regact.envclient.obs import Action, Obs
 class EnvClient:
     """A thin HTTP client exposing a gym-like interface."""
 
-    def __init__(self, http: httpx.Client, game_id: str) -> None:
+    def __init__(self, http: Any, game_id: str) -> None:
         self._http = http
         self._game_id = game_id
         self.action_count = 0

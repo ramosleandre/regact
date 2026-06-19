@@ -19,10 +19,10 @@ from typing import Any
 from regact.config.schema import Lifecycle
 from regact.controllers.runner import run_controller
 from regact.envclient.client import EnvClient
-from regact.isolation.policy import default_policy
-from regact.isolation.scan import scan_file
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
+from regact.security.policy import default_policy
+from regact.security.scan import scan_file
 
 
 class ControllerExecutor:

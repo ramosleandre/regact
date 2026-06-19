@@ -26,6 +26,7 @@ from regact.orchestration.env_transport import EnvConnection, serve_env
 from regact.orchestration.loop import run_session
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
+from regact.security.runtime import make_wrapper
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
 from regact.workspace.bootstrap import Workspace
@@ -130,6 +131,19 @@ async def run_task(
         else:
             loop_tools = tools
 
+        # Confine the agent's subprocess to its workdir and the regact source it imports;
+        # paths outside (the rest of the repo) are absent from its filesystem view.
+        # In-process agents ignore this; subprocess (CLI) agents run wrapped.
+        src_dir = _regact_src_dir()
+        runtime_wrap = make_wrapper(
+            config.security.runtime,
+            workdir=workdir,
+            allow_read=[src_dir],
+            forbid_read=[os.path.dirname(src_dir)],  # the repo: src + environnement + experiments
+            deny_egress=config.security.deny_egress,
+            image=config.security.runtime_opts.get("image"),
+        )
+
         builder = PromptBuilder()
         await agent.start(
             cwd=workdir,
@@ -140,7 +154,8 @@ async def run_task(
             tools=tools,
             # The agent's subprocess scripts (cwd=workdir) must import regact; give
             # them the absolute src dir so it works whether or not regact is installed.
-            env={"PYTHONPATH": _regact_src_dir()},
+            env={"PYTHONPATH": src_dir},
+            runtime_wrap=runtime_wrap,
         )
         first_message = builder.build_first_message(
             problem, task_name, features, info_mode=config.problem.info_mode

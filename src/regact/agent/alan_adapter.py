@@ -9,7 +9,7 @@ the adapter (and declaring its capabilities) never requires ``alancode``.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from regact.agent.base import CodeAgent
@@ -44,7 +44,10 @@ class AlanAgent(CodeAgent):
         system_prompt: str | None,
         tools: list[Tool] | None = None,
         env: dict[str, str] | None = None,
+        runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
+        # in-process backend: the OS room (runtime_wrap) is N/A; confinement for Alan
+        # is its PreToolUse hook + the env HTTP boundary (a later block).
         from alancode import AlanCodeAgent
 
         self._tools = list(tools) if tools is not None else []

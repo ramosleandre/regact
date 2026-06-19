@@ -1,15 +1,17 @@
-"""Static (AST) scan of agent-authored Python for policy violations.
+"""Static (AST) scan of agent-authored Python against a policy.
 
-Run on ``solution.py`` before it is loaded/evaluated, so a cheating controller is
-rejected without ever executing its module body. Pure and dependency-free: parse
-the source, walk the tree, flag forbidden imports and dangerous calls.
+A generic AST utility. A feature applies it to its agent-authored deliverable before
+the module body runs, to reject code that imports a forbidden module or calls an
+escape hatch -- a contract on the shape of the submission, not OS-level confinement
+(that is provided by ``runtime.py``). Pure and dependency-free: parse, walk, and flag
+forbidden imports and calls.
 """
 
 from __future__ import annotations
 
 import ast
 
-from regact.isolation.policy import SecurityPolicy
+from regact.security.policy import SecurityPolicy
 
 
 def scan_source(code: str, policy: SecurityPolicy, *, where: str = "<code>") -> list[str]:

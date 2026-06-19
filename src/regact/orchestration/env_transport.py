@@ -69,7 +69,7 @@ async def _running_uvicorn(server: EnvServer) -> AsyncIterator[str]:
     """
     import uvicorn
 
-    config = uvicorn.Config(server.app, host="127.0.0.1", port=0, log_level="warning")
+    config = uvicorn.Config(server.app, host="127.0.0.1", port=0, log_level="warning", ws="none")
     uv_server = uvicorn.Server(config)
     thread = threading.Thread(target=uv_server.run, daemon=True)
     thread.start()

@@ -1,8 +1,8 @@
-"""Filesystem confinement: is a path inside the agent's workdir?
+"""Filesystem helper: is a path inside a given root (e.g. the agent's workdir)?
 
-The structural complement to the backend's native path hook — used to validate
-that file access stays within the workdir (the agent must not climb out to read
-the game data or framework source).
+A pure containment predicate, used when assembling a sandbox's allowed-path set and
+when flagging a tool call that names a path outside the workdir. The OS sandbox is
+what enforces confinement; this only computes containment.
 """
 
 from __future__ import annotations

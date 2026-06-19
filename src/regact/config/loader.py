@@ -23,12 +23,14 @@ from regact.config.schema import (
     RunConfig,
     SecurityConfig,
 )
+from regact.security.runtime import SandboxRuntime
 
 
 def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
     """Map a plain ``{agent, problem, limits, ...}`` mapping to a ``RunConfig``."""
     agent = dict(data.get("agent") or {})
     problem = dict(data.get("problem") or {})
+    sec = dict(data.get("security") or {})
     return RunConfig(
         agent=AgentConfig(
             name=AgentName(agent["name"]),
@@ -51,7 +53,12 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         execution=Execution(data.get("execution", Execution.SEQUENTIAL)),
         parallel_workers=int(data.get("parallel_workers", 1)),
         limits=LimitsConfig(**dict(data.get("limits") or {})),
-        security=SecurityConfig(**dict(data.get("security") or {})),
+        security=SecurityConfig(
+            runtime=SandboxRuntime(sec.get("runtime", SandboxRuntime.AUTO)),
+            deny_egress=bool(sec.get("deny_egress", False)),
+            anticheat=bool(sec.get("anticheat", True)),
+            runtime_opts=dict(sec.get("runtime_opts") or {}),
+        ),
         experiment_name=data.get("experiment_name"),
         output_root=str(data.get("output_root", "experiments")),
     )

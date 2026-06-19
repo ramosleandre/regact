@@ -10,7 +10,7 @@ this module never pulls a backend SDK.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from regact.agent.capabilities import Capabilities
 from regact.agent.events import AgentEvent
@@ -32,8 +32,12 @@ class CodeAgent(ABC):
         system_prompt: str | None,
         tools: list[Tool] | None = None,
         env: dict[str, str] | None = None,
+        runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
-        """Configure and launch the agent against a workdir and LLM endpoint."""
+        """Configure and launch the agent against a workdir and LLM endpoint.
+        ``runtime_wrap`` (when set) wraps the agent's subprocess argv to run inside
+        an OS sandbox.
+        """
         ...
 
     @abstractmethod

@@ -8,7 +8,7 @@ Paired with ``FakeNativeEnv`` it makes the whole stack runnable in CI.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from regact.agent.base import CodeAgent
 from regact.agent.capabilities import Capabilities
@@ -40,10 +40,11 @@ class ScriptedAgent(CodeAgent):
         system_prompt: str | None,
         tools: list[Tool] | None = None,
         env: dict[str, str] | None = None,
+        runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
         self.started = True
         self.cwd = cwd
-        self.tools = list(tools) if tools is not None else []
+        self.tools = list(tools) if tools is not None else []  # in-process: runtime_wrap N/A
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
         self.sent.append(message)

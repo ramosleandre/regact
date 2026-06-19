@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from regact.agent.claude_adapter import claude_deny_settings
 from regact.config.schema import Lifecycle
 from regact.controllers.executor import ControllerExecutor
 from regact.env.lifecycle import MultiInstancePolicy
@@ -14,11 +15,10 @@ from regact.env.renderer import RawRenderer
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.envclient.client import EnvClient
-from regact.isolation.harness import AntiCheatHarness, claude_deny_settings
-from regact.isolation.paths import path_within
-from regact.isolation.policy import default_policy
-from regact.isolation.scan import scan_source
-from regact.isolation.tool_guard import guard_tool_call
+from regact.security.detection import flag_tool_call
+from regact.security.paths import path_within
+from regact.security.policy import default_policy
+from regact.security.scan import scan_file, scan_source
 from regact.testing.fakes import FakeNativeEnv
 
 
@@ -43,17 +43,18 @@ def test_path_within_confines_to_workdir(tmp_path: Path) -> None:
     assert not path_within("../secret.py", root)
 
 
-def test_tool_guard_flags_forbidden_paths_and_imports() -> None:
+def test_camera_flags_forbidden_paths_and_imports() -> None:
+    """Flags (for logging) the obvious attempts; it never blocks."""
     policy = default_policy()
-    assert guard_tool_call("Bash", {"command": "cat ../environnement/ls20/x.py"}, policy)
-    assert guard_tool_call("Bash", {"command": "python -c 'import arc_agi'"}, policy)
-    assert guard_tool_call("Bash", {"command": "ls code_library"}, policy) == []
+    assert flag_tool_call("Bash", {"command": "cat ../environnement/ls20/x.py"}, policy)
+    assert flag_tool_call("Bash", {"command": "python -c 'import arc_agi'"}, policy)
+    assert flag_tool_call("Bash", {"command": "ls code_library"}, policy) == []
 
 
-def test_harness_scan_file(tmp_path: Path) -> None:
+def test_scan_file_flags_cheating_solution(tmp_path: Path) -> None:
     sol = tmp_path / "solution.py"
     sol.write_text("import arc_agi\n")
-    assert AntiCheatHarness().scan_file(str(sol))
+    assert scan_file(str(sol), default_policy())
 
 
 def test_claude_deny_settings_blocks_game_data_not_the_workdir() -> None:

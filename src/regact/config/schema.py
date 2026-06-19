@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from regact.security.runtime import SandboxRuntime
+
 
 class AgentName(StrEnum):
     ALAN = "alan"
@@ -70,8 +72,10 @@ class LimitsConfig:
 
 @dataclass
 class SecurityConfig:
-    path_hook: bool = True  # confine the agent's file tools to the workdir
-    anticheat: bool = True  # AST scan + tool-guard + shadow-replay
+    runtime: SandboxRuntime = SandboxRuntime.AUTO  # which OS sandbox wraps the agent subprocess
+    deny_egress: bool = False  # also block external internet (only safe when the LLM is local)
+    anticheat: bool = True  # enable the software checks (AST deliverable scan + tool-call flagging)
+    runtime_opts: dict[str, Any] = field(default_factory=dict)  # backend extras, e.g. image=.sif
 
 
 @dataclass
