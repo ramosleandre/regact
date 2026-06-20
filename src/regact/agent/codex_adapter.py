@@ -13,6 +13,7 @@ output — the live test is gated on the ``codex`` CLI being installed.
 from __future__ import annotations
 
 import os
+import shutil
 from typing import Any
 
 from regact.agent.capabilities import Capabilities
@@ -23,6 +24,15 @@ from regact.agent.events import AgentEvent, TextDelta, ThinkingDelta, ToolCall, 
 class CodexAgent(_CliAgent):
     """``CodeAgent`` backed by the headless codex CLI."""
 
+    def __init__(self, args: dict[str, object] | None = None) -> None:
+        super().__init__(args)
+        # Run codex against a generated, isolated home rather than the user's ~/.codex, so
+        # the session is reproducible and carries no ambient user config. Kept outside the
+        # per-run workdir so the auth token stays out of run artifacts. Override via
+        # ``agent.args["codex_home"]``.
+        raw_home = str(self._args.get("codex_home") or "~/.regact/codex-home")
+        self._codex_home = os.path.realpath(os.path.expanduser(raw_home))
+
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="replace",
@@ -30,16 +40,35 @@ class CodexAgent(_CliAgent):
             permission_hooks=False,
             streams_tool_calls=True,
             supports_inject=False,
-            writes_native_transcript=True,  # ~/.codex session
+            writes_native_transcript=True,  # session store in the isolated home
         )
 
     def host_read_paths(self) -> list[str]:
-        # ~/.codex holds codex's config + auth + the session sqlite (read-write).
-        return [os.path.join(os.path.expanduser("~"), ".codex")]
+        # The isolated home holds codex's config, auth, and session store (read-write).
+        return [self._codex_home]
 
     def host_egress_hosts(self) -> list[str]:
         # API-key mode needs only api.openai.com; ChatGPT-login adds auth/chatgpt.
         return ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+
+    def _configure_workdir(self) -> None:
+        """Seed the isolated home and point codex at it via ``CODEX_HOME`` and ``HOME``.
+
+        Codex reads config and skills from both ``$CODEX_HOME`` and ``$HOME/.agents``;
+        redirecting both at the empty home yields a clean session (no ambient config,
+        plugins, or MCP servers). Writes a minimal ``config.toml`` and copies the auth
+        token if present (auth is file-based under ``CODEX_HOME``); otherwise codex falls
+        back to ``OPENAI_API_KEY``.
+        """
+        home = self._codex_home
+        os.makedirs(os.path.join(home, "skills"), exist_ok=True)
+        with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as handle:
+            handle.write("# generated: isolated codex home\n")
+        user_auth = os.path.join(os.path.expanduser("~"), ".codex", "auth.json")
+        if os.path.exists(user_auth):
+            shutil.copyfile(user_auth, os.path.join(home, "auth.json"))
+        self._env_overrides["CODEX_HOME"] = home
+        self._env_overrides["HOME"] = home
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["codex"]

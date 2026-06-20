@@ -4,6 +4,8 @@ The meat is the stream-json → AgentEvent parsing and the command builder; both
 without the CLI installed. Actually spawning the CLI is a separate live concern.
 """
 
+import os
+
 from regact.agent.base import build_agent
 from regact.agent.claude_adapter import ClaudeAgent
 from regact.agent.codex_adapter import CodexAgent
@@ -34,9 +36,24 @@ def test_host_read_paths_are_per_agent() -> None:
     claude = ClaudeAgent().host_read_paths()
     codex = CodexAgent().host_read_paths()
     assert any(p.endswith("/.claude") for p in claude)
-    assert any(p.endswith("/.codex") for p in codex)
-    assert not any(".codex" in p for p in claude)  # no cross-contamination
+    assert any(p.endswith("/codex-home") for p in codex)  # codex's isolated CODEX_HOME
+    assert not any("codex" in p for p in claude)  # no cross-contamination
     assert not any("/.claude" in p for p in codex)
+
+
+def test_codex_uses_an_isolated_home(tmp_path) -> None:
+    """codex runs against a generated home, not the user's ~/.codex, so no ambient
+    config leaks into the session."""
+    home = tmp_path / "codex-home"
+    agent = CodexAgent({"codex_home": str(home)})
+    real = os.path.realpath(str(home))
+    assert agent.host_read_paths() == [real]
+
+    agent._configure_workdir()  # what start() invokes to seed the home
+    assert agent._env_overrides["CODEX_HOME"] == real
+    assert agent._env_overrides["HOME"] == real  # also redirects ~/.agents
+    assert (home / "skills").is_dir()
+    assert (home / "config.toml").read_text().lstrip().startswith("#")
 
 
 def test_host_egress_hosts_are_per_agent() -> None:
