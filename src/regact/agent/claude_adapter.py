@@ -62,6 +62,21 @@ class ClaudeAgent(_CliAgent):
             writes_native_transcript=True,  # .claude session dir
         )
 
+    def host_read_paths(self) -> list[str]:
+        # Coarse dirs that subsume what the CLI touches: ~/.claude holds config + auth +
+        # plugins + projects + sessions; ~/.claude.json is the top-level config; ~/.npm is
+        # the cache it uses. (Discovery may add an OS-specific CLI cache, e.g. macOS
+        # ~/Library/Caches/claude-cli-nodejs, Linux ~/.cache/claude-cli-nodejs.)
+        home = os.path.expanduser("~")
+        return [
+            os.path.join(home, ".claude"),
+            os.path.join(home, ".claude.json"),
+            os.path.join(home, ".npm"),
+        ]
+
+    def host_egress_hosts(self) -> list[str]:
+        return ["api.anthropic.com"]  # block statsig.anthropic.com / sentry telemetry
+
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["claude", "-p", message, "--output-format", "stream-json", "--verbose"]
         # Headless: skip the interactive permission prompt (it would hang). The

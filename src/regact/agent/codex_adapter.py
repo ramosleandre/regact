@@ -12,6 +12,7 @@ output — the live test is gated on the ``codex`` CLI being installed.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from regact.agent.capabilities import Capabilities
@@ -31,6 +32,14 @@ class CodexAgent(_CliAgent):
             supports_inject=False,
             writes_native_transcript=True,  # ~/.codex session
         )
+
+    def host_read_paths(self) -> list[str]:
+        # ~/.codex holds codex's config + auth + the session sqlite (read-write).
+        return [os.path.join(os.path.expanduser("~"), ".codex")]
+
+    def host_egress_hosts(self) -> list[str]:
+        # API-key mode needs only api.openai.com; ChatGPT-login adds auth/chatgpt.
+        return ["api.openai.com", "auth.openai.com", "chatgpt.com"]
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["codex"]

@@ -2,7 +2,7 @@
 preview/
 context/
 contexte/
-debug/
+# debug/
 
 # Python
 __pycache__/

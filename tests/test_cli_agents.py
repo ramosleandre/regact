@@ -29,6 +29,22 @@ def test_capabilities_mark_client_cli() -> None:
     assert CodexAgent().capabilities().control_actions == "client_cli"
 
 
+def test_host_read_paths_are_per_agent() -> None:
+    """Each backend declares only its OWN host dirs — never another backend's."""
+    claude = ClaudeAgent().host_read_paths()
+    codex = CodexAgent().host_read_paths()
+    assert any(p.endswith("/.claude") for p in claude)
+    assert any(p.endswith("/.codex") for p in codex)
+    assert not any(".codex" in p for p in claude)  # no cross-contamination
+    assert not any("/.claude" in p for p in codex)
+
+
+def test_host_egress_hosts_are_per_agent() -> None:
+    assert ClaudeAgent().host_egress_hosts() == ["api.anthropic.com"]
+    assert "api.openai.com" in CodexAgent().host_egress_hosts()
+    assert not any("anthropic" in h for h in CodexAgent().host_egress_hosts())
+
+
 # --- Claude stream-json parsing ------------------------------------------- #
 
 

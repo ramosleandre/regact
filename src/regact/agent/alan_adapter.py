@@ -88,6 +88,17 @@ class AlanAgent(CodeAgent):
             writes_native_transcript=True,
         )
 
+    def host_read_paths(self) -> list[str]:
+        # Alan is in-process (no subprocess sandbox wraps it), so this is not applied
+        # today; its native session lives under <workdir>/.alan. Declared for symmetry —
+        # add Alan's host config dirs here if it is ever run wrapped (e.g. on JZ/Adastra).
+        return []
+
+    def host_egress_hosts(self) -> list[str]:
+        # Alan reaches its model via the configured base_url (e.g. a local server), not a
+        # fixed external host, so there is no static egress host to allowlist.
+        return []
+
     @staticmethod
     def _map(native: Any) -> AgentEvent | None:
         """Translate one ``alancode`` stream event into the normalized union.

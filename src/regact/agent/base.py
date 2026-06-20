@@ -65,6 +65,27 @@ class CodeAgent(ABC):
         """Static description of what this backend supports."""
         ...
 
+    def host_read_paths(self) -> list[str]:
+        """Host config/auth dirs THIS backend needs readable inside the sandbox.
+
+        Each backend declares its own (Claude: ``~/.claude``; codex: ``~/.codex``), so a
+        deny-by-default sandbox allowlist contains only the *loaded* agent's paths, never
+        another backend's. Agnostic by construction: returns plain paths, so the security
+        layer never imports a backend type. In-process backends (scripted/Alan) aren't
+        wrapped, so the default is none.
+        """
+        return []
+
+    def host_egress_hosts(self) -> list[str]:
+        """External hosts THIS backend must reach (for an egress-allowlist proxy).
+
+        Per-backend like :meth:`host_read_paths` (Claude: ``api.anthropic.com``; codex:
+        ``api.openai.com`` / ``auth.openai.com`` / ``chatgpt.com``). Empty when the model
+        is reached via a configured ``base_url`` (e.g. a local server on HPC) rather than
+        a fixed host. Plain strings, so the security/proxy layer stays agnostic.
+        """
+        return []
+
 
 def build_agent(config: AgentConfig) -> CodeAgent:
     """Construct the configured agent; each backend is imported only on its branch."""

@@ -138,16 +138,19 @@ def format_report(results: list[CheckResult]) -> str:
 
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="regact sandbox conformance probe")
-    # a fresh scratch workdir by default, so running the probe never pollutes cwd
-    parser.add_argument("--workdir", default=tempfile.mkdtemp(prefix="regact_probe_"))
+    # default=None then mkdtemp lazily: an eager default would call mkdtemp even when
+    # --workdir is passed, which fails inside a deny-default sandbox (no temp dir).
+    parser.add_argument("--workdir", default=None)
     parser.add_argument("--secret", default=os.environ.get("REGACT_PROBE_SECRET"))
     parser.add_argument("--no-egress", action="store_true", help="skip the external-egress check")
     parser.add_argument(
         "--sandbox", action="store_true", help="re-run this probe inside the detected OS sandbox"
     )
+    parser.add_argument("--image", default=None, help="apptainer/singularity .sif image (HPC)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
+    workdir = args.workdir or tempfile.mkdtemp(prefix="regact_probe_")
     secret = args.secret
     if not secret:
         # the stand-in secret lives in its own dir, so --sandbox can forbid that dir
@@ -157,9 +160,11 @@ def _main(argv: list[str] | None = None) -> int:
             handle.write("WINNING = [3, 1, 2, 0]  # the game answer\n")
 
     if args.sandbox:
-        return _rerun_sandboxed(args.workdir, secret, no_egress=args.no_egress, as_json=args.json)
+        return _rerun_sandboxed(
+            workdir, secret, no_egress=args.no_egress, as_json=args.json, image=args.image
+        )
 
-    results = run_probe(workdir=args.workdir, secret_path=secret, check_egress=not args.no_egress)
+    results = run_probe(workdir=workdir, secret_path=secret, check_egress=not args.no_egress)
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2))
     else:
@@ -167,12 +172,23 @@ def _main(argv: list[str] | None = None) -> int:
     return 0 if all(r.defended for r in results) else 1
 
 
-def _rerun_sandboxed(workdir: str, secret: str, *, no_egress: bool, as_json: bool) -> int:
+def _rerun_sandboxed(
+    workdir: str, secret: str, *, no_egress: bool, as_json: bool, image: str | None = None
+) -> int:
     """Re-exec this probe inside the auto-detected sandbox, forbidding the secret's dir."""
     import subprocess
 
     import regact
-    from regact.security.runtime import detect, wrap_argv
+    from regact.security.runtime import SandboxRuntime, detect, wrap_argv
+
+    backend = detect()
+    print(f"detect() -> {backend.value}")
+    if backend is SandboxRuntime.APPTAINER and not image:
+        print(
+            "apptainer needs a .sif image: pass --image PATH (build it off-node), "
+            "or run where bwrap/seatbelt is available."
+        )
+        return 2
 
     src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
     child = [sys.executable, "-m", "regact.security.probe"]
@@ -181,10 +197,11 @@ def _rerun_sandboxed(workdir: str, secret: str, *, no_egress: bool, as_json: boo
         child.append("--no-egress")
     if as_json:
         child.append("--json")
-    argv = wrap_argv(
-        detect(), child, workdir=workdir, allow_read=[src], forbid_read=[os.path.dirname(secret)]
-    )
-    return subprocess.run(argv, env={**os.environ, "PYTHONPATH": src}, check=False).returncode
+    # deny-default: the secret's dir is simply not in allow_read, so it is absent/denied.
+    argv = wrap_argv(backend, child, workdir=workdir, allow_read=[src], image=image)
+    # TMPDIR inside the (allowed) workdir, so the child has scratch without exposing /tmp.
+    env = {**os.environ, "PYTHONPATH": src, "TMPDIR": workdir}
+    return subprocess.run(argv, env=env, check=False).returncode
 
 
 if __name__ == "__main__":

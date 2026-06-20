@@ -79,17 +79,15 @@ def make_wrapper(
     *,
     workdir: str,
     allow_read: Sequence[str] = (),
-    forbid_read: Sequence[str] = (),
     deny_egress: bool = False,
     image: str | None = None,
 ) -> Wrapper:
     """Return a pure ``argv -> argv`` wrapper that runs argv inside the sandbox.
 
-    ``allow_read`` are extra read-only paths the agent legitimately needs (the regact
-    source, a shared venv). ``forbid_read`` are the paths to hide; allow-by-default
-    backends (seatbelt) deny them explicitly, while allowlist backends (bwrap,
-    apptainer) simply never bind them. The Python prefix and the workdir are always
-    granted.
+    Deny-by-default on every backend: only the workdir, the interpreter, and ``allow_read``
+    (the regact source + the loaded agent's own host dirs) are reachable; everything else —
+    every copy of the game, sibling experiments — is absent. We never enumerate the game's
+    locations; we allow what the agent needs and deny the rest.
     """
     resolved = resolve(runtime)
 
@@ -99,7 +97,6 @@ def make_wrapper(
             argv,
             workdir=workdir,
             allow_read=allow_read,
-            forbid_read=forbid_read,
             deny_egress=deny_egress,
             image=image,
         )
@@ -113,16 +110,15 @@ def wrap_argv(
     *,
     workdir: str,
     allow_read: Sequence[str] = (),
-    forbid_read: Sequence[str] = (),
     deny_egress: bool = False,
     image: str | None = None,
 ) -> Argv:
-    """Prepend the per-platform launcher so ``argv`` runs inside the sandbox."""
+    """Prepend the per-platform launcher so ``argv`` runs inside the sandbox (deny-by-default)."""
     resolved = resolve(runtime)
     if resolved is SandboxRuntime.NONE:
         return list(argv)
     if resolved is SandboxRuntime.SEATBELT:
-        return _seatbelt(argv, workdir, allow_read, forbid_read, deny_egress)
+        return _seatbelt(argv, workdir, allow_read, deny_egress)
     if resolved is SandboxRuntime.BWRAP:
         return _bwrap(argv, workdir, allow_read, deny_egress)
     if resolved is SandboxRuntime.APPTAINER:
@@ -137,32 +133,48 @@ def _python_prefixes() -> list[str]:
     return sorted({os.path.realpath(sys.prefix), os.path.realpath(sys.base_prefix)})
 
 
-def _seatbelt(
-    argv: Sequence[str],
-    workdir: str,
-    allow_read: Sequence[str],
-    forbid_read: Sequence[str],
-    deny_egress: bool,
-) -> Argv:
-    """macOS: allow by default, deny the forbidden paths, re-allow what the agent needs.
+def _sbpl_target(path: str) -> str:
+    """An SBPL path target: ``subpath`` for a directory, ``literal`` for a file."""
+    return f'(subpath "{path}")' if os.path.isdir(path) else f'(literal "{path}")'
 
-    A later ``allow`` overrides an earlier ``deny`` in SBPL, so the workdir, source,
-    and interpreter stay readable even when nested under a forbidden tree. This denies
-    named paths rather than denying everything by default, so it is weaker than the
-    bwrap/apptainer allowlist; it suits a development machine, where breaking the
-    agent's own toolchain (auth, interpreter) must be avoided.
+
+def _seatbelt(
+    argv: Sequence[str], workdir: str, allow_read: Sequence[str], deny_egress: bool
+) -> Argv:
+    """macOS: deny-by-default; allow only the system layer, interpreter, and ``allow_read``.
+
+    File *metadata* (stat) is allowed anywhere (harmless — it reveals only that a path
+    exists, not its contents — and avoids chasing non-fatal stat denials); file-read *data*
+    is allowed only on the system layer + interpreter + ``allow_read``. The workdir, /dev and
+    the user cache dir are read-write. Everything else — the game (wherever its many copies
+    live), sibling experiments, the shared temp dir — is absent. The agent's scratch is kept
+    in its workdir via ``TMPDIR`` (set by the orchestrator).
+
+    NOTE: codex and CPython run fine here; ``claude.exe`` (a Bun binary) crashes at the native
+    level under a deny-default seatbelt on macOS (no log, dtruss is SIP-blocked) — so claude
+    on macOS must run ``runtime=none``. claude is confined on the Linux/HPC hosts instead,
+    where an un-allowed path is *absent* (ENOENT) rather than *denied* (EPERM).
     """
-    allow = [os.path.realpath(workdir), *_python_prefixes()]
-    allow += [os.path.realpath(p) for p in allow_read]
-    forbid = [os.path.realpath(p) for p in forbid_read]
-    rules = ["(version 1)", "(allow default)"]
-    if forbid:
-        rules.append("(deny file-read* " + " ".join(f'(subpath "{p}")' for p in forbid) + ")")
-    rules.append("(allow file-read* " + " ".join(f'(subpath "{p}")' for p in allow) + ")")
-    if deny_egress:
-        # block external egress but keep loopback (the env server + a local LLM)
-        rules.append("(deny network-outbound)")
-        rules.append('(allow network-outbound (remote ip "localhost:*"))')
+    home = os.path.expanduser("~")
+    system_ro = ("/usr", "/bin", "/sbin", "/System", "/Library", "/private/var/db/dyld",
+                 "/private/etc", "/opt")
+    read_only = [*_python_prefixes(), *(d for d in system_ro if os.path.exists(d))]
+    read_write = [os.path.realpath(workdir), "/dev", os.path.join(home, "Library/Caches")]
+    read_write += [os.path.realpath(p) for p in allow_read]
+    rules = [
+        "(version 1)",
+        "(deny default)",
+        "(allow process*)",
+        "(allow sysctl-read)",
+        "(allow mach-lookup)",
+        "(allow file-read-metadata)",
+        '(allow file-read* (literal "/") ' + " ".join(_sbpl_target(p) for p in read_only) + ")",
+        "(allow file* " + " ".join(_sbpl_target(p) for p in read_write) + ")",
+    ]
+    if deny_egress:  # keep loopback (env server + local LLM), block external
+        rules.append('(allow network* (local ip "localhost:*") (remote ip "localhost:*"))')
+    else:
+        rules.append("(allow network*)")
     return ["sandbox-exec", "-p", "".join(rules), *argv]
 
 
@@ -190,9 +202,13 @@ def _bwrap(
     for system_dir in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"):
         if os.path.isdir(system_dir):
             cmd += ["--ro-bind", system_dir, system_dir]
-    for path in (*_python_prefixes(), *(os.path.realpath(p) for p in allow_read)):
+    for path in _python_prefixes():
         if os.path.isdir(path):
             cmd += ["--ro-bind", path, path]
+    for path in (os.path.realpath(p) for p in allow_read):
+        # --ro-bind-try: binds files (e.g. ~/.claude.json) and dirs, and skips silently
+        # if the path is absent (so an allowlist entry that doesn't exist here is harmless).
+        cmd += ["--ro-bind-try", path, path]
     cmd += ["--bind", wd, wd, "--chdir", wd]
     if deny_egress:
         # NOTE: --unshare-net also severs loopback; only safe when the env server +
@@ -217,6 +233,7 @@ def _apptainer(
     binary = "apptainer" if shutil.which("apptainer") else "singularity"
     cmd = [binary, "exec", "--containall", "--no-home", "--bind", f"{wd}:{wd}", "--pwd", wd]
     for path in (*_python_prefixes(), *(os.path.realpath(p) for p in allow_read)):
-        cmd += ["--bind", f"{path}:{path}"]
+        if os.path.exists(path):  # apptainer --bind errors on a missing source
+            cmd += ["--bind", f"{path}:{path}"]
     cmd += [image, *argv]
     return cmd
