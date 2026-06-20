@@ -156,8 +156,16 @@ def _seatbelt(
     where an un-allowed path is *absent* (ENOENT) rather than *denied* (EPERM).
     """
     home = os.path.expanduser("~")
-    system_ro = ("/usr", "/bin", "/sbin", "/System", "/Library", "/private/var/db/dyld",
-                 "/private/etc", "/opt")
+    system_ro = (
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/System",
+        "/Library",
+        "/private/var/db/dyld",
+        "/private/etc",
+        "/opt",
+    )
     read_only = [*_python_prefixes(), *(d for d in system_ro if os.path.exists(d))]
     read_write = [os.path.realpath(workdir), "/dev", os.path.join(home, "Library/Caches")]
     read_write += [os.path.realpath(p) for p in allow_read]
@@ -178,9 +186,7 @@ def _seatbelt(
     return ["sandbox-exec", "-p", "".join(rules), *argv]
 
 
-def _bwrap(
-    argv: Sequence[str], workdir: str, allow_read: Sequence[str], deny_egress: bool
-) -> Argv:
+def _bwrap(argv: Sequence[str], workdir: str, allow_read: Sequence[str], deny_egress: bool) -> Argv:
     """Linux: a mount namespace that contains ONLY the allowlist (deny-default).
 
     The games/repo are simply never bound, so they are absent from the agent's

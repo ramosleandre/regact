@@ -151,16 +151,24 @@ def test_task_style_wiring_hides_game_but_keeps_workdir(tmp_path: Path) -> None:
     read = "import sys; open(sys.argv[1]).read()"
 
     blocked = subprocess.run(
-        wrap_argv(SandboxRuntime.SEATBELT, [sys.executable, "-c", read, str(games / "g.py")],
-                  workdir=str(wd), allow_read=allow),
+        wrap_argv(
+            SandboxRuntime.SEATBELT,
+            [sys.executable, "-c", read, str(games / "g.py")],
+            workdir=str(wd),
+            allow_read=allow,
+        ),
         capture_output=True,
         text=True,
     )
     assert blocked.returncode != 0 and "PermissionError" in blocked.stderr  # game hidden
 
     ok = subprocess.run(
-        wrap_argv(SandboxRuntime.SEATBELT, [sys.executable, "-c", read, str(wd / "solution.py")],
-                  workdir=str(wd), allow_read=allow),
+        wrap_argv(
+            SandboxRuntime.SEATBELT,
+            [sys.executable, "-c", read, str(wd / "solution.py")],
+            workdir=str(wd),
+            allow_read=allow,
+        ),
         capture_output=True,
     )
     assert ok.returncode == 0  # the workdir (under experiments/) stays readable (R1)
