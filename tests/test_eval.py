@@ -10,13 +10,14 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from regact.config.schema import Lifecycle
-from regact.controllers.executor import ControllerExecutor
+from regact.controllers.executor import ControllerExecutor, _default_episode_metrics
 from regact.controllers.runner import run_controller
 from regact.env.lifecycle import MultiInstancePolicy
 from regact.env.renderer import RawRenderer
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.envclient.client import EnvClient
+from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory
 from regact.testing.fakes import FakeNativeEnv
 
@@ -133,6 +134,42 @@ def test_executor_catches_controller_exception(tmp_path: Path) -> None:
     )
     assert result.aggregate["n_errors"] == 1
     assert result.episodes[0].error_category is ErrorCategory.AGENT_SOLUTION
+
+
+def test_default_success_requires_positive_reward() -> None:
+    """Done alone is NOT success (lava death / game over); a positive terminal reward is."""
+
+    def success(reward: float, done: bool) -> bool:
+        obs = Obs(frame=None, reward=reward, is_done=done)
+        return bool(_default_episode_metrics(obs, steps=1)["success"])
+
+    assert success(1.0, True)  # reached the goal
+    assert not success(0.0, True)  # terminated without reward (lava / game over)
+    assert not success(1.0, False)  # rewarded but not terminated
+
+
+def test_executor_uses_injected_problem_metrics(tmp_path: Path) -> None:
+    """The problem's metric functions decide the score, not the generic default."""
+
+    def compute(final_obs: Obs, *, steps: int) -> dict[str, object]:
+        return {"levels_completed": 7, "steps": steps}
+
+    def aggregate(episodes: list[dict[str, object]]) -> dict[str, object]:
+        n = len(episodes)
+        return {"n_episodes": n, "mean_levels": sum(e["levels_completed"] for e in episodes) / n}
+
+    executor = ControllerExecutor(_client(), compute_metrics=compute, aggregate_metrics=aggregate)
+    result = executor.run(
+        task_name="g",
+        solution_path=_write_solution(tmp_path, _FORWARD_SOLUTION),
+        output_path=str(tmp_path / "results.json"),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        n_episodes=2,
+        max_moves=10,
+    )
+    assert result.aggregate["mean_levels"] == 7.0
+    assert result.aggregate["n_errors"] == 0
+    assert result.episodes[0].metrics == {"levels_completed": 7, "steps": 3}
 
 
 def test_executor_flags_missing_factory(tmp_path: Path) -> None:

@@ -130,7 +130,11 @@ class FinalizeControllerHook(Hook):
         deps = self._deps
         if not os.path.exists(deps.solution_path):
             return None  # nothing was ever written; nothing to finalize
-        executor = ControllerExecutor(deps.env_client)
+        executor = ControllerExecutor(
+            deps.env_client,
+            compute_metrics=deps.compute_episode_metrics,
+            aggregate_metrics=deps.aggregate_episode_metrics,
+        )
         result = executor.run(
             task_name=deps.experiment.task_name,
             solution_path=deps.solution_path,
@@ -159,7 +163,11 @@ class ControllerFeature(Feature):
         return _PROMPT_FRAGMENT
 
     def tools(self, deps: RunDeps) -> list[Tool]:
-        executor = ControllerExecutor(deps.env_client)
+        executor = ControllerExecutor(
+            deps.env_client,
+            compute_metrics=deps.compute_episode_metrics,
+            aggregate_metrics=deps.aggregate_episode_metrics,
+        )
         submit = SubmitSolution(
             deps.experiment,
             executor,

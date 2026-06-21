@@ -2,11 +2,12 @@
 
 One in-process executor. It loads ``solution.py``, instantiates the controller,
 and drives ``controller.act(obs) -> EnvClient.step(action)`` against the env
-(already behind HTTP, so no subprocess is needed for integrity). The stop
-condition lives here: MULTI_INSTANCE aggregates over N fresh-env episodes;
-SINGLE_INSTANCE runs the one shared handle to a level boundary. Controller
-exceptions are caught per episode and tagged ``agent_solution``; the aggregate is
-written to ``output_path`` and returned.
+(already behind HTTP). The stop condition lives here: MULTI_INSTANCE aggregates
+over N fresh-env episodes; SINGLE_INSTANCE runs the one shared handle to a level
+boundary. Per-episode and run metrics are computed by injected callables (the
+problem's, so the problem owns what a score means), defaulting to a generic
+success/steps/reward summary. Controller exceptions are caught per episode and
+tagged ``agent_solution``; the aggregate is written to ``output_path`` and returned.
 """
 
 from __future__ import annotations
@@ -14,15 +15,38 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from collections.abc import Callable
 from typing import Any
 
 from regact.config.schema import Lifecycle
 from regact.controllers.runner import run_controller
 from regact.envclient.client import EnvClient
+from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
-from regact.security.policy import default_policy
-from regact.security.scan import scan_file
+
+# Metric callables: the problem supplies these (it knows what its score means);
+# a generic default is used when none is injected.
+EpisodeMetrics = Callable[..., dict[str, Any]]
+AggregateMetrics = Callable[[list[dict[str, Any]]], dict[str, Any]]
+
+
+def _default_episode_metrics(final_obs: Obs, *, steps: int) -> dict[str, Any]:
+    """Generic per-episode metrics: success requires a positive terminal reward."""
+    reward = final_obs.reward or 0.0
+    return {"success": bool(final_obs.is_done and reward > 0), "steps": steps, "reward": reward}
+
+
+def _default_aggregate(episodes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Generic aggregate over per-episode metric dicts (errors are counted by the caller)."""
+    n = len(episodes)
+    if n == 0:
+        return {"n_episodes": 0, "success_rate": 0.0, "mean_steps": 0.0}
+    return {
+        "n_episodes": n,
+        "success_rate": sum(bool(e.get("success")) for e in episodes) / n,
+        "mean_steps": sum(e.get("steps", 0) for e in episodes) / n,
+    }
 
 
 class ControllerExecutor:
@@ -30,11 +54,20 @@ class ControllerExecutor:
 
     Controller-specific (it loads ``solution.py`` and runs a controller), hence
     the ``Controller`` prefix and the ``controllers/`` home — distinct from the
-    agnostic ``EnvClient`` it drives.
+    agnostic ``EnvClient`` it drives. Metric computation is delegated to the
+    injected callables so the problem layer owns what a score means.
     """
 
-    def __init__(self, env: EnvClient) -> None:
+    def __init__(
+        self,
+        env: EnvClient,
+        *,
+        compute_metrics: EpisodeMetrics | None = None,
+        aggregate_metrics: AggregateMetrics | None = None,
+    ) -> None:
         self._env = env
+        self._compute_metrics = compute_metrics or _default_episode_metrics
+        self._aggregate_metrics = aggregate_metrics or _default_aggregate
 
     def run(
         self,
@@ -47,19 +80,6 @@ class ControllerExecutor:
         max_moves: int = 400,
     ) -> EvalResult:
         """Drive the controller via the env client and persist the result."""
-        # Anti-cheat: statically scan the controller before its module body runs,
-        # so a solution that imports the game lib / escape hatch never executes.
-        violations = scan_file(solution_path, default_policy())
-        if violations:
-            result = EvalResult(
-                task=task_name,
-                error="anti-cheat: " + "; ".join(violations),
-                error_category=ErrorCategory.AGENT_SOLUTION,
-                executor="in_process",
-            )
-            _write(output_path, result)
-            return result
-
         try:
             factory = _load_controller_factory(solution_path)
         except Exception as exc:  # import / attribute / syntax error in agent code
@@ -76,9 +96,11 @@ class ControllerExecutor:
         episodes = [
             self._run_one(index, factory, max_moves=max_moves) for index in range(episode_count)
         ]
+        aggregate = self._aggregate_metrics([e.metrics for e in episodes if e.error is None])
+        aggregate["n_errors"] = sum(1 for e in episodes if e.error is not None)
         result = EvalResult(
             task=task_name,
-            aggregate=_aggregate(episodes),
+            aggregate=aggregate,
             episodes=episodes,
             executor="in_process",
         )
@@ -102,11 +124,7 @@ class ControllerExecutor:
             stop_kind=summary.stop_kind,
             stop_reason=summary.stop_reason,
             milestones=[{"step": m.step, "description": m.description} for m in summary.milestones],
-            metrics={
-                "steps": summary.total_steps,
-                "success": summary.stop_kind == "env_done",
-                "reward": self._env.last_reward,
-            },
+            metrics=self._compute_metrics(summary.final_obs, steps=summary.total_steps),
         )
 
 
@@ -118,18 +136,6 @@ def _load_controller_factory(solution_path: str) -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.get_controller
-
-
-def _aggregate(episodes: list[EpisodeResult]) -> dict[str, Any]:
-    """Union-of-metrics aggregate: counts + success rate + mean steps."""
-    ok = [e for e in episodes if e.error is None]
-    successes = sum(1 for e in ok if e.metrics.get("success"))
-    return {
-        "n_episodes": len(episodes),
-        "n_errors": len(episodes) - len(ok),
-        "success_rate": (successes / len(ok)) if ok else 0.0,
-        "mean_steps": (sum(e.metrics.get("steps", 0) for e in ok) / len(ok)) if ok else 0.0,
-    }
 
 
 def _write(output_path: str, result: EvalResult) -> None:

@@ -58,7 +58,11 @@ class _FakeProblem(BaseProblem):
         return {"success": final_obs.is_done, "steps": steps}
 
     def aggregate_episode_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"n_episodes": len(episodes)}
+        n = len(episodes) or 1
+        return {
+            "n_episodes": len(episodes),
+            "success_rate": sum(bool(e.get("success")) for e in episodes) / n,
+        }
 
     def build_prompt(self, task_name: str, *, info_mode: Any) -> str:
         return f"# Game: fake ({task_name})\nReach the goal."

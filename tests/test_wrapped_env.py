@@ -61,16 +61,20 @@ def test_record_frames() -> None:
     assert env.frame_trace[0] == [1, 0, 0, 0]
 
 
-def test_milestone_detector_drain() -> None:
+def test_milestone_detector_surfaces_in_obs() -> None:
+    """Each step's obs carries that step's milestones; nothing is left to drain."""
+
     def detector(e: WrappedEnv) -> list[str]:
         return ["goal reached"] if e.last_reward == 1.0 else []
 
     env = _wrap(milestone_detector=detector)
     env.reset()
-    for _ in range(3):
-        env.step(1)
-    assert env.drain_milestones() == ["goal reached"]
-    assert env.drain_milestones() == []  # cleared
+    obs = env.step(1)
+    assert obs.info["milestones"] == []  # not at the goal yet
+    env.step(1)
+    obs = env.step(1)
+    assert obs.info["milestones"] == ["goal reached"]  # surfaced on the step that reached it
+    assert env.drain_milestones() == []  # the step already drained it
 
 
 def test_unexpected_arity_raises() -> None:

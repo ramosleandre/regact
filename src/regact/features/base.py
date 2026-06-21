@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from regact.config.schema import Lifecycle
 from regact.envclient.client import EnvClient
@@ -64,6 +65,8 @@ class RunDeps:
     submissions_dir: str
     n_episodes: int = 1
     max_moves: int = 400
+    compute_episode_metrics: Callable[..., dict[str, Any]] | None = None
+    aggregate_episode_metrics: Callable[..., dict[str, Any]] | None = None
 
 
 class HookPhase(StrEnum):

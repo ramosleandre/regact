@@ -86,6 +86,7 @@ class WrappedEnv:
         self.last_obs = obs
         if self._milestone_detector is not None:
             self._pending_milestones.extend(self._milestone_detector(self))
+        obs.info["milestones"] = self.drain_milestones()
         if self._record_frames:
             self._capture_frame()
         return obs

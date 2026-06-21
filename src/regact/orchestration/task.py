@@ -116,6 +116,8 @@ async def run_task(
             submissions_dir=os.path.join(workdir, "submissions"),
             n_episodes=1,
             max_moves=config.limits.max_moves,
+            compute_episode_metrics=problem.compute_episode_metrics,
+            aggregate_episode_metrics=problem.aggregate_episode_metrics,
         )
         tools = [tool for feature in features for tool in feature.tools(deps)]
         hooks = [hook for feature in features for hook in feature.hooks(deps)]

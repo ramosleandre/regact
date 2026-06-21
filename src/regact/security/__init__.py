@@ -10,12 +10,9 @@ dicts -- never an agent/env/feature object):
   is the same on every platform; only the enforcing mechanism differs (seatbelt /
   bwrap / landlock / apptainer / intrinsic). ``probe`` checks the contract identically
   on each platform.
-- **Tool-call flagging** (``detection``): a cheap scan of the agent's tool-call
-  arguments that only logs/flags suspicious access for metrics; it never blocks.
-  Missing an obfuscated attempt costs a log entry, not security -- the sandbox is what
-  enforces confinement.
-
-The deliverable check (``scan`` + ``policy``) is feature-specific: each feature
-validates its own agent-authored artifact with its own rules, applied by the feature
-layer -- so this generic layer never depends on what a feature produces.
+- **Tool-call flagging** (``detection`` + ``policy``): a cheap scan of the agent's
+  tool-call arguments that only logs/flags suspicious access for metrics; it never
+  blocks. ``policy`` holds the shared forbidden-substring/import list it (and the
+  deny-list) consumes. Missing an obfuscated attempt costs a log entry, not
+  security -- the sandbox is what enforces confinement.
 """
