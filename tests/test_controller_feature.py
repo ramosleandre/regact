@@ -80,9 +80,13 @@ def test_controller_templates_lay_out_three_files() -> None:
 def test_controller_prompt_fragment_explains_contract() -> None:
     fragment = ControllerFeature().prompt_fragment(_ctx())
     assert fragment is not None
-    assert "act(obs)" in fragment
-    assert "SubmitSolution" in fragment
-    assert "ExitTask" in fragment
+    assert "act(obs)" in fragment  # the controller contract
+    assert "pure policy" in fragment
+    # The feature names its own tools (SubmitSolution/ExitTask); the generic control
+    # block carries the per-agent invocation (native vs `python framework/control.py`).
+    assert "SubmitSolution" in fragment and "ExitTask" in fragment
+    # The stub code lives in the workdir file, not pasted into the prompt.
+    assert "def get_controller" not in fragment
 
 
 def test_controller_tools_wired_with_run_deps(tmp_path: Path) -> None:

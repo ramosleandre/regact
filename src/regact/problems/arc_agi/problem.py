@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -136,19 +137,27 @@ def _milestone_detector(env: Any) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-# Prompt fragments (text reused from GameAgents, observation section adapted to
-# the normalized Obs the agent actually sees over HTTP).
+# Prompt fragments (observation section adapted to the normalized Obs the
+# agent actually sees over HTTP).
 # --------------------------------------------------------------------------- #
 _KEYBOARD_ACTIONS = (
     "Directional actions are integer ids (see `obs.available_actions`): typically "
-    "ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right. Return the id directly "
-    "from `act()` (e.g. `return ACTION4`)."
+    "ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right."
 )
 _CLICK_ACTIONS = (
-    "Click action: ACTION6 needs x,y coordinates (0-63). Return a dict "
+    "The click action ACTION6 takes x,y coordinates (0-63), passed as "
     '`{"action": 6, "data": {"x": 32, "y": 32}}` — or use `complex_action(x, y)` '
     "from `code_library/arc_agi_helper.py`."
 )
+_ACTION5 = (
+    "ACTION5 is a special action whose effect is game-specific (often an interact/"
+    "space-like action) — discover what it does by interaction."
+)
+_ACTION7 = (
+    "ACTION7 is a special action whose effect is game-specific (sometimes it undoes "
+    "the last move) — discover what it does by interaction."
+)
+_DIRECTIONAL_IDS = frozenset({1, 2, 3, 4})
 
 _HELPER = '''\
 """ARC-AGI helpers (import-free): action ids + the click-action builder.
@@ -181,12 +190,32 @@ def complex_action(x: int, y: int) -> dict:
 
 
 def _actions_for_tags(tags: tuple[str, ...]) -> str:
+    """Static (no live obs) action text from the game's metadata tags: directional
+    and/or click. ACTION5/7 cannot be known here (the metadata does not list them);
+    they are described from the live ``available_actions`` via :func:`_actions_for_ids`.
+    """
     tagset = set(tags)
     if tagset == {"click"}:
         return _CLICK_ACTIONS
     if tagset == {"keyboard"}:
         return _KEYBOARD_ACTIONS
     return _KEYBOARD_ACTIONS + "\n\n" + _CLICK_ACTIONS
+
+
+def _actions_for_ids(available: Iterable[int]) -> str:
+    """Action text for exactly the ids a game exposes — each block included only when
+    its action is present in ``available`` (the live ``obs.available_actions``)."""
+    ids = set(available)
+    blocks: list[str] = []
+    if ids & _DIRECTIONAL_IDS:
+        blocks.append(_KEYBOARD_ACTIONS)
+    if 5 in ids:
+        blocks.append(_ACTION5)
+    if 6 in ids:
+        blocks.append(_CLICK_ACTIONS)
+    if 7 in ids:
+        blocks.append(_ACTION7)
+    return "\n\n".join(blocks)
 
 
 class ArcAgiProblem(BaseProblem):

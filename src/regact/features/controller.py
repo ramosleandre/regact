@@ -12,6 +12,7 @@ workspace base.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from regact.controllers.executor import ControllerExecutor
 from regact.features.base import (
@@ -81,35 +82,9 @@ def get_controller() -> Controller:
     return Controller()
 '''
 
-_PROMPT_FRAGMENT = """\
-## Your deliverable: a controller
-
-A controller is a pure policy: `act(obs) -> action`. Instantiation is the
-per-episode reset (state lives on `self`); it never receives or imports the env.
-
-Edit `solution.py`:
-
-```python
-from code_library.base_controller import BaseController
-
-class Controller(BaseController):
-    def act(self, obs):
-        return ...  # an action from obs.available_actions
-
-def get_controller() -> Controller:
-    return Controller()
-```
-
-`code_library/base_controller.py` holds the contract; `example_controller.py`
-shows a trivial policy. When ready, call **SubmitSolution** to score it, iterate,
-and call **ExitTask** when you are done.
-
-### Rules
-
-Win by interacting with the environment through `make_env()` only. Do not import
-the game library, do not read files outside your working directory, and do not use
-`inspect`/`importlib` or hardcode answers — submissions that do are rejected.
-"""
+# The controller feature's prompt fragment lives in markdown next to this module
+# (like the system + game prompts), so prose is edited without touching code.
+_PROMPT_MD = Path(__file__).parent / "prompts" / "controller.md"
 
 
 class FinalizeControllerHook(Hook):
@@ -160,7 +135,7 @@ class ControllerFeature(Feature):
         ]
 
     def prompt_fragment(self, ctx: FeatureContext) -> str | None:
-        return _PROMPT_FRAGMENT
+        return _PROMPT_MD.read_text(encoding="utf-8")
 
     def tools(self, deps: RunDeps) -> list[Tool]:
         executor = ControllerExecutor(

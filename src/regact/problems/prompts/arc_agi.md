@@ -10,7 +10,7 @@ per game and must be discovered through interaction, not assumed.
 `make_env()` gives you a client with a gym-like interface. Each `obs` is:
 
 - `obs.frame` — the current frame(s): a list of 64x64 grids of integer cells
-  (0-15). The last grid is the current state.
+  (0-15). The last grid is the current state (yes you can received mutliple frame after an action if something moved during your action).
 - `obs.available_actions` — the integer action ids currently valid.
 - `obs.is_done` / `obs.reward` — episode end / reward (1.0 on WIN).
 - `obs.info` — readable metadata: `obs.info["state"]`
@@ -19,5 +19,4 @@ per game and must be discovered through interaction, not assumed.
 
 ## Goal
 
-Complete as many levels as possible (a WIN completes all levels). Build and consult
-a model of the game's dynamics in your `code_library/` rather than guessing.
+Complete as many levels as possible (a WIN completes all levels).

@@ -154,7 +154,15 @@ async def run_task(
             model=config.agent.model,
             base_url=config.agent.base_url,
             api_key=config.agent.api_key,
-            system_prompt=builder.build_system_prompt(),
+            system_prompt=builder.build_system_prompt(
+                problem,
+                task_name,
+                features,
+                lifecycle=config.problem.lifecycle,
+                info_mode=config.problem.info_mode,
+                control_actions=agent.capabilities().control_actions,
+                tool_names=[tool.name for tool in tools],
+            ),
             tools=tools,
             # PYTHONPATH: the agent's subprocess scripts (cwd=workdir) must import regact.
             # TMPDIR: keep the agent's scratch inside its (sandbox-allowed) workdir, so the
@@ -162,9 +170,8 @@ async def run_task(
             env={"PYTHONPATH": src_dir, "TMPDIR": agent_tmp},
             runtime_wrap=runtime_wrap,
         )
-        first_message = builder.build_first_message(
-            problem, task_name, features, info_mode=config.problem.info_mode
-        )
+        # 2b will pass the rendered first observation here; for now a generic start.
+        first_message = builder.build_first_message()
 
         with (
             TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,

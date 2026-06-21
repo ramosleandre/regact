@@ -148,15 +148,22 @@ class _StubProblem:
         return f"# Game: grid\n\nYou are playing grid task {task_name}."
 
 
-def test_prompt_builder_system_and_first_message() -> None:
+def test_prompt_builder_system_carries_everything_static() -> None:
+    """The system prompt holds role + game + feature + control + lifecycle (all static)."""
     builder = PromptBuilder()
-    system = builder.build_system_prompt()
-    assert "make_env" in system  # agnostic role: workdir + env client, no controller contract
-
-    msg = builder.build_first_message(_StubProblem(), "lvl1", [_StubFeature()])  # type: ignore[arg-type]
-    assert "grid" in msg
-    assert "lvl1" in msg
-    assert "Stub feature" in msg  # feature fragment layered in
+    system = builder.build_system_prompt(
+        _StubProblem(),  # type: ignore[arg-type]
+        "lvl1",
+        [_StubFeature()],
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        control_actions="client_cli",
+        tool_names=["SubmitSolution", "ExitTask"],
+    )
+    assert "make_env" in system  # role
+    assert "grid" in system and "lvl1" in system  # game section
+    assert "Stub feature" in system  # feature fragment layered in
+    assert "fresh" in system.lower()  # multi-instance lifecycle block (enum-keyed)
+    assert "framework/control.py SubmitSolution" in system  # client_cli control block
 
 
 def test_prompt_builder_drops_empty_feature_fragments() -> None:
@@ -164,6 +171,18 @@ def test_prompt_builder_drops_empty_feature_fragments() -> None:
         def prompt_fragment(self, ctx: FeatureContext) -> str | None:
             return None
 
-    msg = PromptBuilder().build_first_message(_StubProblem(), "lvl1", [_Silent()])  # type: ignore[arg-type]
-    assert "Stub feature" not in msg
-    assert "grid" in msg
+    system = PromptBuilder().build_system_prompt(
+        _StubProblem(),  # type: ignore[arg-type]
+        "lvl1",
+        [_Silent()],
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+    )
+    assert "Stub feature" not in system
+    assert "grid" in system
+
+
+def test_first_message_is_the_observation_or_a_start() -> None:
+    builder = PromptBuilder()
+    assert "make_env" in builder.build_first_message()  # generic start
+    framed = builder.build_first_message("OBS_GRID_HERE")
+    assert "OBS_GRID_HERE" in framed and "first observation" in framed.lower()

@@ -88,6 +88,25 @@ def test_build_prompt_informative_vs_minimal() -> None:
     assert "## Actions" not in minimal
 
 
+def test_actions_for_ids_includes_only_available_actions() -> None:
+    """ACTION5/6/7 each appear only when present in the live available_actions."""
+    from regact.problems.arc_agi.problem import _actions_for_ids
+
+    directional_only = _actions_for_ids([1, 2, 3, 4])
+    assert "ACTION1=up" in directional_only
+    assert "ACTION5" not in directional_only and "ACTION6" not in directional_only
+    assert "ACTION7" not in directional_only
+
+    everything = _actions_for_ids([1, 5, 6, 7])
+    assert "ACTION5" in everything and "click action ACTION6" in everything
+    assert "ACTION7" in everything
+
+    # a game with only the special undo action, no directional/click blocks
+    just_seven = _actions_for_ids([7])
+    assert "ACTION7" in just_seven
+    assert "Directional actions" not in just_seven and "click action" not in just_seven
+
+
 def test_obs_renderer_rejects_non_raw_mode() -> None:
     assert isinstance(_problem().obs_renderer("ls20", mode=ObsMode.RAW), ArcRenderer)
 
