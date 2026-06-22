@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 
 from regact.env.session import EnvSession
 from regact.env.wrapped_env import WrappedEnv
+from regact.envclient.obs import Obs
 from regact.tools.base import Tool, ToolContext
 
 
@@ -47,6 +48,11 @@ class EnvServer:
     def bind_control(self, game_id: str, tools: list[Tool], *, cwd: str) -> None:
         """Bind the framework tools a CLI agent reaches via ``/control``. Idempotent."""
         self._control[game_id] = ({tool.name: tool for tool in tools}, cwd)
+
+    def first_obs(self, game_id: str) -> Obs:
+        """The game's first observation (in-process; the loop calls this once to build
+        the prompt, before the agent starts, so there is no concurrent access)."""
+        return self._session(game_id).first_obs()
 
     def _session(self, game_id: str) -> EnvSession:
         try:

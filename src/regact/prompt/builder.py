@@ -60,7 +60,7 @@ class PromptBuilder:
         return "\n\n".join(s.strip() for s in sections if s and s.strip())
 
     def build_first_message(self, rendered_obs: str | None = None) -> str:
-        """The first user message: the dynamic first observation (or a generic start)."""
+        """The first user message: an optional pre-rendered observation, else a generic start."""
         if rendered_obs:
             return (
                 "This is the first observation of the game. Explore it, build a policy, "
@@ -68,8 +68,8 @@ class PromptBuilder:
                 f"{rendered_obs}"
             )
         return (
-            "Begin: probe the environment with `make_env()`, then write, test, and submit "
-            "your controller. Keep going until you reach the end."
+            "Begin: explore the environment, then write, test, and submit your controller. "
+            "Keep going until you win."
         )
 
 

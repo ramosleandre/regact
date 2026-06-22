@@ -138,13 +138,22 @@ def test_codex_parses_message_reasoning_command_and_completion() -> None:
     assert agent._parse_events(
         {"type": "item.completed", "item": {"type": "reasoning", "text": "hmm"}}
     ) == [ThinkingDelta("hmm")]
-    [tool] = agent._parse_events(
+    # a command: clean ToolCall on start, ToolResult (paired by id) on completion
+    [call] = agent._parse_events(
         {
-            "type": "item.completed",
+            "type": "item.started",
             "item": {"type": "command_execution", "command": "ls", "id": "c1"},
         }
     )
-    assert isinstance(tool, ToolCall) and tool.name == "ls"
+    assert isinstance(call, ToolCall) and call.name == "shell" and call.input == {"command": "ls"}
+    done = {"type": "command_execution", "id": "c1", "aggregated_output": "x", "exit_code": 0}
+    [res] = agent._parse_events({"type": "item.completed", "item": done})
+    assert isinstance(res, ToolResult) and res.id == "c1" and res.output == "x"
+    assert not res.is_error
+    # an intermediate update of the same item is dropped (no duplicate ToolCall)
+    assert agent._parse_events(
+        {"type": "item.updated", "item": {"type": "command_execution", "id": "c1"}}
+    ) == []
     assert agent._parse_events({"type": "turn.completed", "item": {"text": "fin"}}) == [
         TurnComplete("fin")
     ]
@@ -156,3 +165,15 @@ def test_codex_command_pipes_prompt_on_stdin() -> None:
     argv, stdin = agent._command("solve it")
     assert stdin == "solve it"  # codex reads the prompt from stdin
     assert "exec" in argv and "--json" in argv and "--cd" in argv
+    assert os.path.isabs(argv[argv.index("--cd") + 1])  # absolute, else codex re-nests it
+
+
+def test_codex_resume_puts_exec_flags_before_the_subcommand() -> None:
+    """--cd/--json are exec options; `exec resume` rejects them, so they must precede it."""
+    agent = CodexAgent()
+    agent._cwd = "/tmp/wd"
+    agent._session_id = "th-1"
+    argv, _ = agent._command("again")
+    assert argv.index("--cd") < argv.index("resume")
+    assert argv.index("--json") < argv.index("resume")
+    assert argv[argv.index("resume") + 1] == "th-1"

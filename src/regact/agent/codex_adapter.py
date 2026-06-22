@@ -18,7 +18,14 @@ from typing import Any
 
 from regact.agent.capabilities import Capabilities
 from regact.agent.cli_agent import _CliAgent
-from regact.agent.events import AgentEvent, TextDelta, ThinkingDelta, ToolCall, TurnComplete
+from regact.agent.events import (
+    AgentEvent,
+    TextDelta,
+    ThinkingDelta,
+    ToolCall,
+    ToolResult,
+    TurnComplete,
+)
 
 
 class CodexAgent(_CliAgent):
@@ -85,10 +92,9 @@ class CodexAgent(_CliAgent):
             argv += ["--ask-for-approval", str(self._args.get("ask_for_approval", "never"))]
         else:
             argv += ["--dangerously-bypass-approvals-and-sandbox"]
-        argv += ["exec"]
+        argv += ["exec", "--cd", os.path.abspath(self._cwd) if self._cwd else ".", "--json"]
         if self._session_id is not None:
             argv += ["resume", self._session_id]
-        argv += ["--cd", self._cwd or ".", "--json"]
         return argv, message  # codex reads the prompt from stdin
 
     def _track_session(self, obj: dict[str, Any]) -> None:
@@ -100,6 +106,13 @@ class CodexAgent(_CliAgent):
             self._session_id = thread_id
 
     def _parse_events(self, obj: dict[str, Any]) -> list[AgentEvent]:
+        """Map one codex ndjson object to events.
+
+        Codex streams an item lifecycle: ``item.started`` (a command begins) then
+        ``item.completed`` (it finished, with output). We emit a clean ``ToolCall`` on
+        start and a ``ToolResult`` on completion (paired by id), so the transcript reads
+        like the native-tool agents instead of duplicating the raw item dict.
+        """
         kind = str(obj.get("type", ""))
         raw = obj.get("item")
         item: dict[str, Any] = raw if isinstance(raw, dict) else obj
@@ -107,14 +120,22 @@ class CodexAgent(_CliAgent):
 
         if "reasoning" in kind or itype == "reasoning":
             return [ThinkingDelta(_text_of(item.get("text") or item.get("reasoning")))]
-        if itype in ("command_execution", "tool_call", "function_call"):
-            return [
-                ToolCall(
-                    id=str(item.get("id", "")),
-                    name=str(item.get("name") or item.get("command") or "command"),
-                    input=item,
-                )
-            ]
+
+        if itype in ("command_execution", "tool_call", "function_call", "mcp_tool_call"):
+            tool_id = str(item.get("id", ""))
+            if kind.endswith("item.completed") or item.get("status") == "completed":
+                exit_code = item.get("exit_code")
+                return [
+                    ToolResult(
+                        id=tool_id,
+                        output=_text_of(item.get("aggregated_output") or item.get("output")),
+                        is_error=isinstance(exit_code, int) and exit_code != 0,
+                    )
+                ]
+            if kind.endswith("item.started"):
+                return [ToolCall(id=tool_id, name=_tool_name(item), input=_tool_input(item))]
+            return []  # item.updated and other intermediate frames
+
         if kind.endswith("turn.completed") or kind.endswith("turn_complete"):
             return [TurnComplete(final_text=_text_of(item.get("text")))]
         message = item.get("message")
@@ -122,6 +143,21 @@ class CodexAgent(_CliAgent):
         if text:
             return [TextDelta(_text_of(text))]
         return []
+
+
+def _tool_name(item: dict[str, Any]) -> str:
+    """A short tool label: ``shell`` for a command, else the tool/function name."""
+    if item.get("command") is not None:
+        return "shell"
+    return str(item.get("name") or item.get("tool") or item.get("type") or "tool")
+
+
+def _tool_input(item: dict[str, Any]) -> dict[str, Any]:
+    """The tool's arguments only — never the noisy lifecycle/output fields."""
+    if item.get("command") is not None:
+        return {"command": item["command"]}
+    drop = {"id", "type", "status", "aggregated_output", "exit_code"}
+    return {k: v for k, v in item.items() if k not in drop}
 
 
 def _text_of(value: Any) -> str:

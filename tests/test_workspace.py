@@ -183,6 +183,7 @@ def test_prompt_builder_drops_empty_feature_fragments() -> None:
 
 def test_first_message_is_the_observation_or_a_start() -> None:
     builder = PromptBuilder()
-    assert "make_env" in builder.build_first_message()  # generic start
+    # generic start is lifecycle-agnostic (no make_env: single-instance uses env.current)
+    assert "submit" in builder.build_first_message().lower()
     framed = builder.build_first_message("OBS_GRID_HERE")
     assert "OBS_GRID_HERE" in framed and "first observation" in framed.lower()

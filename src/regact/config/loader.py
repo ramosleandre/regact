@@ -54,7 +54,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         parallel_workers=int(data.get("parallel_workers", 1)),
         limits=LimitsConfig(**dict(data.get("limits") or {})),
         security=SecurityConfig(
-            runtime=SandboxRuntime(sec.get("runtime", SandboxRuntime.AUTO)),
+            sandbox=SandboxRuntime(sec.get("sandbox", SandboxRuntime.AUTO)),
             deny_egress=bool(sec.get("deny_egress", False)),
             runtime_opts=dict(sec.get("runtime_opts") or {}),
         ),

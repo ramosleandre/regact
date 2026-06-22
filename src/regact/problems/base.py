@@ -63,6 +63,14 @@ class BaseProblem(ABC):
         """
         return None
 
+    def render_obs_text(self, obs: Obs) -> str | None:
+        """A compact, human-readable text rendering of one observation, or ``None``.
+
+        Game-specific (the game knows its frame). Distinct from ``render_frame`` (RGB,
+        for video).
+        """
+        return None
+
     @abstractmethod
     def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
         """Per-episode metrics from generic episode data only.

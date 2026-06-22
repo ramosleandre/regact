@@ -62,11 +62,11 @@ viz:  ## Launch the experiment visualizer: make viz EXP=experiments/<run> [PORT=
 
 .PHONY: run-exp
 run-exp:  ## Research run (Hydra overrides via ARGS=...)
-	$(PYTHON) -m $(PKG).run_exp $(ARGS)
+	PYTHONPATH=src $(PYTHON) -m $(PKG).run_exp $(ARGS)
 
 .PHONY: run-kaggle
 run-kaggle:  ## Competition run (flags via ARGS=...)
-	$(PYTHON) -m $(PKG).run_kaggle $(ARGS)
+	PYTHONPATH=src $(PYTHON) -m $(PKG).run_kaggle $(ARGS)
 
 .PHONY: debug
 debug:  ## Run a per-block debug smoke script: make debug D=block2_env [ARGS=...]

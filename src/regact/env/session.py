@@ -57,6 +57,12 @@ class EnvSession:
         env = self._live if self._live is not None else self.make()
         return env.reset(seed=seed)
 
+    def first_obs(self) -> Obs:
+        """The first observation: the made env's own initial obs if it has one (no
+        action), else a reset — so a persistent game is not stepped just to be shown."""
+        env = self.make()
+        return env.last_obs if env.last_obs is not None else env.reset()
+
     def assert_can_make(self) -> None:
         """Raise if making this game again would violate the one-make rule."""
         self._lifecycle.assert_can_make(self.key)

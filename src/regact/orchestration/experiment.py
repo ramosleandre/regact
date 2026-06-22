@@ -21,6 +21,7 @@ async def run_experiment(config: RunConfig, *, output_root: str | None = None) -
     problem = build_problem(config.problem.name, config.problem.kwargs)
     task_names = config.task_names or problem.get_task_names()
     root = output_root or os.path.join(config.output_root, config.experiment_name or "run")
+    root = os.path.abspath(root)
 
     async def unit(task_name: str) -> str:
         return await run_task(config, problem, task_name, output_dir=os.path.join(root, task_name))

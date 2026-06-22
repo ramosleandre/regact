@@ -80,31 +80,45 @@ def test_build_prompt_informative_vs_minimal() -> None:
     problem = _problem()
     info = problem.build_prompt("ls20", info_mode=InfoMode.INFORMATIVE)
     assert "ARC-AGI-3" in info
-    assert "obs.available_actions" in info
-    assert "## Actions" in info  # describes actions
+    assert "obs.available_actions" in info  # the Observation section names the field
+    assert "Game id" in info and "Levels to win" in info  # game-specific metadata
+    # actions are described live in the first observation (render_obs_text), not statically
+    assert "## Actions" not in info
 
     minimal = problem.build_prompt("ls20", info_mode=InfoMode.MINIMAL)
     assert "Discover the rules" in minimal
-    assert "## Actions" not in minimal
 
 
 def test_actions_for_ids_includes_only_available_actions() -> None:
-    """ACTION5/6/7 each appear only when present in the live available_actions."""
+    """Each action block appears only when its id is in the live available_actions."""
     from regact.problems.arc_agi.problem import _actions_for_ids
 
-    directional_only = _actions_for_ids([1, 2, 3, 4])
-    assert "ACTION1=up" in directional_only
-    assert "ACTION5" not in directional_only and "ACTION6" not in directional_only
-    assert "ACTION7" not in directional_only
-
+    assert "Directional actions" in _actions_for_ids([1, 2, 3, 4])
+    assert "ACTION5" not in _actions_for_ids([1, 2, 3, 4])
     everything = _actions_for_ids([1, 5, 6, 7])
-    assert "ACTION5" in everything and "click action ACTION6" in everything
-    assert "ACTION7" in everything
-
-    # a game with only the special undo action, no directional/click blocks
+    assert "ACTION5" in everything and "ACTION7" in everything
+    assert "click action ACTION6" in everything
     just_seven = _actions_for_ids([7])
-    assert "ACTION7" in just_seven
-    assert "Directional actions" not in just_seven and "click action" not in just_seven
+    assert "ACTION7" in just_seven and "Directional actions" not in just_seven
+
+
+def test_render_obs_text_compact_grid() -> None:
+    """The text obs render is a header + hex grid + the live action descriptions."""
+    from regact.envclient.obs import Obs
+
+    obs = Obs(
+        frame=[[[0, 1], [15, 2]]],  # a stack of one 2x2 grid
+        available_actions=[1, 6],
+        info={"state": "NOT_FINISHED", "levels_completed": 1, "win_levels": 8},
+    )
+    text = _problem().render_obs_text(obs)
+    assert text is not None
+    assert "available_actions=[1, 6]" in text
+    assert "levels_completed=1/8" in text
+    assert "01" in text and "f2" in text  # 15 -> "f", per-cell hex
+    # actions loaded from the available ids (1 and 6, not 5/7)
+    assert "Directional actions" in text and "click action ACTION6" in text
+    assert "ACTION5" not in text and "ACTION7" not in text
 
 
 def test_obs_renderer_rejects_non_raw_mode() -> None:

@@ -139,7 +139,7 @@ async def run_task(
         # loaded agent's are granted. In-process agents ignore this; CLI agents run wrapped.
         src_dir = _regact_src_dir()
         runtime_wrap = make_wrapper(
-            config.security.runtime,
+            config.security.sandbox,
             workdir=workdir,
             allow_read=[src_dir, *agent.host_read_paths()],
             deny_egress=config.security.deny_egress,
@@ -170,8 +170,8 @@ async def run_task(
             env={"PYTHONPATH": src_dir, "TMPDIR": agent_tmp},
             runtime_wrap=runtime_wrap,
         )
-        # 2b will pass the rendered first observation here; for now a generic start.
-        first_message = builder.build_first_message()
+        first_obs = server.first_obs(task_name)
+        first_message = builder.build_first_message(problem.render_obs_text(first_obs))
 
         with (
             TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,

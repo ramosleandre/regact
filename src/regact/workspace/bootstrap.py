@@ -42,8 +42,9 @@ def make_env(record_frames: bool = False):
 _MAKE_ENV_SINGLE = '''\
 """Connect to the environment server (one shared handle for the whole run).
 
-The game can be made only once. Call ``env.reset()`` for a level reset; the
-action count carries across resets. You never import the game.
+The game is created once and is already started, so this returns the same handle
+without resetting. Read the current state with ``env.current()``; ``env.reset()``
+resets the current level and counts as an action. You never import the game.
 """
 
 from regact.envclient.client import EnvClient
@@ -57,7 +58,6 @@ def make_env(record_frames: bool = False):
     global _HANDLE
     if _HANDLE is None:
         _HANDLE = EnvClient.connect(_BASE_URL, _GAME_ID)
-        _HANDLE.reset()
     return _HANDLE
 '''
 

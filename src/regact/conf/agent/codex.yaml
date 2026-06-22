@@ -1,6 +1,6 @@
 # Codex CLI.
 name: codex
-model: null            # e.g. "gpt-5.5"
+model: gpt-5.5            # e.g. "gpt-5.5"
 args:
   reasoning_effort: medium   # low | medium | high
   # sandbox: workspace-write # set to use codex's native sandbox (may block localhost)

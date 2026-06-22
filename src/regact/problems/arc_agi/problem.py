@@ -50,7 +50,11 @@ class _ArcGymShim:
         self._env = arc_env
         self._GameAction = GameAction
         self._GameState = GameState
-        self._last: Any = None
+        self._last: Any = getattr(arc_env, "_last_response", None)
+
+    def current(self) -> tuple[Any, dict[str, Any]] | None:
+        """The observation without taking an action (the frame from creation/last step)."""
+        return None if self._last is None else (self._last, self._info(self._last))
 
     def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
         obs = self._env.reset()
@@ -136,10 +140,8 @@ def _milestone_detector(env: Any) -> list[str]:
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Prompt fragments (observation section adapted to the normalized Obs the
-# agent actually sees over HTTP).
-# --------------------------------------------------------------------------- #
+# Per-action description blocks, assembled from the ids a game actually exposes (see
+# _actions_for_ids); ACTION5/7 are special and not always present.
 _KEYBOARD_ACTIONS = (
     "Directional actions are integer ids (see `obs.available_actions`): typically "
     "ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right."
@@ -158,6 +160,22 @@ _ACTION7 = (
     "the last move) — discover what it does by interaction."
 )
 _DIRECTIONAL_IDS = frozenset({1, 2, 3, 4})
+
+
+def _actions_for_ids(available: Iterable[int]) -> str:
+    """Action text for exactly the ids a game exposes — each block included only when its
+    action is present in ``available`` (the live ``obs.available_actions``)."""
+    ids = set(available)
+    blocks: list[str] = []
+    if ids & _DIRECTIONAL_IDS:
+        blocks.append(_KEYBOARD_ACTIONS)
+    if 5 in ids:
+        blocks.append(_ACTION5)
+    if 6 in ids:
+        blocks.append(_CLICK_ACTIONS)
+    if 7 in ids:
+        blocks.append(_ACTION7)
+    return "\n\n".join(blocks)
 
 _HELPER = '''\
 """ARC-AGI helpers (import-free): action ids + the click-action builder.
@@ -189,33 +207,18 @@ def complex_action(x: int, y: int) -> dict:
 '''
 
 
-def _actions_for_tags(tags: tuple[str, ...]) -> str:
-    """Static (no live obs) action text from the game's metadata tags: directional
-    and/or click. ACTION5/7 cannot be known here (the metadata does not list them);
-    they are described from the live ``available_actions`` via :func:`_actions_for_ids`.
-    """
-    tagset = set(tags)
-    if tagset == {"click"}:
-        return _CLICK_ACTIONS
-    if tagset == {"keyboard"}:
-        return _KEYBOARD_ACTIONS
-    return _KEYBOARD_ACTIONS + "\n\n" + _CLICK_ACTIONS
+_HEX = "0123456789abcdef"
 
 
-def _actions_for_ids(available: Iterable[int]) -> str:
-    """Action text for exactly the ids a game exposes — each block included only when
-    its action is present in ``available`` (the live ``obs.available_actions``)."""
-    ids = set(available)
-    blocks: list[str] = []
-    if ids & _DIRECTIONAL_IDS:
-        blocks.append(_KEYBOARD_ACTIONS)
-    if 5 in ids:
-        blocks.append(_ACTION5)
-    if 6 in ids:
-        blocks.append(_CLICK_ACTIONS)
-    if 7 in ids:
-        blocks.append(_ACTION7)
-    return "\n\n".join(blocks)
+def _current_grid(frame: Any) -> list[list[int]] | None:
+    """The current 64x64 grid from an ``Obs.frame``: the last grid if a stack is given."""
+    if not isinstance(frame, list) or not frame:
+        return None
+    if isinstance(frame[0], list) and frame[0] and isinstance(frame[0][0], list):
+        frame = frame[-1]  # a stack of grids -> the current (last) one
+    if isinstance(frame, list) and frame and isinstance(frame[0], list):
+        return frame
+    return None
 
 
 class ArcAgiProblem(BaseProblem):
@@ -285,6 +288,26 @@ class ArcAgiProblem(BaseProblem):
     def helper_templates(self, task_name: str) -> list[TemplateFile]:
         return [TemplateFile("code_library/arc_agi_helper.py", _HELPER)]
 
+    def render_obs_text(self, obs: Obs) -> str | None:
+        """A compact text view of the current frame: a header (state, levels, available
+        actions) over the 64x64 grid rendered one hex char per cell (0-f)."""
+        grid = _current_grid(obs.frame)
+        if grid is None:
+            return None
+        info = obs.info or {}
+        header = (
+            f"state={info.get('state', '?')}  "
+            f"levels_completed={info.get('levels_completed', 0)}/{info.get('win_levels', '?')}  "
+            f"available_actions={obs.available_actions}"
+        )
+        rows = [
+            "".join(_HEX[c] if isinstance(c, int) and 0 <= c < 16 else "?" for c in row)
+            for row in grid
+        ]
+        body = f"{header}\n\n" + "\n".join(rows)
+        actions = _actions_for_ids(obs.available_actions)
+        return f"{body}\n\nActions available now:\n\n{actions}" if actions else body
+
     def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
         info = final_obs.info or {}
         return {
@@ -320,7 +343,8 @@ class ArcAgiProblem(BaseProblem):
         if task.baseline_actions:
             total = sum(task.baseline_actions)
             parts.append(f"**Human baseline**: {total} actions total.")
-        parts.append("## Actions\n\n" + _actions_for_tags(task.tags))
+        # The actions are described live in the first observation (render_obs_text), from
+        # the real available_actions, so they are not duplicated statically here.
         return "\n\n".join(parts)
 
     def config_kwargs(self) -> dict[str, Any]:

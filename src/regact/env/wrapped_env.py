@@ -43,6 +43,21 @@ class WrappedEnv:
         self.last_info: dict[str, Any] | None = None
         self.frame_trace: list[Any] = []
         self._pending_milestones: list[str] = []
+        self._capture_initial()
+
+    def _capture_initial(self) -> None:
+        """Capture the env's initial observation if it exposes one before any action.
+
+        Some envs (e.g. ARC) have a playable frame at creation; gym envs do not, and
+        ``last_obs`` stays ``None`` until ``reset``.
+        """
+        peek = getattr(self._native, "current", None)
+        result = peek() if callable(peek) else None
+        if result is None:
+            return
+        native_obs, info = result
+        self.last_info = info
+        self.last_obs = self.prev_obs = self._render(native_obs, info, reward=None, done=False)
 
     def reset(self, *, seed: int | None = None) -> Obs:
         result = self._native.reset(seed=seed) if seed is not None else self._native.reset()
