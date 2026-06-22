@@ -72,6 +72,7 @@ class GameView:
     state: dict[str, Any]
     turns: list[TurnView]
     submissions: list[SubmissionView]
+    config: dict[str, Any]  # the resolved run config (agent, problem, limits, security…)
 
 
 @dataclass
@@ -97,7 +98,8 @@ def load_game(experiment_dir: str, game: str) -> GameView:
     state = _load_json(base / "logs" / "experiment_state.json") or {}
     turns = _group_turns(_load_events(base / "logs" / "transcript.jsonl"))
     submissions = _load_submissions(base / "workdir" / "submissions")
-    return GameView(name=game, state=state, turns=turns, submissions=submissions)
+    config = _load_json(base / "config.json") or {}
+    return GameView(name=game, state=state, turns=turns, submissions=submissions, config=config)
 
 
 def list_artifacts(experiment_dir: str, game: str) -> list[ArtifactFile]:

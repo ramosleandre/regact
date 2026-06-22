@@ -29,6 +29,7 @@ class ExperimentState:
     agent_session_id: str | None = None  # locates the native transcript dir
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
+    exit_reason: str | None = None  # set at teardown; None while the run is still going
     cheat_attempts: int = 0  # tool calls flagged as reaching for forbidden paths/modules
     win_levels: int | None = None  # total levels to win (from the game's first observation)
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far

@@ -12,6 +12,8 @@ Scheduler.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import os
 
 from regact.agent.base import CodeAgent, build_agent
@@ -95,6 +97,10 @@ async def run_task(
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
+    # Persist the resolved run config so the viewer shows how the run was launched
+    # (StrEnums serialize to their value; default=str covers anything else).
+    with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
+        json.dump(dataclasses.asdict(config), handle, indent=2, default=str)
 
     server = _build_server(config, problem, task_name)
     in_process = config.agent.name is AgentName.SCRIPTED

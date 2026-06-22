@@ -63,6 +63,8 @@ class _LoopContext:
     logger: RunLogger
     cwd: str
     policy: SecurityPolicy  # for flagging (not blocking) suspicious tool calls
+    state_path: str = ""  # where to persist ExperimentState (saved live, per event)
+    start: float = 0.0  # time.monotonic() at the run's start, for the live duration
 
 
 @dataclass
@@ -90,6 +92,7 @@ async def run_session(
     stop: StopSignal | None = None,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
+    start = time.monotonic()
     ctx = _LoopContext(
         agent=agent,
         experiment=experiment,
@@ -98,6 +101,8 @@ async def run_session(
         logger=logger,
         cwd=cwd,
         policy=default_policy(),
+        state_path=state_path,
+        start=start,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -106,7 +111,6 @@ async def run_session(
 
     message = first_message
     turns = 0
-    start = time.monotonic()
 
     while True:
         reason = _decide_stop(
@@ -120,8 +124,6 @@ async def run_session(
             break
 
         outcome = await _run_turn(message, ctx)
-        experiment.duration_s = round(time.monotonic() - start, 1)
-        experiment.save(state_path)
 
         if outcome.crashed:
             experiment.last_error_category = ErrorCategory.LOOP_CRASH.value
@@ -136,9 +138,17 @@ async def run_session(
         message = _KEEP_ALIVE_MESSAGE
 
     await _run_teardown_hooks(hooks or [], reason, ctx)
+    experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_end", phase="teardown", reason=reason)
-    experiment.save(state_path)
+    _save_state(ctx)
     return reason
+
+
+def _save_state(ctx: _LoopContext) -> None:
+    """Persist the run state with the live duration (called per event, so the viewer
+    reflects a long single turn — e.g. a codex ``exec`` — as it happens, not only at its end)."""
+    ctx.experiment.duration_s = round(time.monotonic() - ctx.start, 1)
+    ctx.experiment.save(ctx.state_path)
 
 
 async def _run_teardown_hooks(hooks: list[Hook], reason: str, ctx: _LoopContext) -> None:
@@ -186,10 +196,12 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
     """Send one message, consume the event stream, dispatch each event."""
     outcome = _TurnOutcome()
     ctx.transcript.write(UserMessage(message))  # record what was sent before the reply
+    _save_state(ctx)
     try:
         async for event in ctx.agent.send(message):
             ctx.transcript.write(event)
             await _dispatch_event(event, ctx, outcome)
+            _save_state(ctx)  # live: duration + cheat counter update during a long turn
             if outcome.error_category is not None:
                 break  # backend error: stop consuming this turn
     except Exception as exc:  # an unexpected fault in a tool or the adapter

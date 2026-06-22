@@ -33,6 +33,7 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         "duration_s": game.state.get("duration_s", 0),
         "success_rate": _final_metric(game, "success_rate"),
         "last_error_category": game.state.get("last_error_category"),
+        "exit_reason": game.state.get("exit_reason"),  # None while running
         "exit_requested": game.state.get("exit_requested"),
         "cheat_attempts": game.state.get("cheat_attempts", 0),
     }

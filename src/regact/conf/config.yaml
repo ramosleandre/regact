@@ -16,6 +16,6 @@ limits:
   max_moves: 2500
 security:
   sandbox: auto         # auto | none | seatbelt | bwrap | apptainer — 'none' disables the sandbox
-  deny_egress: false
+  deny_egress: true
 output_root: experiments
 experiment_name: dev

@@ -46,6 +46,7 @@ def build_app(experiment_dir: str) -> FastAPI:
         return {
             "name": name,
             "state": view.state,
+            "config": view.config,
             "turns": [dataclasses.asdict(t) for t in view.turns],
             "submissions": [dataclasses.asdict(s) for s in view.submissions],
             "metrics": game_metrics(view),

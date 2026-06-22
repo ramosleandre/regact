@@ -52,10 +52,11 @@ async function renderDashboard() {
 }
 
 function statusOf(m) {
-  return m.last_error_category ? m.last_error_category : (m.exit_requested ? "exited" : "stopped");
+  return m.last_error_category || m.exit_reason || "running";  // no exit_reason yet ⇒ still running
 }
 function statusBadge(m) {
-  const cls = m.last_error_category ? "b-bad" : (m.exit_requested ? "b-good" : "b-warn");
+  const running = !m.last_error_category && !m.exit_reason;
+  const cls = m.last_error_category ? "b-bad" : (running ? "b-warn" : "b-good");
   return h("span", "badge " + cls, statusOf(m));
 }
 
@@ -91,9 +92,27 @@ async function renderOverview(name) {
     kpi("Success", pct(m.success_rate)),
     kpi("Thinking", fmt(m.thinking_chars) + " ch"),
     kpi("Cheat attempts", m.cheat_attempts ?? 0));
-  wrap.append(kpis, barChart("Tool calls", m.tool_histogram));
+  wrap.append(kpis, configBlock(d.config), barChart("Tool calls", m.tool_histogram));
   if (m.submission_trajectory.length) wrap.append(trajectory(m.submission_trajectory));
   shell(name, "", wrap);
+}
+
+function configBlock(c) {
+  if (!c || !Object.keys(c).length) return h("div");
+  const a = c.agent || {}, p = c.problem || {}, lim = c.limits || {}, sec = c.security || {};
+  const args = a.args && Object.keys(a.args).length ? " · " + JSON.stringify(a.args) : "";
+  const rows = [
+    ["agent", `${a.name ?? "?"}${a.model ? " · " + a.model : ""}${args}`],
+    ["problem", `${p.name ?? "?"} · ${p.lifecycle ?? "?"} · info=${p.info_mode ?? "?"} · obs=${p.obs_mode ?? "?"}`],
+    ["features", (c.features || []).join(", ")],
+    ["task_names", (c.task_names || []).join(", ") || "(all)"],
+    ["limits", `keep_alive ${lim.keep_alive ?? "?"} · max_moves ${lim.max_moves ?? "?"}`],
+    ["security", `sandbox ${sec.sandbox ?? "?"} · deny_egress ${sec.deny_egress}`],
+  ];
+  const wrap = h("div"); wrap.append(h("h2", null, "Run config"));
+  const t = h("table");
+  for (const [k, v] of rows) t.append(rowEl("td", [k, String(v)]));
+  wrap.append(t); return wrap;
 }
 
 function kpi(label, value, sub) {
