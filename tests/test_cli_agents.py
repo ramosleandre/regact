@@ -151,9 +151,12 @@ def test_codex_parses_message_reasoning_command_and_completion() -> None:
     assert isinstance(res, ToolResult) and res.id == "c1" and res.output == "x"
     assert not res.is_error
     # an intermediate update of the same item is dropped (no duplicate ToolCall)
-    assert agent._parse_events(
-        {"type": "item.updated", "item": {"type": "command_execution", "id": "c1"}}
-    ) == []
+    assert (
+        agent._parse_events(
+            {"type": "item.updated", "item": {"type": "command_execution", "id": "c1"}}
+        )
+        == []
+    )
     assert agent._parse_events({"type": "turn.completed", "item": {"text": "fin"}}) == [
         TurnComplete("fin")
     ]

@@ -177,6 +177,7 @@ def _actions_for_ids(available: Iterable[int]) -> str:
         blocks.append(_ACTION7)
     return "\n\n".join(blocks)
 
+
 _HELPER = '''\
 """ARC-AGI helpers (import-free): action ids + the click-action builder.
 
