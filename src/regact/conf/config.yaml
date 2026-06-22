@@ -16,6 +16,6 @@ limits:
   max_moves: 2500
 security:
   sandbox: auto         # auto | none | seatbelt | bwrap | apptainer — 'none' disables the sandbox
-  deny_egress: true
+  deny_egress: true     # true = only the agent's declared hosts reachable (via a localhost proxy); blocks the rest
 output_root: experiments
 experiment_name: dev

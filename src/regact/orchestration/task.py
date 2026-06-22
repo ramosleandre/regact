@@ -28,6 +28,7 @@ from regact.orchestration.env_transport import EnvConnection, serve_env
 from regact.orchestration.loop import run_session
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
+from regact.security.egress_proxy import EgressProxy
 from regact.security.runtime import make_wrapper
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
@@ -154,6 +155,18 @@ async def run_task(
 
         agent_tmp = os.path.join(workdir, "tmp")
         os.makedirs(agent_tmp, exist_ok=True)
+        agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
+        egress: EgressProxy | None = None
+        egress_hosts = agent.host_egress_hosts()
+        if config.security.deny_egress and egress_hosts:
+            egress = EgressProxy(egress_hosts)
+            proxy_url = f"http://127.0.0.1:{await egress.start()}"
+            agent_env |= {
+                "HTTPS_PROXY": proxy_url,
+                "HTTP_PROXY": proxy_url,
+                "NO_PROXY": "127.0.0.1,localhost",
+            }
+
         builder = PromptBuilder()
         system_prompt = builder.build_system_prompt(
             problem,
@@ -171,10 +184,7 @@ async def run_task(
             api_key=config.agent.api_key,
             system_prompt=system_prompt,
             tools=tools,
-            # PYTHONPATH: the agent's subprocess scripts (cwd=workdir) must import regact.
-            # TMPDIR: keep the agent's scratch inside its (sandbox-allowed) workdir, so the
-            # shared system temp dir need not be exposed to it.
-            env={"PYTHONPATH": src_dir, "TMPDIR": agent_tmp},
+            env=agent_env,
             runtime_wrap=runtime_wrap,
         )
         first_obs = server.first_obs(task_name)
@@ -199,4 +209,6 @@ async def run_task(
                 hooks=hooks,
             )
         await agent.close()
+        if egress is not None:
+            await egress.close()
         return reason
