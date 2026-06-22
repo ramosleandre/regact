@@ -262,11 +262,16 @@ class SandboxedExecutor:
             sys.executable,
             "-m",
             "regact.controllers.eval_runner",
-            "--solution", os.path.abspath(solution_path),
-            "--lifecycle", lifecycle.value,
-            "--episodes", str(n_episodes),
-            "--max-moves", str(max_moves),
-            "--output", os.path.abspath(raw_path),
+            "--solution",
+            os.path.abspath(solution_path),
+            "--lifecycle",
+            lifecycle.value,
+            "--episodes",
+            str(n_episodes),
+            "--max-moves",
+            str(max_moves),
+            "--output",
+            os.path.abspath(raw_path),
         ]
         tmp = os.path.join(self._workdir, "tmp")
         os.makedirs(tmp, exist_ok=True)
