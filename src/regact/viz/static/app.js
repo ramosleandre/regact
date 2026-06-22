@@ -40,7 +40,7 @@ async function renderDashboard() {
     const m = g.metrics;
     const card = h("div", "card click", h("h3", null, g.name));
     card.append(h("div", "muted",
-      `${g.state.problem_name || "?"} · ${m.n_turns} turns · ${m.n_tool_calls} tools · ${m.n_submissions} submits`));
+      `${g.state.problem_name || "?"} · ${m.n_turns} iters · ${m.env_moves ?? 0} moves · ${m.n_tool_calls} tools · ${m.n_submissions} submits`));
     card.append(h("div", null, statusBadge(m), " ",
       h("span", "badge", `levels ${levels(m)}`), " ",
       h("span", "badge", dur(m.duration_s)), " ",
@@ -83,7 +83,8 @@ async function renderOverview(name) {
   const kpis = h("div", "kpis");
   kpis.append(
     kpi("Status", statusOf(m)),
-    kpi("Turns", m.n_turns),
+    kpi("Iterations", m.n_turns, "agent turns"),
+    kpi("Moves", m.env_moves ?? 0, "env steps on the game"),
     kpi("Tool calls", m.n_tool_calls),
     kpi("Submissions", m.n_submissions),
     kpi("Output tokens", fmt(m.tokens.output), `cache ${fmt(m.tokens.cache_read)}`),
@@ -179,8 +180,9 @@ async function renderConversation(name) {
   shell(name, "conversation", wrap);
 }
 function toolBlock(tool) {
-  const isSubmit = /submit|exit/i.test(tool.name);
-  const box = h("div", "tool" + (isSubmit ? " submit" : ""));
+  // The reader tags calls authoritatively: blue submit, green submit-that-won a level, red cheat.
+  const cls = { cheat: " cheat", submit: " submit", submit_win: " submit-win" }[tool.tag] || "";
+  const box = h("div", "tool" + cls);
   const inp = JSON.stringify(tool.input);
   box.append(h("div", "t", h("b", null, tool.name), " ",
     h("span", "muted", inp.length > 240 ? inp.slice(0, 240) + "…" : inp)));

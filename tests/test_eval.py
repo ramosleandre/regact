@@ -109,6 +109,36 @@ def test_executor_scores_a_solution(tmp_path: Path) -> None:
     assert json.loads(Path(out).read_text())["aggregate"]["success_rate"] == 1.0
 
 
+def test_executor_imports_sibling_workdir_packages(tmp_path: Path) -> None:
+    """solution.py can import its sibling ``code_library/`` — the workdir is on sys.path.
+
+    Mirrors the real bootstrap layout (a namespace package, no ``__init__.py``); a
+    regression against the eval failing with ``ModuleNotFoundError: 'code_library'``.
+    """
+    lib = tmp_path / "code_library"
+    lib.mkdir()
+    (lib / "base_controller.py").write_text(
+        "class BaseController:\n    def act(self, obs):\n        raise NotImplementedError\n"
+    )
+    body = (
+        "from code_library.base_controller import BaseController\n"
+        "class Controller(BaseController):\n"
+        "    def act(self, obs):\n        return 1\n"
+        "def get_controller():\n    return Controller()\n"
+    )
+    executor = ControllerExecutor(_client())
+    result = executor.run(
+        task_name="corridor",
+        solution_path=_write_solution(tmp_path, body),
+        output_path=str(tmp_path / "results.json"),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        n_episodes=1,
+        max_moves=10,
+    )
+    assert result.error is None
+    assert result.aggregate["success_rate"] == 1.0
+
+
 def test_executor_single_instance_runs_one_episode(tmp_path: Path) -> None:
     executor = ControllerExecutor(_client())
     result = executor.run(

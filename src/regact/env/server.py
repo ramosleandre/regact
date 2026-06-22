@@ -54,6 +54,12 @@ class EnvServer:
         the prompt, before the agent starts, so there is no concurrent access)."""
         return self._session(game_id).first_obs()
 
+    def live_action_count(self, game_id: str) -> int:
+        """Env steps taken on the game so far (0 before it is started). The loop polls
+        this to surface the agent's move budget; a plain int read, safe across threads."""
+        session = self._sessions.get(game_id)
+        return session.live.action_count if session is not None and session.live is not None else 0
+
     def _session(self, game_id: str) -> EnvSession:
         try:
             return self._sessions[game_id]

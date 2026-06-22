@@ -20,6 +20,7 @@ The function stays short; each responsibility is its own helper:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from regact.agent.base import CodeAgent
@@ -65,6 +66,7 @@ class _LoopContext:
     policy: SecurityPolicy  # for flagging (not blocking) suspicious tool calls
     state_path: str = ""  # where to persist ExperimentState (saved live, per event)
     start: float = 0.0  # time.monotonic() at the run's start, for the live duration
+    move_count: Callable[[], int] | None = None  # polls the env's step count, for the live state
 
 
 @dataclass
@@ -90,6 +92,7 @@ async def run_session(
     system_prompt: str | None = None,
     hooks: list[Hook] | None = None,
     stop: StopSignal | None = None,
+    move_count: Callable[[], int] | None = None,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
@@ -103,6 +106,7 @@ async def run_session(
         policy=default_policy(),
         state_path=state_path,
         start=start,
+        move_count=move_count,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -148,6 +152,8 @@ def _save_state(ctx: _LoopContext) -> None:
     """Persist the run state with the live duration (called per event, so the viewer
     reflects a long single turn — e.g. a codex ``exec`` — as it happens, not only at its end)."""
     ctx.experiment.duration_s = round(time.monotonic() - ctx.start, 1)
+    if ctx.move_count is not None:
+        ctx.experiment.env_moves = ctx.move_count()
     ctx.experiment.save(ctx.state_path)
 
 

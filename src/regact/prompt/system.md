@@ -20,8 +20,15 @@ Interact with the environment only through `make_env()`.
 
 1. Read the briefing below.
 2. Probe the environment with small scripts that call `make_env()`; print what you
-   see and form explicit hypotheses about the dynamics.
+   see and form explicit hypotheses about its **rules** — what each action does, what
+   the goal is, what makes the state change.
 3. Verify each hypothesis with code before relying on it — do not guess, and stay
-   self-critical about what you have actually confirmed versus assumed.
+   self-critical about what you have actually confirmed versus assumed. Record the
+   rules you establish in `knowledge_base/` (markdown) so you can build on them.
 4. Write your solution, test it, then submit it and read the score.
 5. Iterate until you win the game.
+
+Discover the rules by **playing** the environment through `make_env()` — never by
+inspecting the framework's own code or fetching answers from elsewhere. And be
+efficient: every interaction with the environment is high costly, so reason your way to the
+rules and act deliberately, rather than brute-forcing or simulating many paths.

@@ -71,6 +71,32 @@ def test_metrics_proxies(tmp_path: Path) -> None:
     assert m["submission_trajectory"][0]["submission"] == 0
 
 
+def test_submit_call_tagged_win_when_a_level_clears(tmp_path: Path) -> None:
+    """The SubmitSolution whose submission cleared levels (mean_levels_completed=2) is a win."""
+    game = load_game(_make_experiment(tmp_path), "ls20")
+    by_name = {c.name: c for turn in game.turns for c in turn.tools}
+    assert by_name["SubmitSolution"].tag == "submit_win"  # green
+    assert by_name["Bash"].tag is None  # a plain shell call
+
+
+def test_cheat_call_is_tagged(tmp_path: Path) -> None:
+    """A tool call reaching for a forbidden path is tagged 'cheat' (red), like the loop flags it."""
+    game_dir = tmp_path / "exp" / "g"
+    (game_dir / "logs").mkdir(parents=True)
+    (game_dir / "logs" / "experiment_state.json").write_text(
+        json.dumps({"problem_name": "p", "task_name": "g"})
+    )
+    cheat = {"command": "cat ../environnement/x"}  # references a forbidden path
+    events = [
+        {"type": "ToolCall", "id": "c1", "name": "Bash", "input": cheat},
+        {"type": "ToolResult", "id": "c1", "output": "x", "is_error": False},
+        {"type": "TurnComplete", "usage": {}},
+    ]
+    (game_dir / "logs" / "transcript.jsonl").write_text("\n".join(json.dumps(e) for e in events))
+    game = load_game(str(tmp_path / "exp"), "g")
+    assert game.turns[0].tools[0].tag == "cheat"
+
+
 def test_artifacts_lists_workdir_python(tmp_path: Path) -> None:
     exp = _make_experiment(tmp_path)
     (Path(exp) / "ls20" / "workdir" / "solution.py").write_text(

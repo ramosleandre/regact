@@ -33,6 +33,7 @@ class ExperimentState:
     cheat_attempts: int = 0  # tool calls flagged as reaching for forbidden paths/modules
     win_levels: int | None = None  # total levels to win (from the game's first observation)
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
+    env_moves: int = 0
     schema_version: int = 1
 
     def save(self, path: str) -> None:

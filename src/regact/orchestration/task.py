@@ -207,6 +207,7 @@ async def run_task(
                 cwd=workdir,
                 system_prompt=system_prompt,
                 hooks=hooks,
+                move_count=lambda: server.live_action_count(task_name),
             )
         await agent.close()
         if egress is not None:

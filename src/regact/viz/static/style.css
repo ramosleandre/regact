@@ -41,7 +41,9 @@ pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; font-size: 1
 details.think { margin: 6px 0; } details.think summary { color: var(--think); cursor: pointer; font-size: 13px; }
 details.think pre { color: var(--think); opacity: .85; }
 .tool { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; background: var(--panel2); }
-.tool.submit { border-color: var(--good); }
+.tool.submit { border: 2px solid var(--accent); }          /* a solution submission */
+.tool.submit-win { border: 2px solid var(--good); }        /* submission that cleared a level */
+.tool.cheat { border: 2px solid var(--bad); }              /* flagged: reached for a forbidden path/module */
 .tool .t { padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 13px; }
 .tool .t b { color: var(--accent); }
 .tool .res { padding: 6px 10px; border-top: 1px dashed var(--line); }

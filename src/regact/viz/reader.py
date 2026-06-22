@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from regact.security.detection import flag_tool_call
+from regact.security.policy import default_policy
+
 
 @dataclass
 class ToolCallView:
@@ -24,6 +27,7 @@ class ToolCallView:
     input: dict[str, Any]
     result: str | None = None
     is_error: bool = False
+    tag: str | None = None  # "cheat" | "submit" | "submit_win" — drives the UI's call coloring
 
 
 @dataclass
@@ -99,6 +103,7 @@ def load_game(experiment_dir: str, game: str) -> GameView:
     turns = _group_turns(_load_events(base / "logs" / "transcript.jsonl"))
     submissions = _load_submissions(base / "workdir" / "submissions")
     config = _load_json(base / "config.json") or {}
+    _tag_tool_calls(turns, submissions)
     return GameView(name=game, state=state, turns=turns, submissions=submissions, config=config)
 
 
@@ -227,3 +232,51 @@ def _load_submissions(submissions_dir: Path) -> list[SubmissionView]:
 def _submission_sort_key(path: Path) -> tuple[int, str]:
     # numbered submissions first (by number), then "final" / others last.
     return (int(path.name), "") if path.name.isdigit() else (1_000_000, path.name)
+
+
+def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) -> None:
+    """Tag each tool call for the UI: ``submit`` / ``submit_win`` / ``cheat``.
+
+    Submits are matched to numbered submissions in order (the k-th submit wrote the
+    k-th submission), so a submit that advanced the cleared-level count is a *win*.
+    Cheats reuse the loop's own (non-blocking) flagger so the colors match the run's
+    forensic count. ``submit`` wins over ``cheat`` when a call is both.
+    """
+    policy = default_policy()
+    wins = _submission_wins(submissions)
+    submit_index = 0
+    for turn in turns:
+        for call in turn.tools:
+            if _is_submit_call(call):
+                won = wins[submit_index] if submit_index < len(wins) else False
+                call.tag = "submit_win" if won else "submit"
+                submit_index += 1
+            elif flag_tool_call(call.name, call.input, policy):
+                call.tag = "cheat"
+
+
+def _is_submit_call(call: ToolCallView) -> bool:
+    """A SubmitSolution — a native tool call, or a workdir ``control.py SubmitSolution`` shell."""
+    if call.name == "SubmitSolution":
+        return True
+    blob = json.dumps(call.input).lower()
+    return "submitsolution" in blob and "control" in blob
+
+
+def _submission_wins(submissions: list[SubmissionView]) -> list[bool]:
+    """Per numbered submission (in order): did it clear a new level vs. all prior ones?"""
+    wins: list[bool] = []
+    running = 0.0
+    for sub in sorted((s for s in submissions if s.name.isdigit()), key=lambda s: int(s.name)):
+        levels = _submission_levels(sub.aggregate)
+        wins.append(levels > running)
+        running = max(running, levels)
+    return wins
+
+
+def _submission_levels(aggregate: dict[str, Any]) -> float:
+    """Cleared-level count for a submission (falls back to a solved/success signal)."""
+    levels = aggregate.get("mean_levels_completed")
+    if levels is not None:
+        return float(levels)
+    return 1.0 if (aggregate.get("success_rate") or 0) > 0 else 0.0

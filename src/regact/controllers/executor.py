@@ -12,9 +12,11 @@ tagged ``agent_solution``; the aggregate is written to ``output_path`` and retur
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -129,12 +131,23 @@ class ControllerExecutor:
 
 
 def _load_controller_factory(solution_path: str) -> Any:
-    """Import ``solution.py`` in isolation and return its ``get_controller`` callable."""
+    """Import ``solution.py`` in isolation and return its ``get_controller`` callable.
+
+    The solution's directory (the agent workdir) is put on ``sys.path`` while the
+    module runs so its sibling packages — ``code_library`` (the controller base)
+    and ``framework`` — resolve; it is removed again once the imports have run.
+    """
+    workdir = os.path.dirname(os.path.abspath(solution_path))
     spec = importlib.util.spec_from_file_location("regact_agent_solution", solution_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load solution from {solution_path!r}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.path.insert(0, workdir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        with contextlib.suppress(ValueError):
+            sys.path.remove(workdir)
     return module.get_controller
 
 
