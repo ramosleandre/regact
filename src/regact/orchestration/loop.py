@@ -38,7 +38,7 @@ from regact.obs.errors import ErrorCategory, LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.signals import StopSignal
-from regact.security.detection import flag_tool_call
+from regact.security.detection import flag_os_denial, flag_tool_call
 from regact.security.policy import SecurityPolicy, default_policy
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext
@@ -232,6 +232,8 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             ctx.transcript.write(result)
             await ctx.agent.inject(result.output)
             outcome.saw_tool_call = True
+    elif isinstance(event, ToolResult):
+        _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)
     elif isinstance(event, AgentError):
         ctx.logger.log(
             LogComponent.AGENT,
@@ -244,11 +246,11 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
 
 
 def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
-    """Log (never block) a tool call whose arguments reach for a forbidden path/module.
+    """Keyword camera: flag a call whose arguments reach for a forbidden path/module.
 
-    The OS sandbox is what enforces confinement; this only records the attempt as a
-    forensic signal — a count on the run state + a WARNING line — so the analyst can
-    see whether and how the agent tried to cheat.
+    Precise intent detection (the on-disk game data, escape modules); pairs with
+    :func:`_flag_blocked_result`, which catches egress the keyword list cannot enumerate.
+    Never blocks — it only records a forensic count + WARNING for the analyst.
     """
     flags = flag_tool_call(call.name, call.input, ctx.policy)
     if not flags:
@@ -261,6 +263,19 @@ def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
         tool=call.name,
         flags=flags,
     )
+
+
+def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
+    """Egress camera: count an errored result where the sandbox/proxy blocked an external host.
+
+    A blocked curl (DNS failure) or the egress proxy's 403 is real evidence the agent tried
+    to leave its box for the internet — no need to guess intent from the command, and it
+    covers hosts the keyword list cannot enumerate. Never blocks.
+    """
+    if not result.is_error or not flag_os_denial(result.output):
+        return
+    ctx.experiment.cheat_attempts += 1
+    ctx.logger.log(LogComponent.AGENT, "WARNING", "cheat_attempt", reason="egress_denied")
 
 
 async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:

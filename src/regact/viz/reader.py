@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from regact.security.detection import flag_tool_call
+from regact.security.detection import flag_os_denial, flag_tool_call
 from regact.security.policy import default_policy
 
 
@@ -238,9 +238,10 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
     """Tag each tool call for the UI: ``submit`` / ``submit_win`` / ``cheat``.
 
     Submits are matched to numbered submissions in order (the k-th submit wrote the
-    k-th submission), so a submit that advanced the cleared-level count is a *win*.
-    Cheats reuse the loop's own (non-blocking) flagger so the colors match the run's
-    forensic count. ``submit`` wins over ``cheat`` when a call is both.
+    k-th submission), so a submit that advanced the cleared-level count is a *win*. A
+    cheat is a call that reaches for a forbidden path/module in its args (unsandboxed)
+    or whose result reads like an OS/proxy denial (sandboxed: blocked reads, curls) —
+    the same signals the loop counts. ``submit`` wins over ``cheat`` when a call is both.
     """
     policy = default_policy()
     wins = _submission_wins(submissions)
@@ -251,7 +252,8 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
                 won = wins[submit_index] if submit_index < len(wins) else False
                 call.tag = "submit_win" if won else "submit"
                 submit_index += 1
-            elif flag_tool_call(call.name, call.input, policy):
+            elif flag_tool_call(call.name, call.input, policy) or flag_os_denial(call.result or ""):
+                # forbidden in args (open) or denied in result (sandboxed: curls/reads)
                 call.tag = "cheat"
 
 
