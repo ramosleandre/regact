@@ -22,6 +22,7 @@ from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, Single
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.features.base import Feature, RunDeps, build_features
+from regact.obs.errors import LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.env_transport import EnvConnection, serve_env
@@ -199,6 +200,17 @@ async def run_task(
             TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
             RunLogger(logs_dir, task=task_name) as logger,
         ):
+            single_controller = (
+                config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE
+                and "controller" in config.features
+            )
+            if single_controller:
+                logger.log(
+                    LogComponent.ORCHESTRATOR,
+                    "WARNING",
+                    "single_life_controller",
+                    message="single-instance + controller eval reuses the shared env (degenerate)",
+                )
             reason = await run_session(
                 agent,
                 experiment=experiment,
