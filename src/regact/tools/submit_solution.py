@@ -14,7 +14,7 @@ import os
 from typing import Any
 
 from regact.config.schema import Lifecycle
-from regact.controllers.executor import ControllerExecutor
+from regact.controllers.executor import Executor
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -25,7 +25,7 @@ class SubmitSolution(Tool):
     def __init__(
         self,
         experiment: ExperimentState,
-        executor: ControllerExecutor,
+        executor: Executor,
         *,
         solution_path: str,
         submissions_dir: str,

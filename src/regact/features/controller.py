@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from regact.controllers.executor import ControllerExecutor
+from regact.controllers.executor import ControllerExecutor, SandboxedExecutor
 from regact.features.base import (
     Feature,
     FeatureContext,
@@ -87,6 +87,23 @@ def get_controller() -> Controller:
 _PROMPT_MD = Path(__file__).parent / "prompts" / "controller.md"
 
 
+def _make_executor(deps: RunDeps) -> ControllerExecutor | SandboxedExecutor:
+    """Pick how the controller is evaluated: a sandboxed subprocess for real runs (a
+    real HTTP env to dial), in-process for the ``scripted`` test backend (no socket)."""
+    if deps.sandbox_wrap is not None:
+        return SandboxedExecutor(
+            workdir=os.path.dirname(deps.solution_path),
+            sandbox_wrap=deps.sandbox_wrap,
+            compute_metrics=deps.compute_episode_metrics,
+            aggregate_metrics=deps.aggregate_episode_metrics,
+        )
+    return ControllerExecutor(
+        deps.env_client,
+        compute_metrics=deps.compute_episode_metrics,
+        aggregate_metrics=deps.aggregate_episode_metrics,
+    )
+
+
 class FinalizeControllerHook(Hook):
     """Teardown: re-score the *final* ``solution.py`` as the official result.
 
@@ -105,12 +122,7 @@ class FinalizeControllerHook(Hook):
         deps = self._deps
         if not os.path.exists(deps.solution_path):
             return None  # nothing was ever written; nothing to finalize
-        executor = ControllerExecutor(
-            deps.env_client,
-            compute_metrics=deps.compute_episode_metrics,
-            aggregate_metrics=deps.aggregate_episode_metrics,
-        )
-        result = executor.run(
+        result = _make_executor(deps).run(
             task_name=deps.experiment.task_name,
             solution_path=deps.solution_path,
             output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
@@ -138,14 +150,9 @@ class ControllerFeature(Feature):
         return _PROMPT_MD.read_text(encoding="utf-8")
 
     def tools(self, deps: RunDeps) -> list[Tool]:
-        executor = ControllerExecutor(
-            deps.env_client,
-            compute_metrics=deps.compute_episode_metrics,
-            aggregate_metrics=deps.aggregate_episode_metrics,
-        )
         submit = SubmitSolution(
             deps.experiment,
-            executor,
+            _make_executor(deps),
             solution_path=deps.solution_path,
             submissions_dir=deps.submissions_dir,
             task_name=deps.experiment.task_name,

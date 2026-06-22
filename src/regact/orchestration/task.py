@@ -115,6 +115,18 @@ async def run_task(
         experiment = ExperimentState(
             problem_name=problem.name, task_name=task_name, n_eval_episodes=1, n_videos=0
         )
+        src_dir = _regact_src_dir()
+        eval_wrap = (
+            None
+            if in_process
+            else make_wrapper(
+                config.security.sandbox,
+                workdir=workdir,
+                allow_read=[src_dir],
+                deny_egress=True,
+                image=config.security.runtime_opts.get("image"),
+            )
+        )
         deps = RunDeps(
             experiment=experiment,
             env_client=conn.client,
@@ -125,26 +137,18 @@ async def run_task(
             max_moves=config.limits.max_moves,
             compute_episode_metrics=problem.compute_episode_metrics,
             aggregate_episode_metrics=problem.aggregate_episode_metrics,
+            sandbox_wrap=eval_wrap,
         )
         tools = [tool for feature in features for tool in feature.tools(deps)]
         hooks = [hook for feature in features for hook in feature.hooks(deps)]
 
         agent = agent or build_agent(config.agent)
-        # Where framework tools are executed depends on the backend:
-        #   native_tools (scripted/Alan): the loop executes them on ToolCall events.
-        #   client_cli (Claude/codex): the control server executes them; the workdir
-        #   CLI hits it, and the loop only observes the agent's stream.
         if agent.capabilities().control_actions == "client_cli":
             server.bind_control(task_name, tools, cwd=workdir)
             loop_tools: list[Tool] = []
         else:
             loop_tools = tools
 
-        # Confine the agent's subprocess (deny-by-default): it may reach only its workdir, the
-        # regact source, and the loaded agent's own host dirs — every copy of the game, and
-        # sibling experiments, are absent. Each adapter declares its own host dirs, so only the
-        # loaded agent's are granted. In-process agents ignore this; CLI agents run wrapped.
-        src_dir = _regact_src_dir()
         runtime_wrap = make_wrapper(
             config.security.sandbox,
             workdir=workdir,

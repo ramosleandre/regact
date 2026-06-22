@@ -67,6 +67,7 @@ class RunDeps:
     max_moves: int = 400
     compute_episode_metrics: Callable[..., dict[str, Any]] | None = None
     aggregate_episode_metrics: Callable[..., dict[str, Any]] | None = None
+    sandbox_wrap: Callable[[list[str]], list[str]] | None = None
 
 
 class HookPhase(StrEnum):
