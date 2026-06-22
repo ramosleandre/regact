@@ -14,6 +14,8 @@ function h(tag, cls, ...kids) {
 const clear = (el) => el.replaceChildren();
 const fmt = (n) => (n == null ? "—" : Intl.NumberFormat().format(n));
 const pct = (x) => (x == null ? "—" : (x * 100).toFixed(0) + "%");
+const dur = (s) => { s = Math.round(s || 0); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
+const levels = (m) => `${m.best_levels ?? 0} / ${m.total_levels ?? "?"}`;
 
 async function api(path) {
   const r = await fetch(path);
@@ -40,7 +42,8 @@ async function renderDashboard() {
     card.append(h("div", "muted",
       `${g.state.problem_name || "?"} · ${m.n_turns} turns · ${m.n_tool_calls} tools · ${m.n_submissions} submits`));
     card.append(h("div", null, statusBadge(m), " ",
-      h("span", "badge", `levels ${m.best_levels ?? "—"}`), " ",
+      h("span", "badge", `levels ${levels(m)}`), " ",
+      h("span", "badge", dur(m.duration_s)), " ",
       h("span", "badge", `out ${fmt(m.tokens.output)} tok`)));
     card.onclick = () => { location.hash = "game/" + encodeURIComponent(g.name); };
     grid.append(card);
@@ -83,7 +86,8 @@ async function renderOverview(name) {
     kpi("Tool calls", m.n_tool_calls),
     kpi("Submissions", m.n_submissions),
     kpi("Output tokens", fmt(m.tokens.output), `cache ${fmt(m.tokens.cache_read)}`),
-    kpi("Levels", `${m.best_levels ?? "—"}`, `final ${m.final_levels ?? "—"}`),
+    kpi("Levels", levels(m), `reached / total`),
+    kpi("Time", dur(m.duration_s)),
     kpi("Success", pct(m.success_rate)),
     kpi("Thinking", fmt(m.thinking_chars) + " ch"),
     kpi("Cheat attempts", m.cheat_attempts ?? 0));
@@ -136,6 +140,12 @@ async function renderConversation(name) {
     for (const it of t.items || []) {     // chronological order
       if (it.kind === "thinking") {
         const det = h("details", "think"); det.append(h("summary", null, "💭 thinking"), h("pre", null, it.text));
+        body.append(det);
+      } else if (it.kind === "system") {
+        const det = h("details", "think"); det.append(h("summary", null, "⚙ system prompt"), h("pre", null, it.text));
+        body.append(det);
+      } else if (it.kind === "user") {
+        const det = h("details", "think"); det.append(h("summary", null, "📨 sent to the agent"), h("pre", null, it.text));
         body.append(det);
       } else if (it.kind === "text") {
         body.append(h("pre", "text", it.text));

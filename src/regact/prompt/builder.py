@@ -28,6 +28,11 @@ _LIFECYCLE_MD = {
 }
 _CLOSING = "Do not stop until you have feedback confirming you have solved the game."
 
+_FEATURES_INTRO = (
+    "You are given the following features to help you interact with the environment — it "
+    "is important that you use them rather than acting by hand:"
+)
+
 
 class PromptBuilder:
     """Compose the system prompt (everything static) and the first user message."""
@@ -53,24 +58,23 @@ class PromptBuilder:
             _SYSTEM_MD.read_text(encoding="utf-8"),
             problem.build_prompt(task_name, info_mode=info_mode),
         ]
-        sections += [f.prompt_fragment(ctx) or "" for f in features]
+        fragments = [frag for f in features if (frag := f.prompt_fragment(ctx))]
+        if fragments:  # generic intro, then each feature describes its own deliverable
+            sections.append(_FEATURES_INTRO)
+            sections += fragments
         sections.append(_control_channel_block(control_actions, tool_names or []))
         sections.append(_LIFECYCLE_MD[lifecycle].read_text(encoding="utf-8"))
         sections.append(_CLOSING)
         return "\n\n".join(s.strip() for s in sections if s and s.strip())
 
     def build_first_message(self, rendered_obs: str | None = None) -> str:
-        """The first user message: an optional pre-rendered observation, else a generic start."""
+        """The first user message: the first observation (for reference) + a generic, agnostic
+        start. What to build with it is the features' business, stated in the system prompt."""
+        start = "Use the features described above to make progress; keep going until you win."
         if rendered_obs:
-            return (
-                "This is the first observation of the game. Explore it, build a policy, "
-                "and keep going until you reach the end.\n\n"
-                f"{rendered_obs}"
-            )
-        return (
-            "Begin: explore the environment, then write, test, and submit your controller. "
-            "Keep going until you win."
-        )
+            header = f"This is the first observation of the game, for reference. {start}"
+            return f"{header}\n\n{rendered_obs}"
+        return start
 
 
 def _control_channel_block(

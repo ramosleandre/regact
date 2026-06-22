@@ -173,6 +173,10 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
             current.items.append(TurnItem("text", text=str(event.get("text", ""))))
         elif kind == "ThinkingDelta":
             current.items.append(TurnItem("thinking", text=str(event.get("text", ""))))
+        elif kind == "SystemPrompt":
+            current.items.append(TurnItem("system", text=str(event.get("text", ""))))
+        elif kind == "UserMessage":
+            current.items.append(TurnItem("user", text=str(event.get("text", ""))))
         elif kind == "ToolCall":
             call = ToolCallView(
                 id=str(event.get("id", "")),

@@ -183,7 +183,9 @@ def test_prompt_builder_drops_empty_feature_fragments() -> None:
 
 def test_first_message_is_the_observation_or_a_start() -> None:
     builder = PromptBuilder()
-    # generic start is lifecycle-agnostic (no make_env: single-instance uses env.current)
-    assert "submit" in builder.build_first_message().lower()
+    msg = builder.build_first_message()
+    # the generic first message is agnostic: it points to the features, names no controller
+    assert "feature" in msg.lower()
+    assert "controller" not in msg.lower() and "solution.py" not in msg
     framed = builder.build_first_message("OBS_GRID_HERE")
     assert "OBS_GRID_HERE" in framed and "first observation" in framed.lower()

@@ -23,7 +23,14 @@ import time
 from dataclasses import dataclass
 
 from regact.agent.base import CodeAgent
-from regact.agent.events import AgentError, AgentEvent, ToolCall, ToolResult
+from regact.agent.events import (
+    AgentError,
+    AgentEvent,
+    SystemPrompt,
+    ToolCall,
+    ToolResult,
+    UserMessage,
+)
 from regact.config.schema import LimitsConfig
 from regact.features.base import Hook, HookPhase
 from regact.obs.errors import ErrorCategory, LogComponent
@@ -78,6 +85,7 @@ async def run_session(
     limits: LimitsConfig,
     state_path: str,
     cwd: str,
+    system_prompt: str | None = None,
     hooks: list[Hook] | None = None,
     stop: StopSignal | None = None,
 ) -> str:
@@ -93,6 +101,8 @@ async def run_session(
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
+    if system_prompt:  # record the inputs so the viewer shows the whole session, not just replies
+        transcript.write(SystemPrompt(system_prompt))
 
     message = first_message
     turns = 0
@@ -110,6 +120,7 @@ async def run_session(
             break
 
         outcome = await _run_turn(message, ctx)
+        experiment.duration_s = round(time.monotonic() - start, 1)
         experiment.save(state_path)
 
         if outcome.crashed:
@@ -174,6 +185,7 @@ def _decide_stop(
 async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
     """Send one message, consume the event stream, dispatch each event."""
     outcome = _TurnOutcome()
+    ctx.transcript.write(UserMessage(message))  # record what was sent before the reply
     try:
         async for event in ctx.agent.send(message):
             ctx.transcript.write(event)

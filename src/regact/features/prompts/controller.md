@@ -1,9 +1,12 @@
-## Your deliverable: a controller
+### Controller
 
-This task gives you one feature — a **controller**: a pure policy `act(obs) -> action`.
-It is re-instantiated for each episode (so `__init__` is your per-episode reset; keep
-state on `self`), and it never receives or imports the environment — it acts only on the
-`obs` it is given.
+A **controller** is a pure policy `act(obs) -> action`. You do not play the game by hand:
+you **write the controller code** that chooses the actions, then run and submit it. Do not
+reply with actions yourself.
+
+It is re-instantiated for each episode (so `__init__` is your per-episode reset; keep state
+on `self`), and it never receives or imports the environment — it acts only on the `obs` it
+is given.
 
 Your working directory already holds the files to edit:
 

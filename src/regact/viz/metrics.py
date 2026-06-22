@@ -29,6 +29,8 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         "submission_trajectory": submissions,
         "best_levels": best,
         "final_levels": final,
+        "total_levels": game.state.get("win_levels"),  # from the first obs; shown from the start
+        "duration_s": game.state.get("duration_s", 0),
         "success_rate": _final_metric(game, "success_rate"),
         "last_error_category": game.state.get("last_error_category"),
         "exit_requested": game.state.get("exit_requested"),

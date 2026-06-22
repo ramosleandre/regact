@@ -149,20 +149,21 @@ async def run_task(
         agent_tmp = os.path.join(workdir, "tmp")
         os.makedirs(agent_tmp, exist_ok=True)
         builder = PromptBuilder()
+        system_prompt = builder.build_system_prompt(
+            problem,
+            task_name,
+            features,
+            lifecycle=config.problem.lifecycle,
+            info_mode=config.problem.info_mode,
+            control_actions=agent.capabilities().control_actions,
+            tool_names=[tool.name for tool in tools],
+        )
         await agent.start(
             cwd=workdir,
             model=config.agent.model,
             base_url=config.agent.base_url,
             api_key=config.agent.api_key,
-            system_prompt=builder.build_system_prompt(
-                problem,
-                task_name,
-                features,
-                lifecycle=config.problem.lifecycle,
-                info_mode=config.problem.info_mode,
-                control_actions=agent.capabilities().control_actions,
-                tool_names=[tool.name for tool in tools],
-            ),
+            system_prompt=system_prompt,
             tools=tools,
             # PYTHONPATH: the agent's subprocess scripts (cwd=workdir) must import regact.
             # TMPDIR: keep the agent's scratch inside its (sandbox-allowed) workdir, so the
@@ -171,6 +172,7 @@ async def run_task(
             runtime_wrap=runtime_wrap,
         )
         first_obs = server.first_obs(task_name)
+        experiment.win_levels = (first_obs.info or {}).get("win_levels")
         first_message = builder.build_first_message(problem.render_obs_text(first_obs))
 
         with (
@@ -187,6 +189,7 @@ async def run_task(
                 limits=config.limits,
                 state_path=os.path.join(logs_dir, "experiment_state.json"),
                 cwd=workdir,
+                system_prompt=system_prompt,
                 hooks=hooks,
             )
         await agent.close()

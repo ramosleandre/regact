@@ -61,4 +61,27 @@ class AgentError:
     message: str
 
 
-AgentEvent = TextDelta | ThinkingDelta | ToolCall | ToolResult | TurnComplete | AgentError
+@dataclass
+class SystemPrompt:
+    """The system prompt the framework gave the agent (recorded once, for the viewer)."""
+
+    text: str
+
+
+@dataclass
+class UserMessage:
+    """A message the framework sent the agent (first message, keep-alive) — for the viewer."""
+
+    text: str
+
+
+AgentEvent = (
+    TextDelta
+    | ThinkingDelta
+    | ToolCall
+    | ToolResult
+    | TurnComplete
+    | AgentError
+    | SystemPrompt
+    | UserMessage
+)
