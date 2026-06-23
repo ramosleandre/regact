@@ -96,11 +96,13 @@ def _make_executor(deps: RunDeps) -> ControllerExecutor | SandboxedExecutor:
             sandbox_wrap=deps.sandbox_wrap,
             compute_metrics=deps.compute_episode_metrics,
             aggregate_metrics=deps.aggregate_episode_metrics,
+            render_frame=deps.render_frame,
         )
     return ControllerExecutor(
         deps.env_client,
         compute_metrics=deps.compute_episode_metrics,
         aggregate_metrics=deps.aggregate_episode_metrics,
+        render_frame=deps.render_frame,
     )
 
 
@@ -129,6 +131,7 @@ class FinalizeControllerHook(Hook):
             lifecycle=deps.lifecycle,
             n_episodes=deps.n_episodes,
             max_moves=deps.max_moves,
+            record_video=deps.record_video,
         )
         deps.experiment.last_submission_results = result.to_json()
         return result

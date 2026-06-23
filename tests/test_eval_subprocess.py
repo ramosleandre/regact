@@ -75,3 +75,37 @@ async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path) -> None:
     assert result.aggregate["success_rate"] == 1.0
     # results.json was persisted for the viewer.
     assert (Path(workdir) / "submissions" / "0" / "results.json").is_file()
+
+
+async def test_sandboxed_executor_records_video(tmp_path: Path) -> None:
+    import numpy as np
+
+    def render_frame(obs: object) -> object:  # the problem's job; fixed RGB here
+        return np.full((16, 16, 3), 120, dtype=np.uint8)
+
+    workdir = str(tmp_path / "wd")
+    server = _server()
+    async with serve_env(server, "g", in_process=False) as conn:
+        Workspace(workdir).bootstrap(
+            [ControllerFeature()],
+            problem_name="p",
+            task_name="g",
+            env_base_url=conn.base_url,
+            game_id="g",
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+        )
+        (Path(workdir) / "solution.py").write_text(_FORWARD)
+        executor = SandboxedExecutor(
+            workdir=workdir, sandbox_wrap=lambda argv: argv, render_frame=render_frame
+        )
+        executor.run(
+            task_name="g",
+            solution_path=str(Path(workdir) / "solution.py"),
+            output_path=str(Path(workdir) / "submissions" / "0" / "results.json"),
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+            n_episodes=1,
+            max_moves=10,
+            record_video=True,
+        )
+    video = Path(workdir) / "submissions" / "0" / "video_0.mp4"
+    assert video.is_file() and video.stat().st_size > 0

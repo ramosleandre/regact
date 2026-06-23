@@ -32,23 +32,31 @@ def run_controller(
     *,
     name: str = "controller",
     max_steps: int = 400,
+    collect_frames: bool = False,
 ) -> ControllerSummary:
-    """Roll ``controller`` out on ``env`` (already reset) until done or ``max_steps``."""
+    """Roll ``controller`` out on ``env`` (already reset) until done or ``max_steps``.
+
+    With ``collect_frames`` it records each step's ``obs`` (JSON) for later video render.
+    """
     history = ControllerRun(name=name)
     obs = env.current()
+    frames = [obs.to_json()] if collect_frames else []
     steps = 0
+
+    def done(kind: str, reason: str) -> ControllerSummary:
+        return ControllerSummary(kind, reason, steps, history, obs, frames=frames)
 
     while True:
         if obs.is_done:
-            return ControllerSummary("env_done", "environment signalled done", steps, history, obs)
+            return done("env_done", "environment signalled done")
         if steps >= max_steps:
-            return ControllerSummary(
-                "max_steps", f"reached max_steps={max_steps}", steps, history, obs
-            )
+            return done("max_steps", f"reached max_steps={max_steps}")
 
         action = controller.act(obs)
         obs = env.step(action)
         steps += 1
+        if collect_frames:
+            frames.append(obs.to_json())
 
         for text in obs.info.get("milestones", []):
             history.events.append(MilestoneEvent(step=steps, description=str(text)))

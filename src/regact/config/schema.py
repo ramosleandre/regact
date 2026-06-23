@@ -90,5 +90,6 @@ class RunConfig:
     parallel_workers: int = 1
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    record_video: bool = True
     experiment_name: str | None = None
     output_root: str = "experiments"

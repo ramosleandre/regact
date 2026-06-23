@@ -68,6 +68,8 @@ class RunDeps:
     compute_episode_metrics: Callable[..., dict[str, Any]] | None = None
     aggregate_episode_metrics: Callable[..., dict[str, Any]] | None = None
     sandbox_wrap: Callable[[list[str]], list[str]] | None = None
+    render_frame: Callable[..., Any] | None = None  # one obs -> RGB frame, for the eval video
+    record_video: bool = True  # record a video of the final eval (if render_frame is set)
 
 
 class HookPhase(StrEnum):

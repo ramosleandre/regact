@@ -9,6 +9,7 @@ referenced by path, so inspection works whether or not the process persists.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from regact.envclient.obs import Obs
 
@@ -46,6 +47,7 @@ class ControllerSummary:
     history: ControllerRun
     final_obs: Obs
     trace_path: str | None = None  # path to the full per-step trace on disk, or None
+    frames: list[dict[str, Any]] = field(default_factory=list)  # per-step obs (JSON), for video
 
     @property
     def milestones(self) -> list[MilestoneEvent]:

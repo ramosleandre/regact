@@ -99,3 +99,17 @@ def test_minigrid_make_env_drives_a_step() -> None:
     *_, info = native.step(info["available_actions"][0])
     assert "available_actions" in info
     native.close()
+
+
+def test_minigrid_render_frame_makes_rgb() -> None:
+    """Runtime-gated: render_frame re-renders the symbolic obs into an RGB video frame."""
+    pytest.importorskip("minigrid")
+    from regact.env.renderer import jsonify
+
+    problem = MiniGridProblem(env_id="MiniGrid-Empty-5x5-v0")
+    native = problem.make_env("MiniGrid-Empty-5x5-v0")
+    native_obs, _ = native.reset(seed=0)
+    native.close()
+    img = problem.render_frame(Obs(frame=jsonify(native_obs)))
+    assert img is not None and img.ndim == 3 and img.shape[2] == 3
+    assert problem.render_frame(Obs(frame=[[1, 2]])) is None  # not a MiniGrid obs dict

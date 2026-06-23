@@ -19,6 +19,7 @@ from regact.problems.base import BaseProblem, register_problem
 
 _PROMPT = Path(__file__).parents[1] / "prompts" / "minigrid.md"
 _DEFAULT_ENV_ID = "MiniGrid-Empty-5x5-v0"
+_TILE_SIZE = 24  # px per cell in the video render
 
 
 class MiniGridRenderer(ObsRenderer):
@@ -92,6 +93,26 @@ class MiniGridProblem(BaseProblem):
                 ErrorCategory.ENV_RUNTIME, f"minigrid: obs_mode {mode!r} not supported yet"
             )
         return MiniGridRenderer()
+
+    def render_frame(self, obs: Obs) -> Any | None:
+        """Re-render the symbolic obs into an RGB frame via MiniGrid's own tile renderer."""
+        image = obs.frame.get("image") if isinstance(obs.frame, dict) else None
+        if image is None:
+            return None
+        import numpy as np
+        from minigrid.core.constants import OBJECT_TO_IDX
+        from minigrid.core.grid import Grid
+
+        arr = np.asarray(image, dtype=np.uint8)
+        grid, _ = Grid.decode(arr)
+        agent = np.argwhere(arr[:, :, 0] == OBJECT_TO_IDX["agent"])
+        if len(agent):  # fully-obs: the agent is encoded in the grid + state channel
+            pos = (int(agent[0][0]), int(agent[0][1]))
+            direction = int(arr[pos[0], pos[1], 2])
+        else:  # partial egocentric view: agent at bottom-center, facing up
+            pos = (arr.shape[0] // 2, arr.shape[1] - 1)
+            direction = 3
+        return grid.render(_TILE_SIZE, pos, direction)
 
     def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
         """Generic inputs only: terminated-with-reward = success (truncation is not)."""

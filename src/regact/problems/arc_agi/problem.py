@@ -32,6 +32,27 @@ logger = logging.getLogger(__name__)
 _PROMPT = Path(__file__).parents[1] / "prompts" / "arc_agi.md"
 _DEFAULT_DIR = os.environ.get("ARC_ENVIRONMENTS_DIR", "environnement")
 
+# Cell value (0-15) -> RGB, for the video render. ARC-AGI-3 16-color palette.
+_PALETTE: tuple[tuple[int, int, int], ...] = (
+    (0, 0, 0),
+    (0, 116, 217),
+    (255, 65, 54),
+    (46, 204, 64),
+    (255, 220, 0),
+    (170, 170, 170),
+    (240, 18, 190),
+    (255, 133, 27),
+    (127, 219, 255),
+    (135, 12, 37),
+    (1, 255, 112),
+    (177, 13, 201),
+    (160, 90, 44),
+    (255, 255, 255),
+    (96, 96, 96),
+    (255, 220, 180),
+)
+_RENDER_SCALE = 8
+
 
 # --------------------------------------------------------------------------- #
 # Server-side gym shim: JSON int/dict actions -> native GameAction
@@ -288,6 +309,18 @@ class ArcAgiProblem(BaseProblem):
 
     def helper_templates(self, task_name: str) -> list[TemplateFile]:
         return [TemplateFile("code_library/arc_agi_helper.py", _HELPER)]
+
+    def render_frame(self, obs: Obs) -> Any | None:
+        """Colorize the current 64x64 grid into an upscaled RGB frame for video."""
+        grid = _current_grid(obs.frame)
+        if grid is None:
+            return None
+        import numpy as np
+
+        cells = np.clip(np.asarray(grid, dtype=np.int64), 0, len(_PALETTE) - 1)
+        rgb = np.asarray(_PALETTE, dtype=np.uint8)[cells]
+        s = _RENDER_SCALE
+        return np.repeat(np.repeat(rgb, s, axis=0), s, axis=1)
 
     def render_obs_text(self, obs: Obs) -> str | None:
         """A compact text view of the current frame: a header (state, levels, available

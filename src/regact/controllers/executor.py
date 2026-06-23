@@ -46,6 +46,7 @@ class Executor(Protocol):
         lifecycle: Lifecycle,
         n_episodes: int = ...,
         max_moves: int = ...,
+        record_video: bool = ...,
     ) -> EvalResult: ...
 
 
@@ -74,14 +75,15 @@ def run_episodes_raw(
     lifecycle: Lifecycle,
     n_episodes: int,
     max_moves: int,
+    record_video: bool = False,
 ) -> list[dict[str, Any]]:
     """Run the controller for each episode; return raw per-episode outcomes (no scoring).
 
     The **untrusted** half: it loads ``solution.py`` and records only what the env returned
-    (final obs, steps, milestones, or a per-episode fault) — never a score. Safe to run in a
-    sandboxed subprocess. Raises if the controller cannot be loaded (the caller maps that to
-    an eval error). Used in-process by :class:`ControllerExecutor` and out-of-process by
-    ``regact.controllers.eval_runner``.
+    (final obs, steps, milestones, optional per-step frames, or a per-episode fault) — never a
+    score. Safe to run in a sandboxed subprocess. Raises if the controller cannot be loaded
+    (the caller maps that to an eval error). Used in-process by :class:`ControllerExecutor` and
+    out-of-process by ``regact.controllers.eval_runner``.
     """
     factory = _load_controller_factory(solution_path)
     episode_count = 1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes
@@ -89,7 +91,9 @@ def run_episodes_raw(
     for index in range(episode_count):
         env.reset()
         try:
-            summary = run_controller(env, factory(), max_steps=max_moves)
+            summary = run_controller(
+                env, factory(), max_steps=max_moves, collect_frames=record_video
+            )
         except Exception as exc:  # a fault inside the agent's controller
             out.append({"episode": index, "error": f"{type(exc).__name__}: {exc}"})
             continue
@@ -103,6 +107,7 @@ def run_episodes_raw(
                 ],
                 "final_obs": summary.final_obs.to_json(),
                 "steps": summary.total_steps,
+                "frames": summary.frames,
             }
         )
     return out
@@ -146,6 +151,36 @@ def score_episodes(
     return EvalResult(task=task_name, aggregate=aggregate, episodes=episodes, executor=executor)
 
 
+_VIDEO_FPS = 10
+FrameRenderer = Callable[[Obs], Any]  # one obs -> an RGB frame (ndarray) or None
+
+
+def _encode_video(rgb_frames: list[Any], path: str) -> None:
+    """Write RGB frames to an mp4. Best-effort: skips if empty or imageio is unavailable."""
+    if not rgb_frames:
+        return
+    try:
+        import imageio.v3 as iio
+    except Exception:
+        return
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with contextlib.suppress(Exception):
+        iio.imwrite(path, rgb_frames, fps=_VIDEO_FPS)
+
+
+def _write_episode_videos(
+    raw_episodes: list[dict[str, Any]], output_path: str, render_frame: FrameRenderer
+) -> None:
+    """Render each episode's captured frames (the problem colorizes; we encode the mp4)."""
+    out_dir = os.path.dirname(output_path) or "."
+    for raw in raw_episodes:
+        frames = raw.get("frames")
+        if not frames:
+            continue
+        rgb = [img for f in frames if (img := render_frame(Obs.from_json(f))) is not None]
+        _encode_video(rgb, os.path.join(out_dir, f"video_{raw['episode']}.mp4"))
+
+
 class ControllerExecutor:
     """Evaluate the controller in ``solution.py`` **in-process** and return a result.
 
@@ -162,10 +197,12 @@ class ControllerExecutor:
         *,
         compute_metrics: EpisodeMetrics | None = None,
         aggregate_metrics: AggregateMetrics | None = None,
+        render_frame: FrameRenderer | None = None,
     ) -> None:
         self._env = env
         self._compute_metrics = compute_metrics or _default_episode_metrics
         self._aggregate_metrics = aggregate_metrics or _default_aggregate
+        self._render_frame = render_frame
 
     def run(
         self,
@@ -176,6 +213,7 @@ class ControllerExecutor:
         lifecycle: Lifecycle,
         n_episodes: int = 1,
         max_moves: int = 400,
+        record_video: bool = False,
     ) -> EvalResult:
         """Drive the controller via the env client and persist the result."""
         try:
@@ -185,6 +223,7 @@ class ControllerExecutor:
                 lifecycle=lifecycle,
                 n_episodes=n_episodes,
                 max_moves=max_moves,
+                record_video=record_video and self._render_frame is not None,
             )
         except Exception as exc:  # import / attribute / syntax error in agent code
             result = EvalResult(
@@ -203,6 +242,8 @@ class ControllerExecutor:
             executor="in_process",
         )
         _write(output_path, result)
+        if record_video and self._render_frame is not None:
+            _write_episode_videos(raw, output_path, self._render_frame)
         return result
 
 
@@ -223,11 +264,13 @@ class SandboxedExecutor:
         sandbox_wrap: Callable[[list[str]], list[str]],
         compute_metrics: EpisodeMetrics | None = None,
         aggregate_metrics: AggregateMetrics | None = None,
+        render_frame: FrameRenderer | None = None,
     ) -> None:
         self._workdir = workdir
         self._wrap = sandbox_wrap
         self._compute_metrics = compute_metrics or _default_episode_metrics
         self._aggregate_metrics = aggregate_metrics or _default_aggregate
+        self._render_frame = render_frame
 
     def run(
         self,
@@ -238,13 +281,15 @@ class SandboxedExecutor:
         lifecycle: Lifecycle,
         n_episodes: int = 1,
         max_moves: int = 400,
+        record_video: bool = False,
     ) -> EvalResult:
         """Run the eval subprocess, score its raw outcomes here, and persist the result."""
         out_dir = os.path.dirname(output_path) or "."
         os.makedirs(out_dir, exist_ok=True)
         raw_path = os.path.join(out_dir, "episodes_raw.json")
+        video = record_video and self._render_frame is not None
         result = self._spawn_and_score(
-            task_name, solution_path, raw_path, lifecycle, n_episodes, max_moves
+            task_name, solution_path, raw_path, lifecycle, n_episodes, max_moves, video
         )
         _write(output_path, result)
         return result
@@ -257,6 +302,7 @@ class SandboxedExecutor:
         lifecycle: Lifecycle,
         n_episodes: int,
         max_moves: int,
+        record_video: bool,
     ) -> EvalResult:
         argv = [
             sys.executable,
@@ -273,6 +319,8 @@ class SandboxedExecutor:
             "--output",
             os.path.abspath(raw_path),
         ]
+        if record_video:
+            argv.append("--record-video")
         tmp = os.path.join(self._workdir, "tmp")
         os.makedirs(tmp, exist_ok=True)
         env = {**os.environ, "PYTHONPATH": _src_dir(), "TMPDIR": tmp}
@@ -295,13 +343,17 @@ class SandboxedExecutor:
                 error_category=ErrorCategory.AGENT_SOLUTION,
                 executor="subprocess",
             )
-        return score_episodes(
-            payload.get("episodes", []),
+        episodes = payload.get("episodes", [])
+        result = score_episodes(
+            episodes,
             task_name=task_name,
             compute_metrics=self._compute_metrics,
             aggregate_metrics=self._aggregate_metrics,
             executor="subprocess",
         )
+        if record_video and self._render_frame is not None:
+            _write_episode_videos(episodes, raw_path, self._render_frame)
+        return result
 
 
 def _load_controller_factory(solution_path: str) -> Any:

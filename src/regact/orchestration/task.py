@@ -139,6 +139,8 @@ async def run_task(
             compute_episode_metrics=problem.compute_episode_metrics,
             aggregate_episode_metrics=problem.aggregate_episode_metrics,
             sandbox_wrap=eval_wrap,
+            render_frame=problem.render_frame,
+            record_video=config.record_video,
         )
         tools = [tool for feature in features for tool in feature.tools(deps)]
         hooks = [hook for feature in features for hook in feature.hooks(deps)]
