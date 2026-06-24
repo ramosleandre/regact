@@ -19,4 +19,7 @@ per game and must be discovered through interaction, not assumed.
 
 ## Goal
 
-Complete as many levels as possible (a WIN completes all levels).
+Complete as many levels as possible (a WIN completes all levels). **Submit your
+controller each time it clears another level** — do not run all the way to the last
+level before submitting. Each submission records that level's score and a video, so
+submitting per level keeps a trace of how far you got.

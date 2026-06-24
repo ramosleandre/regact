@@ -15,6 +15,11 @@ Your working directory already holds the files to edit:
 - `code_library/base_controller.py` — the contract to subclass.
 - `code_library/example_controller.py` — a trivial worked example.
 
-Implement your controller in `solution.py`, then run **SubmitSolution** to score it
-against the environment; you may submit as many times as you like. Call **ExitTask** to
-finish the run once you are satisfied. See *Framework tools* below for how to run these.
+Implement your controller in `solution.py` first: `act` must return a real action (one of
+`obs.available_actions`) — **never submit the unimplemented stub** (a controller that
+raises scores nothing). Then run **SubmitSolution** to score it. Once `act` works, **submit
+early and often**: submit as soon as it does something sensible, and again after each
+improvement — do not refine for a long time without submitting. Only submitted controllers
+are scored, and each submission is recorded (score + a video), so frequent submits keep a
+trace of progress. Call **ExitTask** to finish the run once you are satisfied. See
+*Framework tools* below for how to run these.
