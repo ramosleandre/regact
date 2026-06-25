@@ -146,10 +146,14 @@ function rowEl(cell, vals) {
 }
 
 // ---------------------------------------------------------------- conversation tab
+const _TAG_LABEL = { submit: "submit", submit_win: "submit ✓ level", cheat: "cheat" };
+
 async function renderConversation(name) {
   const d = await gameDetail(name);
-  const wrap = h("div");
-  if (!d.turns.length) wrap.append(h("div", "muted", "no transcript"));
+  const conv = h("div", "conv");
+  const navItems = [];     // {id, tag, label} — submissions + cheats, to jump to
+  let nSubmit = 0, nCheat = 0;
+  if (!d.turns.length) conv.append(h("div", "muted", "no transcript"));
   d.turns.forEach((t, i) => {
     const turn = h("div", "turn");
     const u = t.usage || {};
@@ -170,22 +174,54 @@ async function renderConversation(name) {
       } else if (it.kind === "text") {
         body.append(h("pre", "text", it.text));
       } else if (it.kind === "tool" && it.tool) {
-        body.append(toolBlock(it.tool));
+        const block = toolBlock(it.tool);
+        const tag = it.tool.tag;
+        if (tag === "submit" || tag === "submit_win") {
+          block.id = "nav-submit-" + nSubmit;
+          navItems.push({ id: block.id, tag, label: `submission ${nSubmit}${tag === "submit_win" ? " ✓ level" : ""}` });
+          nSubmit++;
+        } else if (tag === "cheat") {
+          block.id = "nav-cheat-" + nCheat;
+          navItems.push({ id: block.id, tag, label: `cheat ${nCheat + 1}` });
+          nCheat++;
+        }
+        body.append(block);
       }
     }
     if (t.error) body.append(h("pre", "text", t.error.message));
     turn.append(head, body);
-    wrap.append(turn);
+    conv.append(turn);
   });
-  shell(name, "conversation", wrap);
+
+  const nav = h("div", "convnav");
+  nav.append(h("div", "h", "Jump to"));
+  if (navItems.length) {
+    for (const it of navItems) {
+      const a = h("a", "navitem nav-" + it.tag, it.label);
+      a.onclick = (e) => {
+        e.preventDefault();
+        document.getElementById(it.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      };
+      nav.append(a);
+    }
+  } else {
+    nav.append(h("div", "muted", "no submission yet"));
+  }
+  const layout = h("div", "convlayout");
+  layout.append(nav, conv);
+  shell(name, "conversation", layout);
 }
+
 function toolBlock(tool) {
   // The reader tags calls authoritatively: blue submit, green submit-that-won a level, red cheat.
   const cls = { cheat: " cheat", submit: " submit", submit_win: " submit-win" }[tool.tag] || "";
   const box = h("div", "tool" + cls);
   const inp = JSON.stringify(tool.input);
-  box.append(h("div", "t", h("b", null, tool.name), " ",
-    h("span", "muted", inp.length > 240 ? inp.slice(0, 240) + "…" : inp)));
+  const t = h("div", "t");
+  if (tool.tag) t.append(h("span", "tag tag-" + tool.tag, _TAG_LABEL[tool.tag]), " ");
+  t.append(h("b", null, tool.name), " ",
+    h("span", "muted", inp.length > 240 ? inp.slice(0, 240) + "…" : inp));
+  box.append(t);
   if (tool.result != null) {
     const res = h("div", "res" + (tool.is_error ? " err" : ""));
     res.append(h("pre", null, String(tool.result).slice(0, 4000)));

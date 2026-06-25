@@ -36,6 +36,16 @@ def get_controller():
     return Controller()
 """
 
+_BROKEN = """\
+class Controller:
+    def act(self, obs):
+        raise NotImplementedError
+
+
+def get_controller():
+    return Controller()
+"""
+
 
 def _server() -> EnvServer:
     server = EnvServer()
@@ -84,6 +94,30 @@ async def test_control_channel_runs_submit_and_exit(tmp_path: Path) -> None:
         exit_resp = httpx.post(url, json={"name": "ExitTask", "input": {}}, timeout=30.0)
         assert exit_resp.status_code == 200
         assert experiment.exit_requested is True
+
+
+async def test_control_channel_submit_surfaces_controller_error(tmp_path: Path) -> None:
+    """A failing controller's error reaches the agent (so it can fix it), not just a count."""
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    (workdir / "solution.py").write_text(_BROKEN)
+    server = _server()
+    async with serve_env(server, "g", in_process=False) as conn:
+        experiment = ExperimentState(problem_name="p", task_name="g", n_eval_episodes=1, n_videos=0)
+        deps = RunDeps(
+            experiment=experiment,
+            env_client=conn.client,
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+            solution_path=str(workdir / "solution.py"),
+            submissions_dir=str(workdir / "submissions"),
+            n_episodes=1,
+            max_moves=10,
+        )
+        server.bind_control("g", ControllerFeature().tools(deps), cwd=str(workdir))
+        url = f"{conn.base_url}/control/g/tool"
+        resp = httpx.post(url, json={"name": "SubmitSolution", "input": {}}, timeout=30.0)
+        assert resp.status_code == 200
+        assert "NotImplementedError" in resp.json()["output"]  # the agent sees the real error
 
 
 async def test_control_channel_unbound_and_unknown_tool(tmp_path: Path) -> None:

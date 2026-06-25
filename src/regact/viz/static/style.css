@@ -44,6 +44,23 @@ details.think pre { color: var(--think); opacity: .85; }
 .tool.submit { border: 2px solid var(--accent); }          /* a solution submission */
 .tool.submit-win { border: 2px solid var(--good); }        /* submission that cleared a level */
 .tool.cheat { border: 2px solid var(--bad); }              /* flagged: reached for a forbidden path/module */
+.tag { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; color: #0b0d11; }
+.tag-submit { background: var(--accent); }
+.tag-submit_win { background: var(--good); }
+.tag-cheat { background: var(--bad); color: #fff; }
+
+/* conversation: left jump-nav (submissions + cheats) beside the transcript */
+.convlayout { display: flex; gap: 16px; align-items: flex-start; }
+.convnav { width: 190px; flex: 0 0 auto; position: sticky; top: 64px; max-height: 82vh; overflow: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 8px; }
+.convnav .h { color: var(--muted); font-size: 12px; padding: 4px 6px 6px; }
+.conv { flex: 1 1 auto; min-width: 0; }
+.navitem { display: block; padding: 4px 8px; margin: 2px 0; border-radius: 6px; font-size: 13px;
+  cursor: pointer; border-left: 3px solid var(--line); color: var(--fg); }
+.navitem:hover { background: var(--panel2); }
+.navitem.nav-submit { border-left-color: var(--accent); }
+.navitem.nav-submit_win { border-left-color: var(--good); }
+.navitem.nav-cheat { border-left-color: var(--bad); }
 .tool .t { padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 13px; }
 .tool .t b { color: var(--accent); }
 .tool .res { padding: 6px 10px; border-top: 1px dashed var(--line); }

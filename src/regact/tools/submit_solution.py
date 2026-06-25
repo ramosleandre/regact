@@ -33,6 +33,7 @@ class SubmitSolution(Tool):
         lifecycle: Lifecycle,
         n_episodes: int = 1,
         max_moves: int = 400,
+        record_video: bool = False,
     ) -> None:
         self._experiment = experiment
         self._executor = executor
@@ -42,6 +43,7 @@ class SubmitSolution(Tool):
         self._lifecycle = lifecycle
         self._n_episodes = n_episodes
         self._max_moves = max_moves
+        self._record_video = record_video
 
     @property
     def name(self) -> str:
@@ -66,9 +68,6 @@ class SubmitSolution(Tool):
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "results.json")
 
-        # Run the (synchronous) executor off the event loop: when this tool is
-        # invoked from the control server, the executor's sync EnvClient must reach
-        # the same server, so the loop has to stay free to answer it.
         result = await asyncio.to_thread(
             self._executor.run,
             task_name=self._task_name,
@@ -77,8 +76,16 @@ class SubmitSolution(Tool):
             lifecycle=self._lifecycle,
             n_episodes=self._n_episodes,
             max_moves=self._max_moves,
+            record_video=self._record_video,
         )
 
         self._experiment.submission_count = index + 1
         self._experiment.last_submission_results = result.to_json()
-        return ToolOutput(data={"submission": index, "aggregate": result.aggregate})
+
+        errors = [e.error for e in result.episodes if e.error]
+        if result.error:
+            errors.insert(0, result.error)
+        data: dict[str, Any] = {"submission": index, "aggregate": result.aggregate}
+        if errors:
+            data["errors"] = errors[:3]
+        return ToolOutput(data=data)

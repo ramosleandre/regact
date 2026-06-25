@@ -71,8 +71,8 @@ def test_renderer_makes_frame_json_safe() -> None:
 def test_render_frame_colorizes_grid_for_video() -> None:
     img = _problem().render_frame(Obs(frame=[[[0, 1], [2, 3]]]))  # a 2x2 grid stack
     assert img is not None and img.shape == (16, 16, 3) and img.dtype.name == "uint8"
-    assert tuple(img[0, 0]) == (0, 0, 0)  # value 0 -> black
-    assert tuple(img[0, 8]) == (0, 116, 217)  # value 1 -> blue (after x8 upscale)
+    assert tuple(img[0, 0]) == (255, 255, 255)  # value 0 -> white (ARC-AGI-3 palette)
+    assert tuple(img[0, 8]) == (204, 204, 204)  # value 1 -> off-white (after x8 upscale)
     assert _problem().render_frame(Obs(frame=None)) is None
 
 

@@ -16,6 +16,7 @@ import contextlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -216,6 +217,7 @@ class ControllerExecutor:
         record_video: bool = False,
     ) -> EvalResult:
         """Drive the controller via the env client and persist the result."""
+        _snapshot_solution(solution_path, output_path)
         try:
             raw = run_episodes_raw(
                 self._env,
@@ -286,6 +288,7 @@ class SandboxedExecutor:
         """Run the eval subprocess, score its raw outcomes here, and persist the result."""
         out_dir = os.path.dirname(output_path) or "."
         os.makedirs(out_dir, exist_ok=True)
+        _snapshot_solution(solution_path, output_path)
         raw_path = os.path.join(out_dir, "episodes_raw.json")
         video = record_video and self._render_frame is not None
         result = self._spawn_and_score(
@@ -381,6 +384,18 @@ def _write(output_path: str, result: EvalResult) -> None:
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as handle:
         json.dump(result.to_json(), handle, indent=2)
+
+
+def _snapshot_solution(solution_path: str, output_path: str) -> None:
+    """Copy the evaluated ``solution.py`` next to its ``results.json`` (and video), so each
+    submission keeps the exact controller for post-run analysis. Best-effort; copies the
+    file verbatim (no import/execution), so it never pulls code from another directory."""
+    if not os.path.exists(solution_path):
+        return
+    dest_dir = os.path.dirname(output_path) or "."
+    os.makedirs(dest_dir, exist_ok=True)
+    with contextlib.suppress(OSError):
+        shutil.copyfile(solution_path, os.path.join(dest_dir, "solution.py"))
 
 
 def _src_dir() -> str:

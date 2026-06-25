@@ -162,6 +162,7 @@ class ControllerFeature(Feature):
             lifecycle=deps.lifecycle,
             n_episodes=deps.n_episodes,
             max_moves=deps.max_moves,
+            record_video=deps.record_video,
         )
         return [submit, ExitTask(deps.experiment)]
 

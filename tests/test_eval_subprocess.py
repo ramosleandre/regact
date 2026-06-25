@@ -73,8 +73,9 @@ async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path) -> None:
     assert result.executor == "subprocess"
     assert result.error is None
     assert result.aggregate["success_rate"] == 1.0
-    # results.json was persisted for the viewer.
+    # results.json + a snapshot of the evaluated controller were persisted for the viewer.
     assert (Path(workdir) / "submissions" / "0" / "results.json").is_file()
+    assert (Path(workdir) / "submissions" / "0" / "solution.py").is_file()
 
 
 async def test_sandboxed_executor_records_video(tmp_path: Path) -> None:
