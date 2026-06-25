@@ -110,3 +110,36 @@ async def test_sandboxed_executor_records_video(tmp_path: Path) -> None:
         )
     video = Path(workdir) / "submissions" / "0" / "video_0.mp4"
     assert video.is_file() and video.stat().st_size > 0
+
+
+async def test_sandboxed_executor_shadow_replay_scores_on_trusted_env(tmp_path: Path) -> None:
+    """With shadow_replay, the score comes from re-applying the recorded actions on the trusted
+    env (this side), not from the subprocess's self-reported obs."""
+    workdir = str(tmp_path / "wd")
+    server = _server()
+    async with serve_env(server, "g", in_process=False) as conn:
+        Workspace(workdir).bootstrap(
+            [ControllerFeature()],
+            problem_name="p",
+            task_name="g",
+            env_base_url=conn.base_url,
+            game_id="g",
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+        )
+        (Path(workdir) / "solution.py").write_text(_FORWARD)
+        executor = SandboxedExecutor(
+            workdir=workdir,
+            sandbox_wrap=lambda argv: argv,
+            env_client=conn.client,
+            shadow_replay=True,
+        )
+        result = executor.run(
+            task_name="g",
+            solution_path=str(Path(workdir) / "solution.py"),
+            output_path=str(Path(workdir) / "submissions" / "0" / "results.json"),
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+            n_episodes=1,
+            max_moves=10,
+        )
+    assert result.executor == "shadow_replay"  # scored by the trusted replay, not the subprocess
+    assert result.aggregate["success_rate"] == 1.0

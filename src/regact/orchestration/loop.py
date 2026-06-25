@@ -19,6 +19,8 @@ The function stays short; each responsibility is its own helper:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -115,31 +117,38 @@ async def run_session(
 
     message = first_message
     turns = 0
+    watchdog = _spawn_walltime_watchdog(agent, start, limits.walltime_s)
+    try:
+        while True:
+            reason = _decide_stop(
+                exit_requested=experiment.exit_requested,
+                interrupted=stop.is_set() if stop is not None else False,
+                turns=turns,
+                elapsed_s=time.monotonic() - start,
+                limits=limits,
+            )
+            if reason is not None:
+                break
 
-    while True:
-        reason = _decide_stop(
-            exit_requested=experiment.exit_requested,
-            interrupted=stop.is_set() if stop is not None else False,
-            turns=turns,
-            elapsed_s=time.monotonic() - start,
-            limits=limits,
-        )
-        if reason is not None:
-            break
+            outcome = await _run_turn(message, ctx)
 
-        outcome = await _run_turn(message, ctx)
+            if limits.walltime_s is not None and time.monotonic() - start >= limits.walltime_s:
+                reason = "walltime_limit"  # the watchdog aborted a long turn; this is not an error
+                break
+            if outcome.crashed:
+                experiment.last_error_category = ErrorCategory.LOOP_CRASH.value
+                reason = "loop_crash"
+                break
+            if outcome.error_category is not None:
+                experiment.last_error_category = outcome.error_category.value
+                reason = outcome.error_category.value
+                break
 
-        if outcome.crashed:
-            experiment.last_error_category = ErrorCategory.LOOP_CRASH.value
-            reason = "loop_crash"
-            break
-        if outcome.error_category is not None:
-            experiment.last_error_category = outcome.error_category.value
-            reason = outcome.error_category.value
-            break
-
-        turns += 1
-        message = _KEEP_ALIVE_MESSAGE
+            turns += 1
+            message = _KEEP_ALIVE_MESSAGE
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
 
     await _run_teardown_hooks(hooks or [], reason, ctx)
     experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
@@ -176,6 +185,23 @@ async def _run_teardown_hooks(hooks: list[Hook], reason: str, ctx: _LoopContext)
                 hook=type(hook).__name__,
                 error=f"{type(exc).__name__}: {exc}",
             )
+
+
+def _spawn_walltime_watchdog(
+    agent: CodeAgent, start: float, walltime_s: int | None
+) -> asyncio.Task[None] | None:
+    """A task that aborts ``agent`` once ``walltime_s`` elapses (None = no budget)."""
+    if walltime_s is None:
+        return None
+
+    async def _watch() -> None:
+        remaining = walltime_s - (time.monotonic() - start)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        with contextlib.suppress(Exception):
+            await agent.abort()
+
+    return asyncio.create_task(_watch())
 
 
 def _decide_stop(

@@ -41,10 +41,11 @@ def run_controller(
     history = ControllerRun(name=name)
     obs = env.current()
     frames = [obs.to_json()] if collect_frames else []
+    actions: list[Any] = []
     steps = 0
 
     def done(kind: str, reason: str) -> ControllerSummary:
-        return ControllerSummary(kind, reason, steps, history, obs, frames=frames)
+        return ControllerSummary(kind, reason, steps, history, obs, frames=frames, actions=actions)
 
     while True:
         if obs.is_done:
@@ -53,6 +54,7 @@ def run_controller(
             return done("max_steps", f"reached max_steps={max_steps}")
 
         action = controller.act(obs)
+        actions.append(action)
         obs = env.step(action)
         steps += 1
         if collect_frames:

@@ -66,6 +66,7 @@ class ProblemConfig:
 class LimitsConfig:
     keep_alive: int = 150  # max idle agent turns before the loop gives up
     max_moves: int = 2500  # max env.step per controller rollout (eval)
+    n_episodes: int = 1  # eval episodes per submission (MULTI_INSTANCE: more = better stats)
     walltime_s: int | None = None  # wall-clock budget for the whole task (per game)
     token_budget: int | None = None
 
@@ -91,5 +92,6 @@ class RunConfig:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     record_video: bool = True
+    shadow_replay: bool = False
     experiment_name: str | None = None
     output_root: str = "experiments"

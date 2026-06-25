@@ -56,6 +56,9 @@ class Scheduler:
 
         async def _bounded(name: str) -> object:
             async with semaphore:
-                return await unit(name)
+                try:
+                    return await unit(name)
+                except Exception as exc:
+                    return f"task_error: {type(exc).__name__}: {exc}"
 
         return list(await asyncio.gather(*(_bounded(name) for name in task_names)))

@@ -16,8 +16,10 @@ Framework tools (submit/exit) are NOT passed natively to these agents — their
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
+import signal
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable
 
@@ -83,6 +85,7 @@ class _CliAgent(CodeAgent):
             stderr=None,
             env={**os.environ, **self._env_overrides},
             limit=_STDOUT_LINE_LIMIT,
+            start_new_session=True,
         )
         self._proc = proc
         if stdin_data is not None and proc.stdin is not None:
@@ -116,7 +119,11 @@ class _CliAgent(CodeAgent):
         self._pending.append(message)
 
     async def abort(self) -> None:
-        if self._proc is not None and self._proc.returncode is None:
+        if self._proc is None or self._proc.returncode is not None:
+            return
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(os.getpgid(self._proc.pid), signal.SIGKILL)
+        with contextlib.suppress(ProcessLookupError):
             self._proc.kill()
 
     async def close(self) -> None:

@@ -14,9 +14,11 @@ parallel_workers: 1
 limits:
   keep_alive: 150
   max_moves: 2500
+  n_episodes: 1
 security:
   sandbox: auto         # auto | none | seatbelt | bwrap | apptainer — 'none' disables the sandbox
   deny_egress: true     # true = only the agent's declared hosts reachable (via a localhost proxy); blocks the rest
 record_video: true      # record a video of the final controller eval (per game's render_frame)
+shadow_replay: false    # re-score by replaying actions on a trusted env (anti-cheat; ~2x eval cost)
 output_root: experiments
 experiment_name: dev

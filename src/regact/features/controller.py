@@ -97,12 +97,16 @@ def _make_executor(deps: RunDeps) -> ControllerExecutor | SandboxedExecutor:
             compute_metrics=deps.compute_episode_metrics,
             aggregate_metrics=deps.aggregate_episode_metrics,
             render_frame=deps.render_frame,
+            seed=deps.seed,
+            env_client=deps.env_client,
+            shadow_replay=deps.shadow_replay,
         )
     return ControllerExecutor(
         deps.env_client,
         compute_metrics=deps.compute_episode_metrics,
         aggregate_metrics=deps.aggregate_episode_metrics,
         render_frame=deps.render_frame,
+        seed=deps.seed,
     )
 
 

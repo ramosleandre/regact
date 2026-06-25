@@ -25,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-moves", type=int, default=400)
     parser.add_argument("--output", required=True)
     parser.add_argument("--record-video", action="store_true")
+    parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args(argv)
 
     # The workdir is the cwd: its framework.make_env carries the baked env URL + game id.
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
             n_episodes=args.episodes,
             max_moves=args.max_moves,
             record_video=args.record_video,
+            seed=args.seed,
         )
         payload: dict[str, object] = {"episodes": episodes}
     except Exception as exc:  # could not load solution.py — report it for scoring

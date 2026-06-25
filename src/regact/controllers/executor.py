@@ -77,6 +77,7 @@ def run_episodes_raw(
     n_episodes: int,
     max_moves: int,
     record_video: bool = False,
+    seed: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run the controller for each episode; return raw per-episode outcomes (no scoring).
 
@@ -90,7 +91,7 @@ def run_episodes_raw(
     episode_count = 1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes
     out: list[dict[str, Any]] = []
     for index in range(episode_count):
-        env.reset()
+        env.reset(seed=None if seed is None else seed + index)
         try:
             summary = run_controller(
                 env, factory(), max_steps=max_moves, collect_frames=record_video
@@ -109,6 +110,7 @@ def run_episodes_raw(
                 "final_obs": summary.final_obs.to_json(),
                 "steps": summary.total_steps,
                 "frames": summary.frames,
+                "actions": summary.actions,
             }
         )
     return out
@@ -152,7 +154,63 @@ def score_episodes(
     return EvalResult(task=task_name, aggregate=aggregate, episodes=episodes, executor=executor)
 
 
+def _replay_episode(env: EnvClient, actions: list[Any], *, seed: int | None) -> tuple[Obs, int]:
+    """Re-apply a recorded action sequence on a fresh trusted env; return its final obs + steps."""
+    obs = env.reset(seed=seed)
+    steps = 0
+    for action in actions:
+        if obs.is_done:
+            break
+        obs = env.step(action)
+        steps += 1
+    return obs, steps
+
+
+def replay_and_score(
+    env: EnvClient,
+    raw_episodes: list[dict[str, Any]],
+    *,
+    task_name: str,
+    seed: int | None,
+    compute_metrics: EpisodeMetrics,
+    aggregate_metrics: AggregateMetrics,
+) -> EvalResult:
+    """Shadow replay (anti-cheat): score by RE-APPLYING the controller's recorded actions on a fresh
+    **trusted** env here, instead of trusting the obs the untrusted subprocess reported. The actions
+    must really win on the real env, so a sandboxed controller cannot fake its own score."""
+    episodes: list[EpisodeResult] = []
+    for raw in raw_episodes:
+        index = int(raw["episode"])
+        if raw.get("error"):
+            episodes.append(
+                EpisodeResult(
+                    episode=index,
+                    error=str(raw["error"]),
+                    error_category=ErrorCategory.AGENT_SOLUTION,
+                )
+            )
+            continue
+        final_obs, steps = _replay_episode(
+            env, raw.get("actions", []), seed=None if seed is None else seed + index
+        )
+        episodes.append(
+            EpisodeResult(
+                episode=index,
+                stop_kind=raw.get("stop_kind"),
+                stop_reason=raw.get("stop_reason"),
+                milestones=raw.get("milestones", []),
+                metrics=compute_metrics(final_obs, steps=steps),
+            )
+        )
+    aggregate = aggregate_metrics([e.metrics for e in episodes if e.error is None])
+    aggregate["n_errors"] = sum(1 for e in episodes if e.error is not None)
+    return EvalResult(
+        task=task_name, aggregate=aggregate, episodes=episodes, executor="shadow_replay"
+    )
+
+
 _VIDEO_FPS = 10
+_EVAL_TIMEOUT_S = 1200  # hard cap on one eval subprocess; a hung controller can't freeze the task
 FrameRenderer = Callable[[Obs], Any]  # one obs -> an RGB frame (ndarray) or None
 
 
@@ -199,11 +257,13 @@ class ControllerExecutor:
         compute_metrics: EpisodeMetrics | None = None,
         aggregate_metrics: AggregateMetrics | None = None,
         render_frame: FrameRenderer | None = None,
+        seed: int | None = None,
     ) -> None:
         self._env = env
         self._compute_metrics = compute_metrics or _default_episode_metrics
         self._aggregate_metrics = aggregate_metrics or _default_aggregate
         self._render_frame = render_frame
+        self._seed = seed
 
     def run(
         self,
@@ -226,6 +286,7 @@ class ControllerExecutor:
                 n_episodes=n_episodes,
                 max_moves=max_moves,
                 record_video=record_video and self._render_frame is not None,
+                seed=self._seed,
             )
         except Exception as exc:  # import / attribute / syntax error in agent code
             result = EvalResult(
@@ -267,12 +328,18 @@ class SandboxedExecutor:
         compute_metrics: EpisodeMetrics | None = None,
         aggregate_metrics: AggregateMetrics | None = None,
         render_frame: FrameRenderer | None = None,
+        seed: int | None = None,
+        env_client: EnvClient | None = None,
+        shadow_replay: bool = False,
     ) -> None:
         self._workdir = workdir
         self._wrap = sandbox_wrap
         self._compute_metrics = compute_metrics or _default_episode_metrics
         self._aggregate_metrics = aggregate_metrics or _default_aggregate
         self._render_frame = render_frame
+        self._seed = seed
+        self._env_client = env_client
+        self._shadow_replay = shadow_replay and env_client is not None
 
     def run(
         self,
@@ -324,12 +391,27 @@ class SandboxedExecutor:
         ]
         if record_video:
             argv.append("--record-video")
+        if self._seed is not None:
+            argv += ["--seed", str(self._seed)]
         tmp = os.path.join(self._workdir, "tmp")
         os.makedirs(tmp, exist_ok=True)
         env = {**os.environ, "PYTHONPATH": _src_dir(), "TMPDIR": tmp}
-        proc = subprocess.run(
-            self._wrap(argv), cwd=self._workdir, env=env, capture_output=True, text=True
-        )
+        try:
+            proc = subprocess.run(
+                self._wrap(argv),
+                cwd=self._workdir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=_EVAL_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            return EvalResult(
+                task=task_name,
+                error=f"eval timed out after {_EVAL_TIMEOUT_S}s (controller likely hung)",
+                error_category=ErrorCategory.EVAL_HARNESS,
+                executor="subprocess",
+            )
         payload = _read_json(raw_path)
         if payload is None:  # the subprocess died before writing (e.g. sandbox killed it)
             tail = (proc.stderr or "").strip()[-500:]
@@ -347,13 +429,23 @@ class SandboxedExecutor:
                 executor="subprocess",
             )
         episodes = payload.get("episodes", [])
-        result = score_episodes(
-            episodes,
-            task_name=task_name,
-            compute_metrics=self._compute_metrics,
-            aggregate_metrics=self._aggregate_metrics,
-            executor="subprocess",
-        )
+        if self._shadow_replay and self._env_client is not None:
+            result = replay_and_score(
+                self._env_client,
+                episodes,
+                task_name=task_name,
+                seed=self._seed,
+                compute_metrics=self._compute_metrics,
+                aggregate_metrics=self._aggregate_metrics,
+            )
+        else:
+            result = score_episodes(
+                episodes,
+                task_name=task_name,
+                compute_metrics=self._compute_metrics,
+                aggregate_metrics=self._aggregate_metrics,
+                executor="subprocess",
+            )
         if record_video and self._render_frame is not None:
             _write_episode_videos(episodes, raw_path, self._render_frame)
         return result

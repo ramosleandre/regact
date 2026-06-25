@@ -134,13 +134,15 @@ async def run_task(
             lifecycle=config.problem.lifecycle,
             solution_path=os.path.join(workdir, "solution.py"),
             submissions_dir=os.path.join(workdir, "submissions"),
-            n_episodes=1,
+            n_episodes=config.limits.n_episodes,
             max_moves=config.limits.max_moves,
             compute_episode_metrics=problem.compute_episode_metrics,
             aggregate_episode_metrics=problem.aggregate_episode_metrics,
             sandbox_wrap=eval_wrap,
             render_frame=problem.render_frame,
             record_video=config.record_video,
+            seed=config.problem.seed,
+            shadow_replay=config.shadow_replay,
         )
         tools = [tool for feature in features for tool in feature.tools(deps)]
         hooks = [hook for feature in features for hook in feature.hooks(deps)]
@@ -184,50 +186,52 @@ async def run_task(
             control_actions=agent.capabilities().control_actions,
             tool_names=[tool.name for tool in tools],
         )
-        await agent.start(
-            cwd=workdir,
-            model=config.agent.model,
-            base_url=config.agent.base_url,
-            api_key=config.agent.api_key,
-            system_prompt=system_prompt,
-            tools=tools,
-            env=agent_env,
-            runtime_wrap=runtime_wrap,
-        )
-        first_obs = server.first_obs(task_name)
-        experiment.win_levels = (first_obs.info or {}).get("win_levels")
-        first_message = builder.build_first_message(problem.render_obs_text(first_obs))
-
-        with (
-            TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
-            RunLogger(logs_dir, task=task_name) as logger,
-        ):
-            single_controller = (
-                config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE
-                and "controller" in config.features
-            )
-            if single_controller:
-                logger.log(
-                    LogComponent.ORCHESTRATOR,
-                    "WARNING",
-                    "single_life_controller",
-                    message="single-instance + controller eval reuses the shared env (degenerate)",
-                )
-            reason = await run_session(
-                agent,
-                experiment=experiment,
-                first_message=first_message,
-                tools=loop_tools,
-                transcript=transcript,
-                logger=logger,
-                limits=config.limits,
-                state_path=os.path.join(logs_dir, "experiment_state.json"),
+        try:
+            await agent.start(
                 cwd=workdir,
+                model=config.agent.model,
+                base_url=config.agent.base_url,
+                api_key=config.agent.api_key,
                 system_prompt=system_prompt,
-                hooks=hooks,
-                move_count=lambda: server.live_action_count(task_name),
+                tools=tools,
+                env=agent_env,
+                runtime_wrap=runtime_wrap,
             )
-        await agent.close()
-        if egress is not None:
-            await egress.close()
+            first_obs = server.first_obs(task_name)
+            experiment.win_levels = (first_obs.info or {}).get("win_levels")
+            first_message = builder.build_first_message(problem.render_obs_text(first_obs))
+
+            with (
+                TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
+                RunLogger(logs_dir, task=task_name) as logger,
+            ):
+                single_controller = (
+                    config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE
+                    and "controller" in config.features
+                )
+                if single_controller:
+                    logger.log(
+                        LogComponent.ORCHESTRATOR,
+                        "WARNING",
+                        "single_life_controller",
+                        message="single-instance + controller: eval reuses the shared env",
+                    )
+                reason = await run_session(
+                    agent,
+                    experiment=experiment,
+                    first_message=first_message,
+                    tools=loop_tools,
+                    transcript=transcript,
+                    logger=logger,
+                    limits=config.limits,
+                    state_path=os.path.join(logs_dir, "experiment_state.json"),
+                    cwd=workdir,
+                    system_prompt=system_prompt,
+                    hooks=hooks,
+                    move_count=lambda: server.live_action_count(task_name),
+                )
+        finally:  # always release the agent subprocess + the egress proxy, even on a crash
+            await agent.close()
+            if egress is not None:
+                await egress.close()
         return reason

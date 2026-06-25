@@ -48,6 +48,7 @@ class ControllerSummary:
     final_obs: Obs
     trace_path: str | None = None  # path to the full per-step trace on disk, or None
     frames: list[dict[str, Any]] = field(default_factory=list)  # per-step obs (JSON), for video
+    actions: list[Any] = field(default_factory=list)  # actions taken, for the trusted shadow replay
 
     @property
     def milestones(self) -> list[MilestoneEvent]:
