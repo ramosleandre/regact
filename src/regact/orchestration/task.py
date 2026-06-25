@@ -27,6 +27,7 @@ from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.env_transport import EnvConnection, serve_env
 from regact.orchestration.loop import run_session
+from regact.orchestration.signals import StopSignal
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
 from regact.security.egress_proxy import EgressProxy
@@ -90,6 +91,7 @@ async def run_task(
     *,
     output_dir: str,
     agent: CodeAgent | None = None,
+    stop: StopSignal | None = None,
 ) -> str:
     """Drive ``task_name`` to completion; return the loop's exit reason.
 
@@ -99,8 +101,6 @@ async def run_task(
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
-    # Persist the resolved run config so the viewer shows how the run was launched
-    # (StrEnums serialize to their value; default=str covers anything else).
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
         json.dump(dataclasses.asdict(config), handle, indent=2, default=str)
 
@@ -229,6 +229,7 @@ async def run_task(
                     system_prompt=system_prompt,
                     hooks=hooks,
                     move_count=lambda: server.live_action_count(task_name),
+                    stop=stop,
                 )
         finally:  # always release the agent subprocess + the egress proxy, even on a crash
             await agent.close()

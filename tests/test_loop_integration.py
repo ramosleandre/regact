@@ -151,6 +151,19 @@ async def test_teardown_finalizes_when_agent_exits_without_resubmitting(tmp_path
     assert final["aggregate"]["success_rate"] == 1.0
 
 
+async def test_graceful_stop_still_finalizes(tmp_path: Path) -> None:
+    """A stop signal (Ctrl+C) ends the run but still runs teardown — unlike a crash."""
+    stack = _Stack(tmp_path)
+    stop = StopSignal()
+    stop.set()  # pre-armed: the loop stops at the first safe point
+    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), TurnComplete()]])
+    reason = await stack.run(agent, stop=stop)
+
+    assert reason == "interrupted"
+    # teardown was NOT skipped (it would be on a crash) -> the final result is written.
+    assert (stack.workdir / "submissions" / "final" / "results.json").is_file()
+
+
 async def test_pipeline_stops_on_backend_error(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     agent = ScriptedAgent([[AgentError(ErrorCategory.AGENT_API, "429"), TurnComplete()]])

@@ -45,9 +45,7 @@ from regact.security.policy import SecurityPolicy, default_policy
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext
 
-# Exit reasons for which the run is aborted: teardown hooks (re-score, verify)
-# would operate on a broken session, so they are skipped.
-_ABORTED_REASONS = frozenset({"interrupted", "loop_crash"})
+_ABORTED_REASONS = frozenset({"loop_crash"})
 
 _KEEP_ALIVE_MESSAGE = (
     "Continue working. Submit again to re-measure your approach to win the game, "
