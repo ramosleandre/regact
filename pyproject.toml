@@ -31,7 +31,7 @@ arc = ["arc-agi"]
 #   pip install alancode (wait for it to be published on PyPI) or
 #   pip install -e ../alancode (for local development)
 agents = ["alancode"]
-viz = ["imageio>=2.31", "imageio-ffmpeg"]
+# (imageio / imageio-ffmpeg for video are core deps above — no separate viz extra.)
 dev = [
     "ruff>=0.6",
     "mypy>=1.11",
