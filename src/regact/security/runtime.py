@@ -150,10 +150,13 @@ def _seatbelt(
     live), sibling experiments, the shared temp dir — is absent. The agent's scratch is kept
     in its workdir via ``TMPDIR`` (set by the orchestrator).
 
-    NOTE: codex and CPython run fine here; ``claude.exe`` (a Bun binary) crashes at the native
-    level under a deny-default seatbelt on macOS (no log, dtruss is SIP-blocked) — so claude
-    on macOS must run ``runtime=none``. claude is confined on the Linux/HPC hosts instead,
-    where an un-allowed path is *absent* (ENOENT) rather than *denied* (EPERM).
+    NOTE: codex (Node) and CPython run fine here, and so does ``claude.exe`` (a Bun binary).
+    Bun additionally reads the ICU timezone DB and a POSIX shm region at startup and *SIGTRAPs*
+    (not a graceful error) if either is denied, so the profile allows both below. Subscription
+    auth keeps its token in the macOS Keychain, so claude's ``host_read_paths`` add
+    ``~/Library/Keychains`` (API-key mode via ``ANTHROPIC_API_KEY`` needs neither). Verified on
+    macOS: claude runs a real authed turn fully confined, and a read outside the allowlist stays
+    denied (R2).
     """
     home = os.path.expanduser("~")
     system_ro = (
@@ -165,6 +168,7 @@ def _seatbelt(
         "/private/var/db/dyld",
         "/private/etc",
         "/opt",
+        "/private/var/db/timezone",
     )
     read_only = [*_python_prefixes(), *(d for d in system_ro if os.path.exists(d))]
     read_write = [os.path.realpath(workdir), "/dev", os.path.join(home, "Library/Caches")]
@@ -176,6 +180,7 @@ def _seatbelt(
         "(allow sysctl-read)",
         "(allow mach-lookup)",
         "(allow file-read-metadata)",
+        "(allow ipc-posix-shm*)",
         '(allow file-read* (literal "/") ' + " ".join(_sbpl_target(p) for p in read_only) + ")",
         "(allow file* " + " ".join(_sbpl_target(p) for p in read_write) + ")",
     ]

@@ -20,3 +20,9 @@ per game and must be discovered through interaction, not assumed.
 ## Goal
 
 Complete as many levels as possible (a WIN completes all levels).
+
+## Solve it, don't memorise it
+
+The game is deterministic, so brute force could record one winning path — but that measures
+nothing and generalises to nothing. Spend as **few env steps as possible**: interact just
+enough to discover the rule of *this* game (what the actions do, what completes a level)

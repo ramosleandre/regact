@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any
 
 from regact.agent.capabilities import Capabilities
@@ -51,6 +52,9 @@ class ClaudeAgent(_CliAgent):
         os.makedirs(settings_dir, exist_ok=True)
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
             json.dump(claude_deny_settings(self._cwd), handle, indent=2)
+        budget = self._args.get("max_thinking_tokens")
+        if budget:
+            self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -68,20 +72,22 @@ class ClaudeAgent(_CliAgent):
         # the cache it uses. (Discovery may add an OS-specific CLI cache, e.g. macOS
         # ~/Library/Caches/claude-cli-nodejs, Linux ~/.cache/claude-cli-nodejs.)
         home = os.path.expanduser("~")
-        return [
+        paths = [
             os.path.join(home, ".claude"),
             os.path.join(home, ".claude.json"),
             os.path.join(home, ".npm"),
         ]
+        if sys.platform == "darwin":
+            claude_tmp = f"/tmp/claude-{os.getuid()}"
+            os.makedirs(claude_tmp, exist_ok=True)  # must exist => a (subpath) rule, not (literal)
+            paths += [os.path.join(home, "Library/Keychains"), "/Library/Keychains", claude_tmp]
+        return paths
 
     def host_egress_hosts(self) -> list[str]:
         return ["api.anthropic.com"]  # block statsig.anthropic.com / sentry telemetry
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["claude", "-p", message, "--output-format", "stream-json", "--verbose"]
-        # Headless: skip the interactive permission prompt (it would hang). The
-        # .claude/settings.json deny-list + the HTTP boundary remain the confinement
-        # (deny rules still apply). Override via agent.args.permission_mode.
         argv += ["--permission-mode", str(self._args.get("permission_mode", "bypassPermissions"))]
         if self._args.get("effort"):
             argv += ["--effort", str(self._args["effort"])]
@@ -138,7 +144,9 @@ def _blocks_to_events(blocks: list[dict[str, Any]]) -> list[AgentEvent]:
         if btype == "text":
             events.append(TextDelta(_text_of(block.get("text"))))
         elif btype == "thinking":
-            events.append(ThinkingDelta(_text_of(block.get("thinking"))))
+            text = _text_of(block.get("thinking"))
+            if text:  # Claude Code redacts the reasoning (signature only) — skip empty blocks
+                events.append(ThinkingDelta(text))
         elif btype == "tool_use":
             tool_input = block.get("input")
             events.append(
