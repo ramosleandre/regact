@@ -311,6 +311,9 @@ class ArcAgiProblem(BaseProblem):
     def helper_templates(self, task_name: str) -> list[TemplateFile]:
         return [TemplateFile("code_library/arc_agi_helper.py", _HELPER)]
 
+    def secret_modules(self) -> tuple[str, ...]:
+        return ("arcengine", "arc_agi")
+
     def render_frame(self, obs: Obs) -> Any | None:
         """Colorize the current 64x64 grid into an upscaled RGB frame for video."""
         grid = _current_grid(obs.frame)

@@ -69,6 +69,7 @@ class LimitsConfig:
     n_episodes: int = 1  # eval episodes per submission (MULTI_INSTANCE: more = better stats)
     walltime_s: int | None = None  # wall-clock budget for the whole task (per game)
     token_budget: int | None = None
+    env_step_budget: int | None = None  # hard cap on env steps per env (anti-runaway; None = off)
 
 
 @dataclass

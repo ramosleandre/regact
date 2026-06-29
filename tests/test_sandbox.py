@@ -97,6 +97,21 @@ def test_wrap_argv_allows_a_file_path(tmp_path: Path) -> None:
     assert f"--ro-bind-try {real} {real}" in " ".join(bwrap)  # binds files + tolerates absent
 
 
+def test_deny_read_carves_game_packages_out_of_the_allowed_venv() -> None:
+    """deny_read hides packages that live INSIDE the allowed interpreter prefix (the venv)."""
+    sb = wrap_argv(
+        SandboxRuntime.SEATBELT,
+        ["x"],
+        workdir="/tmp/wd",
+        allow_read=["/repo/src"],
+        deny_read=["/repo/.venv/lib/python3.12/site-packages/arcengine"],
+    )
+    assert "(deny file-read*" in sb[2]  # a deny rule overrides the venv allow (last match wins)
+    # bwrap mounts an empty tmpfs over each existing deny path (/usr exists here).
+    bw = wrap_argv(SandboxRuntime.BWRAP, ["x"], workdir="/tmp/wd", deny_read=["/usr"])
+    assert "--tmpfs /usr" in " ".join(bw)
+
+
 def test_detect_returns_a_known_runtime() -> None:
     assert detect() in set(SandboxRuntime)
 

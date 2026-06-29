@@ -17,6 +17,8 @@ limits:
   n_episodes: 1
   walltime_s: null      # wall-clock budget per game (seconds); null = no limit (override e.g. =3600)
   token_budget: null    # token budget per game; null = no limit
+  env_step_budget: null # hard cap on env steps per env (anti-runaway). Single-instance: shared
+                        # with the eval, so set it generously (e.g. 20000). null = no cap.
 security:
   sandbox: auto         # auto | none | seatbelt | bwrap | apptainer — 'none' disables the sandbox
   deny_egress: true     # true = only the agent's declared hosts reachable (via a localhost proxy); blocks the rest

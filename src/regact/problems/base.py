@@ -55,6 +55,17 @@ class BaseProblem(ABC):
         """
         return []
 
+    def secret_modules(self) -> tuple[str, ...]:
+        """Importable packages that ARE the game (its engine / data library).
+
+        These are pip-installed in the same venv as the framework, so the OS sandbox —
+        which allows the whole interpreter prefix for Python to run — would otherwise
+        expose their source. The agent reaches the env only over HTTP and never needs
+        them, so the sandbox hides their on-disk source (closing the read-the-engine
+        cheat, e.g. ``sed .../arcengine/base_game.py``). Default: none.
+        """
+        return ()
+
     def render_frame(self, obs: Obs) -> Any | None:
         """Colorize one observation into an RGB frame for video, or ``None``.
 

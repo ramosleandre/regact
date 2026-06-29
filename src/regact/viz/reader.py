@@ -28,6 +28,7 @@ class ToolCallView:
     result: str | None = None
     is_error: bool = False
     tag: str | None = None  # "cheat" | "submit" | "submit_win" — drives the UI's call coloring
+    flags: list[str] = field(default_factory=list)  # why a call was tagged "cheat" (the reasons)
 
 
 @dataclass
@@ -252,17 +253,24 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
                 won = wins[submit_index] if submit_index < len(wins) else False
                 call.tag = "submit_win" if won else "submit"
                 submit_index += 1
-            elif flag_tool_call(call.name, call.input, policy) or flag_os_denial(call.result or ""):
-                # forbidden in args (open) or denied in result (sandboxed: curls/reads)
-                call.tag = "cheat"
+            else:
+                kw = flag_tool_call(call.name, call.input, policy)
+                denied = flag_os_denial(call.result or "")
+                if kw or denied:  # forbidden in args (open) or denied in result (sandboxed)
+                    call.tag = "cheat"
+                    call.flags = [*kw, *(["OS/proxy denial in result"] if denied else [])]
 
 
 def _is_submit_call(call: ToolCallView) -> bool:
-    """A SubmitSolution — a native tool call, or a workdir ``control.py SubmitSolution`` shell."""
+    """A SubmitSolution — a native tool call, or a workdir ``control.py SubmitSolution`` shell.
+
+    Matches the actual *invocation* (``control.py submitsolution``), NOT a grep/sed that merely
+    mentions those strings (e.g. ``rg "…|control/.*tool|SubmitSolution"``) — a false submit there
+    would shift the submit-to-submission alignment and mis-color the wins.
+    """
     if call.name == "SubmitSolution":
         return True
-    blob = json.dumps(call.input).lower()
-    return "submitsolution" in blob and "control" in blob
+    return "control.py submitsolution" in json.dumps(call.input).lower()
 
 
 def _submission_wins(submissions: list[SubmissionView]) -> list[bool]:

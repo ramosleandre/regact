@@ -27,6 +27,7 @@ class WrappedEnv:
         milestone_detector: Callable[[WrappedEnv], list[str]] | None = None,
         action_adapter: Callable[[Action], Any] | None = None,
         record_frames: bool = False,
+        step_budget: int | None = None,
     ) -> None:
         self._native = native_env
         self.task_name = task_name
@@ -34,6 +35,7 @@ class WrappedEnv:
         self._milestone_detector = milestone_detector
         self._action_adapter = action_adapter
         self._record_frames = record_frames
+        self._step_budget = step_budget  # hard cap on env steps (anti-runaway; None = no cap)
         self.action_count: int = 0
         self.last_obs: Obs | None = None
         self.prev_obs: Obs | None = None
@@ -79,6 +81,11 @@ class WrappedEnv:
         return obs
 
     def step(self, action: Action) -> Obs:
+        if self._step_budget is not None and self.action_count >= self._step_budget:
+            raise RegactError(
+                ErrorCategory.ENV_RUNTIME,
+                f"env step budget exhausted ({self._step_budget}); stop exploring and submit",
+            )
         adapted = self._action_adapter(action) if self._action_adapter else action
         result = self._native.step(adapted)
         if len(result) == 5:

@@ -24,7 +24,14 @@ def test_camera_flags_forbidden_paths_and_imports() -> None:
     policy = default_policy()
     assert flag_tool_call("Bash", {"command": "cat ../environnement/ls20/x.py"}, policy)
     assert flag_tool_call("Bash", {"command": "python -c 'import arc_agi'"}, policy)
+    # a direct read of the game engine/data source (the in-venv packages) is flagged:
+    assert flag_tool_call("shell", {"command": "sed -n 1,9p /x/arcengine/base_game.py"}, policy)
     assert flag_tool_call("Bash", {"command": "ls code_library"}, policy) == []
+    # precise identifiers only — these benign cases must NOT be flagged (no false positives):
+    assert flag_tool_call("Bash", {"command": "ls .. && cd ../foo"}, policy) == []
+    assert flag_tool_call("Bash", {"command": "python -c 'import inspect'"}, policy) == []
+    # the legit workdir helper (named arc_agi_helper.py) must NOT trip the 'arc_agi/' rule:
+    assert flag_tool_call("Bash", {"command": "cat code_library/arc_agi_helper.py"}, policy) == []
 
 
 def test_os_denial_recognizes_blocked_egress_only() -> None:

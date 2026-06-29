@@ -29,6 +29,7 @@ class EnvSession:
         lifecycle: EnvLifecyclePolicy,
         milestone_detector: Callable[[WrappedEnv], list[str]] | None = None,
         action_adapter: Callable[[Action], Any] | None = None,
+        step_budget: int | None = None,
     ) -> None:
         self._make_native = make_native
         self.key = key
@@ -36,6 +37,7 @@ class EnvSession:
         self._lifecycle = lifecycle
         self._milestone_detector = milestone_detector
         self._action_adapter = action_adapter
+        self._step_budget = step_budget
         self._live: WrappedEnv | None = None
 
     def _build(self) -> WrappedEnv:
@@ -45,6 +47,7 @@ class EnvSession:
             renderer=self._renderer,
             milestone_detector=self._milestone_detector,
             action_adapter=self._action_adapter,
+            step_budget=self._step_budget,
         )
 
     def make(self) -> WrappedEnv:

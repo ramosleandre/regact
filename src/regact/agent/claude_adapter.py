@@ -38,7 +38,7 @@ def claude_deny_settings(workdir: str, policy: SecurityPolicy | None = None) -> 
     the OS sandbox, not a substitute for it.
     """
     policy = policy or default_policy()
-    deny = [f"Read(**/{sub}/**)" for sub in sorted(policy.forbidden_path_substrings) if sub != ".."]
+    deny = [f"Read(**/{sub.rstrip('/')}/**)" for sub in sorted(policy.forbidden_path_substrings)]
     return {"permissions": {"deny": deny}}
 
 
@@ -67,10 +67,6 @@ class ClaudeAgent(_CliAgent):
         )
 
     def host_read_paths(self) -> list[str]:
-        # Coarse dirs that subsume what the CLI touches: ~/.claude holds config + auth +
-        # plugins + projects + sessions; ~/.claude.json is the top-level config; ~/.npm is
-        # the cache it uses. (Discovery may add an OS-specific CLI cache, e.g. macOS
-        # ~/Library/Caches/claude-cli-nodejs, Linux ~/.cache/claude-cli-nodejs.)
         home = os.path.expanduser("~")
         paths = [
             os.path.join(home, ".claude"),
@@ -85,6 +81,11 @@ class ClaudeAgent(_CliAgent):
 
     def host_egress_hosts(self) -> list[str]:
         return ["api.anthropic.com"]  # block statsig.anthropic.com / sentry telemetry
+
+    def host_write_prefixes(self) -> list[str]:
+        if sys.platform != "darwin":
+            return [] 
+        return [os.path.realpath("/tmp") + "/claude-"]
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["claude", "-p", message, "--output-format", "stream-json", "--verbose"]
@@ -145,7 +146,7 @@ def _blocks_to_events(blocks: list[dict[str, Any]]) -> list[AgentEvent]:
             events.append(TextDelta(_text_of(block.get("text"))))
         elif btype == "thinking":
             text = _text_of(block.get("thinking"))
-            if text:  # Claude Code redacts the reasoning (signature only) — skip empty blocks
+            if text:
                 events.append(ThinkingDelta(text))
         elif btype == "tool_use":
             tool_input = block.get("input")

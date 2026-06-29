@@ -21,10 +21,8 @@ class SecurityPolicy:
     forbidden_path_substrings: frozenset[str] = field(default_factory=frozenset)
 
 
-# Game libraries + introspection/escape hatches: a controller is a pure policy and
-# needs none of these. Reaching the game lib or the on-disk game data is cheating.
 _GAME_MODULES = ("arc_agi", "arcengine", "gymnasium", "minigrid")
-_ESCAPE_MODULES = ("inspect", "importlib", "ctypes")  # extend as new vectors appear
+_ESCAPE_MODULES = ("importlib", "ctypes")  # extend as new vectors appear
 
 
 def default_policy(*, extra_imports: Iterable[str] = ()) -> SecurityPolicy:
@@ -41,5 +39,7 @@ def default_policy(*, extra_imports: Iterable[str] = ()) -> SecurityPolicy:
                 "importlib.import_module",
             }
         ),
-        forbidden_path_substrings=frozenset({"environnement", "environment_files", ".."}),
+        forbidden_path_substrings=frozenset(
+            {"environnement", "environment_files", "arcengine/", "arc_agi/"}
+        ),
     )

@@ -94,6 +94,7 @@ async function renderOverview(name) {
     kpi("Cheat attempts", m.cheat_attempts ?? 0));
   wrap.append(kpis, configBlock(d.config), barChart("Tool calls", m.tool_histogram));
   if (m.submission_trajectory.length) wrap.append(trajectory(m.submission_trajectory));
+  if (m.cheats && m.cheats.length) wrap.append(cheatsPanel(m.cheats));
   shell(name, "", wrap);
 }
 
@@ -139,6 +140,16 @@ function trajectory(traj) {
   for (const s of traj)
     t.append(rowEl("td", [s.submission, pct(s.success_rate), s.levels ?? "—", s.mean_steps ?? "—", s.error || ""]));
   wrap.append(t); return wrap;
+}
+function cheatsPanel(cheats) {
+  const wrap = h("div");
+  wrap.append(h("h2", null, `Cheat attempts (${cheats.length})`));
+  const t = h("table");
+  t.append(rowEl("th", ["turn", "tool", "command / args", "why flagged"]));
+  for (const c of cheats)
+    t.append(rowEl("td", [c.turn, c.tool, c.args, (c.flags || []).join("; ")]));
+  wrap.append(t);
+  return wrap;
 }
 function rowEl(cell, vals) {
   const tr = h("tr"); for (const v of vals) tr.append(h(cell, null, String(v))); return tr;

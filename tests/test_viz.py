@@ -79,6 +79,17 @@ def test_submit_call_tagged_win_when_a_level_clears(tmp_path: Path) -> None:
     assert by_name["Bash"].tag is None  # a plain shell call
 
 
+def test_grep_mentioning_submitsolution_is_not_counted_as_a_submit() -> None:
+    """A grep/rg that merely MENTIONS the strings must not be a submit (it would shift the
+    submit->submission alignment and mis-color the wins)."""
+    from regact.viz.reader import ToolCallView, _is_submit_call
+
+    real = ToolCallView("1", "shell", {"command": "python framework/control.py SubmitSolution"})
+    grep = ToolCallView("2", "shell", {"command": 'rg -n "control/.*tool|SubmitSolution" src'})
+    assert _is_submit_call(real) is True
+    assert _is_submit_call(grep) is False
+
+
 def test_cheat_call_is_tagged(tmp_path: Path) -> None:
     """A tool call reaching for a forbidden path is tagged 'cheat' (red), like the loop flags it."""
     game_dir = tmp_path / "exp" / "g"

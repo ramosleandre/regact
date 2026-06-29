@@ -86,6 +86,14 @@ class CodeAgent(ABC):
         """
         return []
 
+    def host_write_prefixes(self) -> list[str]:
+        """Path PREFIXES under which the backend creates scratch files with RANDOM leaf
+        names (so a fixed subpath rule cannot name them; the sandbox allows read+write on
+        anything starting with the prefix). E.g. Claude Code's ``/tmp/claude-<rand>-cwd``.
+        Plain strings, regex-anchored by the sandbox. Default: none.
+        """
+        return []
+
 
 def build_agent(config: AgentConfig) -> CodeAgent:
     """Construct the configured agent; each backend is imported only on its branch."""

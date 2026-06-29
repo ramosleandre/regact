@@ -44,6 +44,28 @@ def _regact_src_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
 
 
+def _secret_module_paths(modules: tuple[str, ...]) -> list[str]:
+    """On-disk dirs of the game packages (engine/data lib), to hide from the sandbox.
+
+    Resolved via ``find_spec`` (no import) so a package the host lacks is just skipped.
+    """
+    import importlib.util
+
+    paths: list[str] = []
+    for module in modules:
+        try:
+            spec = importlib.util.find_spec(module)
+        except (ImportError, ValueError):
+            continue
+        if spec is None:
+            continue
+        if spec.submodule_search_locations:
+            paths.extend(spec.submodule_search_locations)
+        elif spec.origin and spec.origin not in ("built-in", "frozen"):
+            paths.append(os.path.dirname(spec.origin))
+    return [os.path.realpath(p) for p in paths]
+
+
 def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
     if lifecycle is Lifecycle.SINGLE_INSTANCE:
         return SingleInstancePolicy()
@@ -58,6 +80,7 @@ def _build_server(config: RunConfig, problem: BaseProblem, task_name: str) -> En
         renderer=problem.obs_renderer(task_name, mode=config.problem.obs_mode),
         lifecycle=_lifecycle_policy(config.problem.lifecycle),
         milestone_detector=problem.milestone_detector(task_name),
+        step_budget=config.limits.env_step_budget,
     )
     server = EnvServer()
     server.register(task_name, session)
@@ -117,6 +140,7 @@ async def run_task(
             problem_name=problem.name, task_name=task_name, n_eval_episodes=1, n_videos=0
         )
         src_dir = _regact_src_dir()
+        deny_read = _secret_module_paths(problem.secret_modules())
         eval_wrap = (
             None
             if in_process
@@ -125,6 +149,7 @@ async def run_task(
                 workdir=workdir,
                 allow_read=[src_dir],
                 deny_egress=True,
+                deny_read=deny_read,
                 image=config.security.runtime_opts.get("image"),
             )
         )
@@ -159,6 +184,8 @@ async def run_task(
             workdir=workdir,
             allow_read=[src_dir, *agent.host_read_paths()],
             deny_egress=config.security.deny_egress,
+            deny_read=deny_read,
+            allow_write_prefixes=agent.host_write_prefixes(),
             image=config.security.runtime_opts.get("image"),
         )
 

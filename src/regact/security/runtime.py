@@ -80,6 +80,8 @@ def make_wrapper(
     workdir: str,
     allow_read: Sequence[str] = (),
     deny_egress: bool = False,
+    deny_read: Sequence[str] = (),
+    allow_write_prefixes: Sequence[str] = (),
     image: str | None = None,
 ) -> Wrapper:
     """Return a pure ``argv -> argv`` wrapper that runs argv inside the sandbox.
@@ -87,7 +89,8 @@ def make_wrapper(
     Deny-by-default on every backend: only the workdir, the interpreter, and ``allow_read``
     (the regact source + the loaded agent's own host dirs) are reachable; everything else —
     every copy of the game, sibling experiments — is absent. We never enumerate the game's
-    locations; we allow what the agent needs and deny the rest.
+    locations; we allow what the agent needs and deny the rest. ``deny_read`` carves specific
+    subtrees (the game engine/data packages) back out of the allowed interpreter prefix.
     """
     resolved = resolve(runtime)
 
@@ -98,6 +101,8 @@ def make_wrapper(
             workdir=workdir,
             allow_read=allow_read,
             deny_egress=deny_egress,
+            deny_read=deny_read,
+            allow_write_prefixes=allow_write_prefixes,
             image=image,
         )
 
@@ -111,6 +116,8 @@ def wrap_argv(
     workdir: str,
     allow_read: Sequence[str] = (),
     deny_egress: bool = False,
+    deny_read: Sequence[str] = (),
+    allow_write_prefixes: Sequence[str] = (),
     image: str | None = None,
 ) -> Argv:
     """Prepend the per-platform launcher so ``argv`` runs inside the sandbox (deny-by-default)."""
@@ -118,9 +125,9 @@ def wrap_argv(
     if resolved is SandboxRuntime.NONE:
         return list(argv)
     if resolved is SandboxRuntime.SEATBELT:
-        return _seatbelt(argv, workdir, allow_read, deny_egress)
+        return _seatbelt(argv, workdir, allow_read, deny_egress, deny_read, allow_write_prefixes)
     if resolved is SandboxRuntime.BWRAP:
-        return _bwrap(argv, workdir, allow_read, deny_egress)
+        return _bwrap(argv, workdir, allow_read, deny_egress, deny_read)
     if resolved is SandboxRuntime.APPTAINER:
         return _apptainer(argv, workdir, allow_read, image)
     if resolved is SandboxRuntime.LANDLOCK:
@@ -139,7 +146,12 @@ def _sbpl_target(path: str) -> str:
 
 
 def _seatbelt(
-    argv: Sequence[str], workdir: str, allow_read: Sequence[str], deny_egress: bool
+    argv: Sequence[str],
+    workdir: str,
+    allow_read: Sequence[str],
+    deny_egress: bool,
+    deny_read: Sequence[str] = (),
+    allow_write_prefixes: Sequence[str] = (),
 ) -> Argv:
     """macOS: deny-by-default; allow only the system layer, interpreter, and ``allow_read``.
 
@@ -184,6 +196,13 @@ def _seatbelt(
         '(allow file-read* (literal "/") ' + " ".join(_sbpl_target(p) for p in read_only) + ")",
         "(allow file* " + " ".join(_sbpl_target(p) for p in read_write) + ")",
     ]
+    for prefix in allow_write_prefixes:
+        # Files whose leaf name is random per call (e.g. Claude Code's /tmp/claude-<rand>-cwd);
+        # a subpath rule can't name them, so allow the prefix. Prefixes must be plain paths.
+        rules.append(f'(allow file* (regex #"^{prefix}"))')
+    if deny_read:  # carve the game packages back out of the allowed venv (last match wins)
+        targets = " ".join(_sbpl_target(os.path.realpath(p)) for p in deny_read)
+        rules.append(f"(deny file-read* {targets})")
     if deny_egress:  # keep loopback (env server + local LLM), block external
         rules.append('(allow network* (local ip "localhost:*") (remote ip "localhost:*"))')
     else:
@@ -191,7 +210,13 @@ def _seatbelt(
     return ["sandbox-exec", "-p", "".join(rules), *argv]
 
 
-def _bwrap(argv: Sequence[str], workdir: str, allow_read: Sequence[str], deny_egress: bool) -> Argv:
+def _bwrap(
+    argv: Sequence[str],
+    workdir: str,
+    allow_read: Sequence[str],
+    deny_egress: bool,
+    deny_read: Sequence[str] = (),
+) -> Argv:
     """Linux: a mount namespace that contains ONLY the allowlist (deny-default).
 
     The games/repo are simply never bound, so they are absent from the agent's
@@ -217,10 +242,11 @@ def _bwrap(argv: Sequence[str], workdir: str, allow_read: Sequence[str], deny_eg
         if os.path.isdir(path):
             cmd += ["--ro-bind", path, path]
     for path in (os.path.realpath(p) for p in allow_read):
-        # --ro-bind-try: binds files (e.g. ~/.claude.json) and dirs, and skips silently
-        # if the path is absent (so an allowlist entry that doesn't exist here is harmless).
         cmd += ["--ro-bind-try", path, path]
     cmd += ["--bind", wd, wd, "--chdir", wd]
+    for path in (os.path.realpath(p) for p in deny_read):
+        if os.path.isdir(path):
+            cmd += ["--tmpfs", path]
     if deny_egress:
         # NOTE: --unshare-net also severs loopback; only safe when the env server +
         # LLM are reached over a unix socket or are inside the namespace. Fine-grained

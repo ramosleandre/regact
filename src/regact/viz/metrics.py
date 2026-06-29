@@ -7,6 +7,7 @@ tool histogram), progress (score per submission), reasoning volume (thinking).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from regact.viz.reader import GameView
@@ -18,6 +19,7 @@ def game_metrics(game: GameView) -> dict[str, Any]:
     tools = _tool_histogram(game)
     submissions = _submission_trajectory(game)
     best, final = _levels(game)
+    cheats = _cheat_calls(game)  # re-derived from the transcript with the CURRENT policy
     return {
         "n_turns": len(game.turns),
         "n_tool_calls": sum(tools.values()),
@@ -35,8 +37,28 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         "last_error_category": game.state.get("last_error_category"),
         "exit_reason": game.state.get("exit_reason"),  # None while running
         "exit_requested": game.state.get("exit_requested"),
-        "cheat_attempts": game.state.get("cheat_attempts", 0),
+        # Re-derived count (current policy), so the KPI matches the conversation/panel — not the
+        # live state count, which may be stale (an older, noisier policy version).
+        "cheat_attempts": len(cheats),
+        "cheats": cheats,
     }
+
+
+def _cheat_calls(game: GameView) -> list[dict[str, Any]]:
+    """Each cheat-flagged tool call: the tool, a short arg preview, and why it was flagged."""
+    out: list[dict[str, Any]] = []
+    for i, turn in enumerate(game.turns):
+        for call in turn.tools:
+            if call.tag == "cheat":
+                out.append(
+                    {
+                        "turn": i,
+                        "tool": call.name,
+                        "args": json.dumps(call.input)[:200],
+                        "flags": call.flags,
+                    }
+                )
+    return out
 
 
 def _token_totals(game: GameView) -> dict[str, int]:
