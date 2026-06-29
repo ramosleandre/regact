@@ -1,0 +1,8 @@
+# Alan in-process agent, driven against an OpenAI-compatible endpoint (a local
+# SimpleLM / SGLang server on HPC, where the CLI agents' cloud APIs are unreachable).
+# Set model + base_url at launch, e.g.:
+#   agent=alan agent.model=openai/<MODEL_NAME> agent.base_url=http://127.0.0.1:9876/v1
+name: alan
+model: null            # openai/<MODEL_NAME> (the served model); null = none
+base_url: null         # http://127.0.0.1:9876/v1 (the SimpleLM/SGLang endpoint)
+api_key: null          # a local server needs none

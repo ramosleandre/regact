@@ -84,7 +84,7 @@ class ClaudeAgent(_CliAgent):
 
     def host_write_prefixes(self) -> list[str]:
         if sys.platform != "darwin":
-            return [] 
+            return []
         return [os.path.realpath("/tmp") + "/claude-"]
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
