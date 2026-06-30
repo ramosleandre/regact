@@ -104,7 +104,7 @@ def build_agent(config: AgentConfig) -> CodeAgent:
     if config.name is AgentName.ALAN:
         from regact.agent.alan_adapter import AlanAgent
 
-        return AlanAgent()
+        return AlanAgent(config.args)
     if config.name is AgentName.CLAUDE:
         from regact.agent.claude_adapter import ClaudeAgent
 

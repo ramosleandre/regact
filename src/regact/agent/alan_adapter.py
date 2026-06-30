@@ -66,7 +66,8 @@ def _to_alan_tools(tools: list[Tool]) -> list[Any]:
 class AlanAgent(CodeAgent):
     """``CodeAgent`` backed by an in-process ``AlanCodeAgent``."""
 
-    def __init__(self) -> None:
+    def __init__(self, args: dict[str, Any] | None = None) -> None:
+        self._args = dict(args or {})  # alancode tuning: permission_mode, max_output_tokens, ...
         self._agent: Any = None  # set in start(): an alancode.AlanCodeAgent
         self._tools: list[Tool] = []
 
@@ -94,7 +95,12 @@ class AlanAgent(CodeAgent):
             cwd=cwd,
             programmatic=True,
             custom_system_prompt=system_prompt,
-            extra_tools=_to_alan_tools(self._tools),  # wrap regact tools as alancode tools
+            extra_tools=_to_alan_tools(self._tools),
+            permission_mode=self._args.get("permission_mode"),
+            max_iterations_per_turn=self._args.get("max_iterations_per_turn"),
+            max_output_tokens=self._args.get("max_output_tokens"),
+            memory=self._args.get("memory"),
+            tool_call_format=self._args.get("tool_call_format"),
         )
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:

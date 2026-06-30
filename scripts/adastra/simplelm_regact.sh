@@ -45,6 +45,7 @@ done
 [ "${ready}" = 1 ] || { echo "[regact] not ready in ${READY_TIMEOUT_S}s"; tail -60 "${SLOG}"; kill "${PID}" 2>/dev/null; exit 1; }
 
 export AGENT_BASE_URL="${BASE}"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
 SANDBOX_ARGS=("security.sandbox=${SANDBOX}")
 if [ "${SANDBOX}" = "apptainer" ]; then
     SANDBOX_ARGS+=("+security.runtime_opts.image=${SIF:?SANDBOX=apptainer needs SIF=<image.sif>}")
@@ -55,6 +56,7 @@ python -m regact.run_exp \
     agent=alan \
     agent.model="openai/${MODEL_NAME}" \
     agent.base_url="${AGENT_BASE_URL}" \
+    agent.api_key="${OPENAI_API_KEY}" \
     problem=arc_agi \
     "task_names=[${TASK_NAMES}]" \
     problem.lifecycle="${LIFECYCLE}" \
