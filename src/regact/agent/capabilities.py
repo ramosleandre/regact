@@ -28,3 +28,7 @@ class Capabilities:
     streams_tool_calls: bool  # surfaces ToolCall events in its stream
     supports_inject: bool  # accepts mid-turn injected messages
     writes_native_transcript: bool  # writes its own session dir (.alan / .claude)
+    # The agent EXECUTES its own native tools (Alan, via alancode) — so the loop must NOT also
+    # run them (it would double-submit); it only observes. False (default): the loop runs the
+    # framework tools when it sees the agent's ToolCall (the scripted test backend relies on this).
+    executes_tools: bool = False

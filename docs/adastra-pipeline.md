@@ -21,9 +21,13 @@ codex/claude are unreachable there).
 ssh ada
 cd $WORKDIR && git clone git@github.com:<your-org>/regact.git
 source $WORKDIR/venv_ada/bin/activate
+which python                                  # MUST be …/venv_ada/bin/python before installing
 # regact's framework deps are light + CPU (the ARC engine); does NOT touch torch/ROCm.
-pip install -e "$WORKDIR/regact[arc]"        # arc extra = arc-agi (the game)
-python -c "import regact, arc_agi; print('regact + arc_agi OK')"
+pip install -e "$WORKDIR/regact[arc]"         # QUOTE the [arc] extra so the shell doesn't glob it
+# The `arc-agi` PyPI pkg pulls `arcengine` automatically. If the extra didn't take (shell/proxy),
+# install it directly — note the DASH (`pip install arc agi` with a space installs the wrong thing):
+pip install arc-agi
+python -c "import regact, arc_agi, arcengine; print('regact + arc_agi + arcengine OK')"   # MUST print before submitting
 ```
 > Inode hygiene: this adds ~a few k files to the **shared** quota — check `usage_ada`.
 > If a shared venv is in use, install regact into it instead of a personal one.

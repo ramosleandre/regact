@@ -173,9 +173,12 @@ async def run_task(
         hooks = [hook for feature in features for hook in feature.hooks(deps)]
 
         agent = agent or build_agent(config.agent)
-        if agent.capabilities().control_actions == "client_cli":
+        caps = agent.capabilities()
+        if caps.control_actions == "client_cli":
             server.bind_control(task_name, tools, cwd=workdir)
             loop_tools: list[Tool] = []
+        elif caps.executes_tools:
+            loop_tools = []
         else:
             loop_tools = tools
 

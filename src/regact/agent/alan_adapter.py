@@ -27,6 +27,42 @@ from regact.obs.errors import ErrorCategory
 from regact.tools.base import Tool
 
 
+def _to_alan_tools(tools: list[Tool]) -> list[Any]:
+    """Wrap regact ``Tool`` objects as alancode tools so alancode can schema-ize and run them.
+
+    alancode owns execution of its tools (``to_schema()`` + ``call()``); each wrapper exposes
+    the regact tool's name/description/input_schema and delegates ``call`` to it. Deferred
+    import (alancode is optional). The loop must therefore NOT re-run them (see ``executes_tools``).
+    """
+    from alancode.tools.base import Tool as AlanTool
+    from alancode.tools.base import ToolResult as AlanToolResult
+    from alancode.tools.base import ToolUseContext
+
+    from regact.tools.base import ToolContext
+
+    class _Wrapped(AlanTool):  # type: ignore[misc]
+        def __init__(self, tool: Tool) -> None:
+            self._tool = tool
+
+        @property
+        def name(self) -> str:
+            return self._tool.name
+
+        @property
+        def description(self) -> str:
+            return self._tool.description
+
+        @property
+        def input_schema(self) -> dict[str, Any]:
+            return self._tool.input_schema
+
+        async def call(self, args: dict[str, Any], context: ToolUseContext) -> Any:
+            out = await self._tool.call(args, ToolContext(cwd=context.cwd))
+            return AlanToolResult(data=str(out.data), is_error=out.is_error)
+
+    return [_Wrapped(t) for t in tools]
+
+
 class AlanAgent(CodeAgent):
     """``CodeAgent`` backed by an in-process ``AlanCodeAgent``."""
 
@@ -58,7 +94,7 @@ class AlanAgent(CodeAgent):
             cwd=cwd,
             programmatic=True,
             custom_system_prompt=system_prompt,
-            extra_tools=self._tools,
+            extra_tools=_to_alan_tools(self._tools),  # wrap regact tools as alancode tools
         )
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
@@ -86,6 +122,7 @@ class AlanAgent(CodeAgent):
             streams_tool_calls=True,
             supports_inject=True,
             writes_native_transcript=True,
+            executes_tools=True,  # alancode runs the framework tools; the loop only observes
         )
 
     def host_read_paths(self) -> list[str]:
