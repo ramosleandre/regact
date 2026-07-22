@@ -153,14 +153,17 @@ def rhae_from_results(
         if not isinstance(ep, dict) or ep.get("error"):
             continue
         metrics = ep.get("metrics") if isinstance(ep.get("metrics"), dict) else {}
-        milestones = ep.get("milestones") if isinstance(ep.get("milestones"), list) else []
+        raw_ms = ep.get("milestones")
+        milestones: list[dict[str, object]] = raw_ms if isinstance(raw_ms, list) else []
         levels = int(metrics.get("levels_completed", 0) or 0)  # type: ignore[union-attr]
         total_levels = int(metrics.get("win_levels", 0) or 0) or (  # type: ignore[union-attr]
             len(baseline_actions) if baseline_actions else 0
         )
         steps = int(metrics.get("steps", 0) or 0)  # type: ignore[union-attr]
         apl = actions_per_level_from_milestones(
-            milestones, total_steps=steps, levels_completed=levels  # type: ignore[arg-type]
+            milestones,
+            total_steps=steps,
+            levels_completed=levels,
         )
         return rhae_score(
             baseline_actions=baseline_actions,

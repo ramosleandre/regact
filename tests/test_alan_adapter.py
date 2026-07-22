@@ -27,8 +27,9 @@ class ToolUseBlock:
 
 
 class AssistantMessage:
-    def __init__(self, content: list, *, is_api_error_message: bool = False,
-                 error_details: str | None = None) -> None:
+    def __init__(
+        self, content: list, *, is_api_error_message: bool = False, error_details: str | None = None
+    ) -> None:
         self.content = content
         self.is_api_error_message = is_api_error_message
         self.error_details = error_details

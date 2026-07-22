@@ -18,7 +18,6 @@ from regact.config.loader import run_config_from_mapping
 from regact.config.schema import AgentName, Execution, RunConfig
 from regact.orchestration.experiment import run_experiment
 
-
 _DEFAULT_PROFILE = Path(__file__).parent / "config" / "profile" / "competition.yaml"
 
 
