@@ -49,11 +49,28 @@ def test_mapping_defaults() -> None:
 
 
 def test_competition_profile_loads() -> None:
+    # The Kaggle profile drives the in-process Alan agent against a local vLLM
+    # endpoint (the cloud CLI agents are unreachable offline), single make per game.
     config = build_run_config_from_profile(str(_PROFILE))
     assert config.problem.name == "arc_agi"
     assert config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE
-    assert config.agent.name is AgentName.CLAUDE
+    assert config.agent.name is AgentName.ALAN
+    assert config.agent.model == "openai/qwen3-14b"  # default model knob
+    assert config.agent.base_url == "http://127.0.0.1:8000/v1"  # default vLLM endpoint
+    # default offline; ARC_OPERATION_MODE flips it to online for the gateway
     assert config.problem.kwargs["operation_mode"] == "offline"
+    assert config.security.sandbox.value == "none"  # ARC gateway already isolates the kernel
+
+
+def test_competition_profile_env_knobs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The notebook switches model/endpoint/mode via env vars without editing the YAML."""
+    monkeypatch.setenv("LLM_MODEL_NAME", "qwen3-32b")
+    monkeypatch.setenv("AGENT_BASE_URL", "http://127.0.0.1:9999/v1")
+    monkeypatch.setenv("ARC_OPERATION_MODE", "online")
+    config = build_run_config_from_profile(str(_PROFILE))
+    assert config.agent.model == "openai/qwen3-32b"
+    assert config.agent.base_url == "http://127.0.0.1:9999/v1"
+    assert config.problem.kwargs["operation_mode"] == "online"
 
 
 def test_run_exp_hydra_composes_a_config() -> None:

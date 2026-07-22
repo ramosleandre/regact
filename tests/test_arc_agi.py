@@ -35,6 +35,33 @@ def test_discover_tasks_finds_the_committed_games() -> None:
     assert ls20.win_levels == len(ls20.baseline_actions or ())
 
 
+def test_discover_tasks_from_arcade_uses_live_listing() -> None:
+    # Online/gateway mode has no local metadata: the catalog comes from the served
+    # arcade's available_environments. The full game_id is preserved (online make()
+    # needs it), keyed by the short id so --games filters match offline behavior.
+    from regact.problems.arc_agi.tasks import discover_tasks_from_arcade
+
+    fake_arcade = SimpleNamespace(
+        available_environments=[
+            SimpleNamespace(
+                game_id="ls20-9607627b",
+                title="LS20",
+                baseline_actions=[19, 16, 34],
+                level_tags=None,
+            ),
+            SimpleNamespace(
+                game_id="vc33-abcd", title="VC33", baseline_actions=None, level_tags=("click",)
+            ),
+        ]
+    )
+    tasks = discover_tasks_from_arcade(fake_arcade)
+    assert set(tasks) == {"ls20", "vc33"}
+    assert tasks["ls20"].game_id == "ls20-9607627b"  # full served id for Arcade.make()
+    assert tasks["ls20"].win_levels == 3
+    assert tasks["vc33"].win_levels is None
+    assert tasks["vc33"].tags == ("click",)
+
+
 def test_build_problem_resolves_arc() -> None:
     problem = build_problem("arc_agi", {"environments_dir": _ENV_DIR})
     assert isinstance(problem, ArcAgiProblem)

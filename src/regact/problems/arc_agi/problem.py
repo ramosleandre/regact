@@ -23,7 +23,11 @@ from regact.config.schema import InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
-from regact.problems.arc_agi.tasks import ArcAgiTask, discover_tasks
+from regact.problems.arc_agi.tasks import (
+    ArcAgiTask,
+    discover_tasks,
+    discover_tasks_from_arcade,
+)
 from regact.problems.base import BaseProblem, register_problem
 from regact.workspace.templates import TemplateFile
 
@@ -258,22 +262,40 @@ class ArcAgiProblem(BaseProblem):
         self._dir = environments_dir
         self._operation_mode = operation_mode
         self._arcade: Any = None
-        self._tasks: dict[str, ArcAgiTask] = discover_tasks(environments_dir)
-        logger.info(
-            "ArcAgiProblem: %d games discovered in %r (mode=%s)",
-            len(self._tasks),
-            environments_dir,
-            operation_mode,
-        )
+        if self._is_online:
+            # Online (Kaggle gateway): no local metadata — the served arcade
+            # enumerates the games. Build it (dotenv/env-driven) and discover live.
+            self._tasks = discover_tasks_from_arcade(self._arcade_instance())
+            logger.info(
+                "ArcAgiProblem: %d games discovered from the arcade (mode=%s)",
+                len(self._tasks),
+                operation_mode,
+            )
+        else:
+            self._tasks = discover_tasks(environments_dir)
+            logger.info(
+                "ArcAgiProblem: %d games discovered in %r (mode=%s)",
+                len(self._tasks),
+                environments_dir,
+                operation_mode,
+            )
+
+    @property
+    def _is_online(self) -> bool:
+        return self._operation_mode in ("online", "normal")
 
     def _arcade_instance(self) -> Any:
         if self._arcade is None:
             import arc_agi
 
-            self._arcade = arc_agi.Arcade(
-                operation_mode=arc_agi.OperationMode(self._operation_mode),
-                environments_dir=self._dir,
-            )
+            mode = arc_agi.OperationMode(self._operation_mode)
+            if self._is_online:
+                self._arcade = arc_agi.Arcade(operation_mode=mode)
+            else:
+                self._arcade = arc_agi.Arcade(
+                    operation_mode=mode,
+                    environments_dir=self._dir,
+                )
         return self._arcade
 
     def _task(self, task_name: str) -> ArcAgiTask:

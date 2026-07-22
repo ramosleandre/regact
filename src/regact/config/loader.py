@@ -26,6 +26,29 @@ from regact.config.schema import (
 from regact.security.runtime import SandboxRuntime
 
 
+def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
+    """Build ``LimitsConfig`` coercing numeric fields to int.
+
+    Values may arrive as strings — env-var interpolation (``${oc.env:VAR,default}``)
+    yields a string when the variable is set. Coerce so the loop's comparisons never
+    hit ``float >= str``. ``None``/empty stays ``None`` for the optional fields.
+    """
+
+    def _int_or_none(value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        return int(value)
+
+    fields: dict[str, Any] = dict(raw)
+    for name in ("keep_alive", "max_moves", "n_episodes"):
+        if name in fields and fields[name] is not None:
+            fields[name] = int(fields[name])
+    for name in ("walltime_s", "token_budget", "env_step_budget"):
+        if name in fields:
+            fields[name] = _int_or_none(fields[name])
+    return LimitsConfig(**fields)
+
+
 def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
     """Map a plain ``{agent, problem, limits, ...}`` mapping to a ``RunConfig``."""
     agent = dict(data.get("agent") or {})
@@ -52,7 +75,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         tools=dict(data.get("tools") or {}),
         execution=Execution(data.get("execution", Execution.SEQUENTIAL)),
         parallel_workers=int(data.get("parallel_workers", 1)),
-        limits=LimitsConfig(**dict(data.get("limits") or {})),
+        limits=_limits_from(data.get("limits") or {}),
         security=SecurityConfig(
             sandbox=SandboxRuntime(sec.get("sandbox", SandboxRuntime.AUTO)),
             deny_egress=bool(sec.get("deny_egress", False)),
