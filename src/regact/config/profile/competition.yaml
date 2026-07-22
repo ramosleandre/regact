@@ -1,21 +1,52 @@
-# Competition profile (Kaggle): ARC-AGI-3, offline local games, one make per game.
-# Loaded by `run_kaggle --config .../competition.yaml`.
+# Competition profile (Kaggle ARC-AGI-3): in-process Alan agent driven by a local
+# vLLM endpoint, playing the live games one make per game (single_instance).
+#
+# Loaded by `python -m regact.run_kaggle --config .../competition.yaml`. Values
+# interpolate from the environment so the notebook can switch model/endpoint with
+# ONE knob and never edit this file:
+#   LLM_MODEL_NAME   the served model name        (default: qwen3-14b)
+#   AGENT_BASE_URL   the OpenAI-compatible endpoint (default: http://127.0.0.1:8000/v1)
+#   OPENAI_API_KEY   any non-empty string for a local server (litellm requires one)
+#   ARC_OPERATION_MODE  offline (25 public games) | online (110 gateway games)
+#   ARC_ENVIRONMENTS_DIR  local game data dir, used only in offline mode
 agent:
-  name: claude
+  name: alan
+  # vLLM serves an OpenAI-compatible API, so the model is addressed as openai/<name>.
+  model: openai/${oc.env:LLM_MODEL_NAME,qwen3-14b}
+  base_url: ${oc.env:AGENT_BASE_URL,http://127.0.0.1:8000/v1}
+  api_key: ${oc.env:OPENAI_API_KEY,local}
+  args:
+    permission_mode: yolo        # headless: no permission prompts
+    max_output_tokens: 4096      # cap per completion (small-context / quantized models)
+    memory: "off"                # no cross-run memory store
+    # Tell Alan its context window explicitly: offline, litellm can't fetch it and
+    # defaults to 200k, so Alan would let the prompt grow until compaction overflows the
+    # server's real max-model-len. Keep this well under LLM_MAX_MODEL_LEN (65536) so
+    # there's room for output + the compaction summary. (TufaLabs use 32768.)
+    context_window: ${oc.env:AGENT_CONTEXT_WINDOW,32768}
 problem:
   name: arc_agi
-  lifecycle: single_instance
+  lifecycle: single_instance     # one Arcade.make() per game; RESET = level reset
   obs_mode: raw
   info_mode: informative
   kwargs:
-    operation_mode: offline
-    environments_dir: environnement
+    operation_mode: ${oc.env:ARC_OPERATION_MODE,offline}
+    environments_dir: ${oc.env:ARC_ENVIRONMENTS_DIR,environnement}
 features:
   - controller
-execution: parallel
-parallel_workers: 4
+# One agent instance per game. Sequential by default; the notebook may pass
+# --parallel N to run N games concurrently against the one shared vLLM endpoint.
+execution: sequential
+parallel_workers: 1
+security:
+  # The Kaggle kernel is already isolated (no internet, the ARC gateway sandboxes
+  # us). The OS filesystem sandbox is therefore off; the detection camera + policy
+  # still run. Set SANDBOX elsewhere for hardened local/HPC runs.
+  sandbox: none
+  deny_egress: false             # the agent must reach the local vLLM endpoint
 limits:
-  keep_alive: 150
+  keep_alive: 3
   max_moves: 2500
-output_root: experiments
+  walltime_s: ${oc.env:PER_GAME_WALLTIME_S,240}
+output_root: ${oc.env:OUTPUT_ROOT,experiments}
 experiment_name: competition

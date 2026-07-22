@@ -10,3 +10,5 @@ args:
   permission_mode: yolo        # headless: no permission prompts
   max_output_tokens: 4096      # cap per completion — keeps small-context models (~32k) from overflowing
   memory: "off"                # no cross-run memory store
+  context_window: null         # tell Alan its window (int); null = infer. Set for a local
+                               # server (litellm can't fetch it offline; keep < max-model-len).

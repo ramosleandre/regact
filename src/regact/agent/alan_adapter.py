@@ -83,11 +83,12 @@ class AlanAgent(CodeAgent):
         env: dict[str, str] | None = None,
         runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
-        # in-process backend: the OS room (runtime_wrap) is N/A; confinement for Alan
-        # is its PreToolUse hook + the env HTTP boundary (a later block).
         from alancode import AlanCodeAgent
 
         self._tools = list(tools) if tools is not None else []
+        extra: dict[str, Any] = {}
+        if self._args.get("context_window") is not None:
+            extra["context_window"] = int(self._args["context_window"])  # env interp can be str
         self._agent = AlanCodeAgent(
             model=model,
             base_url=base_url,
@@ -101,12 +102,12 @@ class AlanAgent(CodeAgent):
             max_output_tokens=self._args.get("max_output_tokens"),
             memory=self._args.get("memory"),
             tool_call_format=self._args.get("tool_call_format"),
+            **extra,
         )
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
         async for native in self._agent.query_events_async(message):
-            event = self._map(native)
-            if event is not None:
+            for event in self._map_all(native):
                 yield event
 
     async def inject(self, message: str) -> None:
@@ -142,17 +143,63 @@ class AlanAgent(CodeAgent):
         # fixed external host, so there is no static egress host to allowlist.
         return []
 
+    @classmethod
+    def _map_all(cls, native: Any) -> list[AgentEvent]:
+        """Translate one ``alancode`` stream item into zero or more normalized events.
+
+        ``query_events_async`` yields whole ``AssistantMessage`` objects (a ``.content``
+        list of TextBlock/ThinkingBlock/ToolUseBlock), NOT individual blocks — so we must
+        UNPACK each message into its events. A message flagged as an API error becomes an
+        ``AgentError``. Falls back to :meth:`_map` for any single-block/legacy item so
+        older alancode builds still work. Dispatch is by class name to avoid importing
+        alancode's types here.
+        """
+        kind = type(native).__name__
+        if kind == "AssistantMessage":
+            events: list[AgentEvent] = []
+            if getattr(native, "is_api_error_message", False):
+                detail = getattr(native, "error_details", None) or getattr(native, "api_error", "")
+                events.append(
+                    AgentError(
+                        category=ErrorCategory.AGENT_API,
+                        message=str(detail or getattr(native, "text", "") or "assistant API error"),
+                    )
+                )
+                return events
+            for block in getattr(native, "content", []) or []:
+                bkind = type(block).__name__
+                if bkind == "TextBlock":
+                    text = getattr(block, "text", "")
+                    if text:
+                        events.append(TextDelta(text=text))
+                elif bkind in ("ThinkingBlock", "RedactedThinkingBlock"):
+                    events.append(
+                        ThinkingDelta(text=getattr(block, "thinking", getattr(block, "text", "")))
+                    )
+                elif bkind == "ToolUseBlock":
+                    events.append(
+                        ToolCall(
+                            id=getattr(block, "id", ""),
+                            name=getattr(block, "name", ""),
+                            input=getattr(block, "input", {}) or {},
+                        )
+                    )
+            return events
+        one = cls._map(native)
+        return [one] if one is not None else []
+
     @staticmethod
     def _map(native: Any) -> AgentEvent | None:
-        """Translate one ``alancode`` stream event into the normalized union.
+        """Translate one single ``alancode`` block/message into the normalized union.
 
-        Dispatches on the native event's class name so we don't import alancode's
-        block types here; unknown events map to ``None`` and are dropped.
+        Handles legacy per-block streams and terminal messages; unknown items map to
+        ``None`` and are dropped. Whole ``AssistantMessage`` objects are unpacked by
+        :meth:`_map_all`, not here.
         """
         kind = type(native).__name__
         if kind == "TextBlock":
             return TextDelta(text=getattr(native, "text", ""))
-        if kind == "ThinkingBlock":
+        if kind in ("ThinkingBlock", "RedactedThinkingBlock"):
             return ThinkingDelta(text=getattr(native, "thinking", getattr(native, "text", "")))
         if kind == "ToolUseBlock":
             return ToolCall(
