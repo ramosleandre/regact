@@ -148,7 +148,8 @@ async def run_task(
                 config.security.sandbox,
                 workdir=workdir,
                 allow_read=[src_dir],
-                deny_egress=True, #TODO: verify if this is correct, maybe we want to use config.security.deny_egress
+                # TODO: verify — maybe use config.security.deny_egress here instead of True.
+                deny_egress=True,
                 deny_read=deny_read,
                 image=config.security.runtime_opts.get("image"),
             )

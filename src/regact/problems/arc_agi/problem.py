@@ -215,7 +215,8 @@ Use these with the env client in your scripts and controller, e.g.::
     obs = env.step(ACTION4)              # a directional action
     obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)
 
-Valid ids for the current game are in ``obs.available_actions``. ACTION6 is click if she is given to you.
+Valid ids for the current game are in ``obs.available_actions``. ACTION6 is the click
+action, when it is available.
 """
 
 RESET = 0
