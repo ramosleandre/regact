@@ -14,11 +14,16 @@ from regact.viz.reader import GameView
 
 
 def game_metrics(game: GameView) -> dict[str, Any]:
-    """A flat dict of proxies for one game (used by the dashboard + overview)."""
+    """A flat dict of proxies for one game (used by the dashboard + overview).
+
+    Game-specific scores (ARC's levels, MiniGrid's reward, …) are NOT named here:
+    the whole final aggregate is passed through opaquely as ``final_aggregate`` and
+    the per-submission trajectory carries every numeric key each game reports, so a
+    new game needs no viz change (see :func:`_submission_trajectory`).
+    """
     tokens = _token_totals(game)
     tools = _tool_histogram(game)
     submissions = _submission_trajectory(game)
-    best, final = _levels(game)
     cheats = _cheat_calls(game)  # re-derived from the transcript with the CURRENT policy
     return {
         "n_turns": len(game.turns),
@@ -29,9 +34,8 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         "thinking_chars": sum(len(t) for turn in game.turns for t in turn.thinkings),
         "text_chars": sum(len(t) for turn in game.turns for t in turn.texts),
         "submission_trajectory": submissions,
-        "best_levels": best,
-        "final_levels": final,
-        "total_levels": game.state.get("win_levels"),  # from the first obs; shown from the start
+        # The final submission's whole metric dict, opaque — each game owns its keys.
+        "final_aggregate": _final_aggregate(game),
         "duration_s": game.state.get("duration_s", 0),
         "success_rate": _final_metric(game, "success_rate"),
         "last_error_category": game.state.get("last_error_category"),
@@ -80,37 +84,38 @@ def _tool_histogram(game: GameView) -> dict[str, int]:
 
 
 def _submission_trajectory(game: GameView) -> list[dict[str, Any]]:
-    """Score per numbered submission, in order — to see whether the agent improved."""
+    """Per numbered submission, in order — to see whether the agent improved.
+
+    Game-agnostic: each row carries the submission's whole numeric aggregate under
+    ``metrics`` (every key the game reports), so the dashboard can plot whichever
+    keys a given game emits without this layer knowing their names.
+    """
     out: list[dict[str, Any]] = []
     for sub in game.submissions:
         if not sub.name.isdigit():
             continue
-        agg = sub.aggregate
+        metrics = {
+            k: v
+            for k, v in sub.aggregate.items()
+            if isinstance(v, (int, float)) and k != "n_episodes"
+        }
         out.append(
             {
                 "submission": int(sub.name),
-                "success_rate": agg.get("success_rate"),
-                "levels": agg.get("mean_levels_completed"),
-                "mean_steps": agg.get("mean_steps"),
+                "metrics": metrics,
                 "error": sub.error,
             }
         )
     return out
 
 
-def _levels(game: GameView) -> tuple[float | None, float | None]:
-    """Best mean_levels_completed across submissions, and the 'final' one."""
-    values: list[float] = [
-        float(s.aggregate["mean_levels_completed"])
-        for s in game.submissions
-        if s.aggregate.get("mean_levels_completed") is not None
-    ]
-    best = max(values) if values else None
-    final = next(
-        (s.aggregate.get("mean_levels_completed") for s in game.submissions if s.name == "final"),
-        None,
-    )
-    return best, final
+def _final_aggregate(game: GameView) -> dict[str, Any]:
+    """The 'final' submission's whole metric dict (else the last numbered one), opaque."""
+    final = next((s for s in game.submissions if s.name == "final"), None)
+    if final is not None:
+        return dict(final.aggregate)
+    numbered = [s for s in game.submissions if s.name.isdigit()]
+    return dict(numbered[-1].aggregate) if numbered else {}
 
 
 def _final_metric(game: GameView, key: str) -> Any:

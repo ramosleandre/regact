@@ -1,78 +1,189 @@
 # regact
 
-Agent-, game-, and feature-agnostic framework that drives a **code agent** (the
-codex or Claude Code CLI, an in-process Alan agent, or a scripted test agent) to
-write a **controller** — a pure `act(obs) -> action` policy — that plays a
-**game** (ARC-AGI-3, MiniGrid). The agent reaches the environment only over an
-HTTP boundary and never imports the game; new games, agents, and agent-built
-features plug in behind small seams without touching the core.
+**regact is a research framework for building agents that interact with an
+environment.** It drives a *code-writing agent* (the Claude Code or codex CLI, an
+in-process Alan agent, or a scripted test agent) that plays a **game** (ARC-AGI-3,
+MiniGrid) by using a set of **features** — the always-on one being `controller`, which
+has the agent write a pure `act(obs) -> action` policy and submit it.
 
-## Requirements
+Its point is **agnosticity**, so you can run many experiments by swapping parts: the
+**agent**, the **environment** (a "problem"), and the **features** are all pluggable
+behind small seams. The agent reaches the environment only over a localhost **HTTP
+boundary** and never imports the game, so the score measures understanding, not
+memorization or cheating.
 
-- Python **3.11 or 3.12** (not 3.13).
-- To run *sandboxed* on Linux: `bwrap` (bubblewrap) + unprivileged user
-  namespaces; on HPC: Apptainer/Singularity; macOS dev uses the built-in
-  `sandbox-exec`. **None** of these are needed to install or to run the tests.
+## Install
 
-## Install — plain `pip`, no `make` needed
+Python **3.11 or 3.12** (not 3.13). No `make` needed.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-
-# Clean / HPC / most reliable — copies the package into site-packages:
-pip install .                      # + extras, e.g.  pip install ".[minigrid]"  ".[arc]"
-
-# Local development — editable + lint/type/test tooling:
-pip install -e ".[dev]"
+pip install -e ".[dev]"                 # dev + tooling  (add ".[arc]" ".[minigrid]" for games)
 ```
 
-After install the entry points run from **anywhere, with no `PYTHONPATH`**:
+Check the machine is ready (Python, agent CLIs, sandbox, game extras):
 
 ```bash
-python -m regact.run_exp agent=codex problem=arc_agi 'task_names=[ls20]'
-python -m regact.security.probe --sandbox          # check the OS sandbox on this host
-python -m regact.viz.app --experiment experiments/<run>
+make doctor
 ```
 
-> **macOS quirk:** if the repo is under `~/Desktop` and a bare `python -m regact…`
-> says `No module named regact` after an *editable* install, that's a known macOS
-> `.pth`/privacy interaction — use `pip install .` instead, or prefix
-> `PYTHONPATH=src`. The test suite is unaffected (it injects `src` itself).
-
-### Optional extras
-
-| Extra | Brings | For |
-|---|---|---|
-| `dev` | ruff, mypy, pytest | development + the quality gate |
-| `minigrid` | gymnasium, minigrid | the MiniGrid problem |
-| `arc` | arc-agi | the ARC-AGI-3 problem |
-
-The Alan in-process backend installs from its sibling repo: `pip install -e ../alancode`.
-
-## Quality gate & tests (raw commands — `make` is only a convenience)
-
-| Task | `pip`/raw command | `make` shortcut |
-|---|---|---|
-| Lint | `ruff check src tests` | `make lint` |
-| Format + autofix | `ruff format src tests && ruff check --fix src tests` | `make format` |
-| Type-check | `mypy src` | `make typecheck` |
-| Unit tests (no LLM) | `pytest -m "not integration and not slow"` | `make test` |
-| All tests | `pytest` | `make test-all` |
-| Full gate | `ruff check src tests && mypy src && pytest` | `make check` |
+> **macOS quirk:** if a bare `python -m regact…` says `No module named regact` after an
+> editable install (a known macOS `.pth` interaction under `~/Desktop`), prefix
+> `PYTHONPATH=src` — the `make` targets already do this for you.
 
 ## Run
 
-```bash
-# ARC-AGI-3 (local offline games), one game, with codex:
-python -m regact.run_exp agent=codex problem=arc_agi 'task_names=[ls20]' agent.args.reasoning_effort=high
+One command. Compose the four axes as Hydra groups (`agent`, `problem`, `features`,
+`experiment`) and override any field on the CLI:
 
-# MiniGrid with Claude:
-python -m regact.run_exp agent=claude problem=minigrid
+```bash
+# 1) fastest end-to-end, no LLM and no game library (scripted agent, one game):
+make run ARGS="experiment=dev"
+
+# 2) a real ARC-AGI-3 run with a coding CLI (anti-cheat on, records a video):
+make run ARGS="experiment=research agent=codex 'task_names=[ls20]'"
+
+# 3) MiniGrid with Claude:
+make run ARGS="agent=claude problem=minigrid"
 ```
 
-Outputs land under `experiments/<experiment_name>/<game>/`:
-`logs/transcript.jsonl`, `logs/experiment_state.json`, and
-`workdir/submissions/<n|final>/results.json` (+ a rollout video).
+Then open the visualizer on the run (conversation, metrics, submissions, videos):
+
+```bash
+make viz EXP=experiments/<run>
+```
+
+Outputs land under `experiments/<name>/<game>/`: `logs/transcript.jsonl`,
+`logs/experiment_state.json`, and `workdir/submissions/<n|final>/results.json` (+ a video).
+
+## Configure (Hydra)
+
+Everything is a Hydra group under [`src/regact/conf/`](src/regact/conf/) — one file per option:
+
+| To configure a… | Edit / add a file in | Select on the CLI |
+|---|---|---|
+| **agent** | `conf/agent/` (`claude`, `codex`, `alan`, `scripted`) | `agent=claude` |
+| **environment** (problem) | `conf/problem/` (`arc_agi`, `minigrid`) | `problem=arc_agi` |
+| **features** (a set) | `conf/features/` (`controller`, …) | `features=controller` |
+| **experiment** (a whole profile) | `conf/experiment/` (`dev`, `research`, `competition`) | `experiment=research` |
+
+A run loads a **list of features** — `controller` is the always-on base, but you can
+stack more (`features: [controller, my_feature]`); the bootstrap, prompt, tools, and
+teardown assemble themselves from that set.
+
+Hyperparameters (single- vs multi-instance lifecycle, limits, sandbox, `shadow_replay`…)
+are plain fields you set inline (`problem.lifecycle=single_instance limits.walltime_s=3600`)
+or bundle into an `experiment` profile. The typed schema is
+[`config/schema.py`](src/regact/config/schema.py); both front-ends
+(`run_exp` via Hydra, `run_kaggle` via a YAML profile) build the same `RunConfig`.
+
+## Commands (`make help`)
+
+```
+make help        # this list, grouped by category
+make doctor      # is this machine ready to run regact?
+make check       # the quality gate: lint + typecheck + unit tests
+make run         # a research run (ARGS="...")
+make viz         # the experiment visualizer (EXP=...)
+make probe       # verify the OS sandbox on this host
+```
+
+---
+
+## Architecture
+
+**One keep-alive loop** wrapped around **three swappable plugins** meeting at an **HTTP
+wall**. The loop sends a message to the agent, consumes a normalized `AgentEvent` stream,
+runs any framework tool the agent calls, re-injects the result, and repeats until the
+agent exits, a limit trips, or an error stops it.
+
+```
+                        orchestration/task.py   ← the one wiring hub
+                        (joins the 3 by name + Capabilities, never by concrete type)
+                                  │
+        ┌─────────────────────────┼─────────────────────────┐
+        ▼                         ▼                          ▼
+   ┌─────────┐              ┌───────────┐              ┌──────────┐
+   │  AGENT  │              │  PROBLEM  │══ HTTP wall ═│ FEATURE  │
+   │CodeAgent│              │(the env)  │  Obs (JSON)  │ Feature  │
+   └────┬────┘              └───────────┘              └────┬─────┘
+        │  AgentEvent stream                                │ Tool / Hook
+        ▼                                                   ▼
+   ┌──────────────────────── orchestration/loop.py ───────────────────┐
+   │  send → consume events → run framework tools → inject → repeat    │
+   │  agnostic: knows only agents / tools / hooks / limits / writers   │
+   └───────────────────────────────────────────────────────────────────┘
+```
+
+### The three abstractions
+
+Each is an ABC behind a lazy `string → factory` registry, so config names only
+strings/enums — never a concrete class. To add one, drop a file and register a name;
+the core is untouched.
+
+| Axis | ABC | Defined in | Add one by |
+|---|---|---|---|
+| **Agent** — who writes the code | `CodeAgent` | [agent/base.py](src/regact/agent/base.py) | `AgentName` enum + `build_agent` branch + adapter + `conf/agent/*.yaml` |
+| **Problem** — the environment (iterates its tasks) | `BaseProblem` | [problems/base.py](src/regact/problems/base.py) | `problems/<game>/problem.py` + one `_load_builtins()` line + `conf/problem/*.yaml` |
+| **Feature** — an agent-built capability | `Feature` | [features/base.py](src/regact/features/base.py) | `features/<name>.py` + one `_load_builtins()` line + `conf/features/*.yaml` |
+
+The agent is driven only through the `CodeAgent` ABC, described by a data-only
+`Capabilities` descriptor and a normalized `AgentEvent` union — so the loop never
+inspects a backend's type, and tool routing degrades on *data*, not on which adapter is
+loaded.
+
+### What a feature is
+
+A **feature** is a self-contained capability a run turns on. It bundles four things,
+and the core assembles a run from whatever set of features is loaded — the loop never
+names a specific feature. The contract is [features/base.py](src/regact/features/base.py):
+
+| A feature provides… | Method | Assembled into |
+|---|---|---|
+| workdir files | `templates(ctx)` | scaffolded into the agent's workdir |
+| a prompt fragment | `prompt_fragment(ctx)` | appended to the agent's first message |
+| tools | `tools(deps)` | tools the agent can call (run by the loop or over `/control`) |
+| teardown hooks | `hooks(deps)` | framework work fired at a phase (e.g. re-score at the end) |
+
+`templates`/`prompt_fragment` take a static `FeatureContext`; `tools`/`hooks` take a
+runtime `RunDeps` (the run's `EnvClient`, state, paths…). The only built-in feature is
+[features/controller.py](src/regact/features/controller.py) — read it as the worked
+example: it ships `base_controller.py` + a `solution.py` stub (templates), explains the
+`act(obs) -> action` contract (prompt, in `features/prompts/controller.md`), provides the
+`SubmitSolution` + `ExitTask` tools, and registers a teardown hook that re-scores the
+final `solution.py`. A new feature is one file next to it plus `register_feature(...)`.
+
+### The HTTP wall (why the agent never imports the game)
+
+[env/server.py](src/regact/env/server.py) ↔ [envclient/client.py](src/regact/envclient/client.py):
+only serialized JSON crosses — an opaque action out, an `Obs` DTO
+([envclient/obs.py](src/regact/envclient/obs.py): `frame`/`reward`/`is_done`/`available_actions`/`info`)
+back. A server-side `ObsRenderer` flattens the native observation into `Obs`; the agent
+cannot override it. The game engine and its answer key run in a separate process and are
+never in the agent's filesystem view — **prevention by absence**.
+
+### Trusted vs untrusted (why a controller cannot fake its score)
+
+The agent writes `solution.py`, which could otherwise compute — and lie about — its own
+score. regact splits evaluation in two ([controllers/executor.py](src/regact/controllers/executor.py)):
+
+- **Untrusted** (`run_episodes_raw`) — the agent's controller runs in a sandboxed
+  subprocess and only **records what the env returned** (observations, actions). It never
+  computes a score and has no access to the scoring function.
+- **Trusted** (`score_episodes` / `replay_and_score`) — the **orchestrator**, outside the
+  sandbox, applies the problem's metric to those recordings. With `shadow_replay`, it
+  re-runs the recorded actions on a *fresh trusted env* and re-derives the score.
+
+So the score is computed by code the agent didn't write, on an env it doesn't control —
+neutralizing both faked metrics and memorized action replays.
+
+### Isolation, woven through — not central
+
+[security/](src/regact/security/) is a stdlib-only leaf (imports no other regact module).
+The OS sandbox (`runtime.wrap_argv`: none / seatbelt / bwrap / apptainer) + an egress
+allow-list proxy are **enforced**; a detection "camera" (`detection.py` + `policy.py`) is
+**advisory** — it only counts and logs suspicious tool calls, never blocks. The R1–R6
+isolation contract is checked per host by the conformance probe (`make probe`).
 
 ## Docs
 
@@ -81,15 +192,21 @@ Outputs land under `experiments/<experiment_name>/<game>/`:
 | [docs/agents-setup.md](docs/agents-setup.md) | install + authenticate the CLI agents; full config reference |
 | [docs/agent-isolation.md](docs/agent-isolation.md) | the anti-cheat / sandbox design (threat model, invariants R1–R6) |
 | [docs/sandbox-testing.md](docs/sandbox-testing.md) | verify the sandbox per machine (the conformance probe) |
-| [docs/debug_isolation_linux.md](docs/debug_isolation_linux.md) | **copy-paste commands to run on a Linux box**; paste the output back for analysis |
-| [docs/contexte_isolation_state.md](docs/contexte_isolation_state.md) | **read first on a new machine** — current isolation state + the audited networking truth |
+| [docs/contexte_isolation_state.md](docs/contexte_isolation_state.md) | **read first on a new machine** — current isolation state |
 
 ## Layout
 
 ```
-src/regact/   the package (agent, env, envclient, tools, features, problems,
-              controllers, prompt, workspace, orchestration, security, obs,
-              session, viz, config)
-tests/        deterministic tests (scripted agent + fake env, no LLM)
-docs/         the docs above
+src/regact/
+  orchestration/  the conductor: loop (agnostic keep-alive) + task (the wiring hub)
+  agent/          the Agent plugin: CodeAgent ABC, Capabilities, AgentEvent, adapters
+  problems/       the Problem plugin: BaseProblem ABC + arc_agi, minigrid
+  features/       the Feature plugin: Feature ABC + the always-on controller
+  controllers/    the untrusted/trusted eval split (executor, runner, summary)
+  env/ envclient/ the HTTP wall: server + wrapped env / renderer  ·  client + Obs
+  prompt/ workspace/ tools/   system prompt · workdir bootstrap · framework tools
+  security/       anti-cheat & sandbox: runtime wrap, egress proxy, R1–R6 probe
+  obs/ viz/ session/  transcript+logs · dashboard · run state
+  conf/ config/   Hydra config groups · the typed RunConfig schema + loader
+tests/            deterministic tests (scripted agent + fake env, no LLM)
 ```

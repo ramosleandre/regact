@@ -1,0 +1,22 @@
+# @package _global_
+# Dev profile: the fastest end-to-end run, no LLM and no game library.
+# The scripted agent replays canned events and the fake/offline path exercises the
+# whole loop → eval → artifacts pipeline. Use it to smoke-test plumbing changes.
+#
+#   python -m regact.run_exp experiment=dev
+agent:
+  name: scripted
+problem:
+  name: arc_agi
+  lifecycle: single_instance
+  kwargs:
+    operation_mode: offline
+    environments_dir: environnement
+features:
+  - controller
+task_names: [ls20]        # one game, so the run is quick
+security:
+  sandbox: none           # dev convenience; no confinement
+limits:
+  keep_alive: 3
+experiment_name: dev

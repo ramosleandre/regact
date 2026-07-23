@@ -97,6 +97,20 @@ class BaseProblem(ABC):
         """Roll per-episode metrics into a run aggregate."""
         ...
 
+    def derived_submission_metrics(
+        self, task_name: str, raw_episodes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Extra scores a game derives offline from a submission's serialized episodes.
+
+        Distinct from :meth:`aggregate_episode_metrics` (which sees only per-episode
+        ``metrics``): this receives the raw episode dicts — including ``milestones`` —
+        so a game whose real score needs step-level data + external baselines (ARC's
+        RHAE, from its per-level human benchmark) can compute it here. Read by the
+        viewer to display the game's own metric without the viz naming any key. Plain
+        dict of numbers; empty by default (most games score fully in the aggregate).
+        """
+        return {}
+
     @abstractmethod
     def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
         """The game prompt for the first message, built per task and info level."""

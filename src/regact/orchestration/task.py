@@ -148,7 +148,7 @@ async def run_task(
                 config.security.sandbox,
                 workdir=workdir,
                 allow_read=[src_dir],
-                deny_egress=True,
+                deny_egress=True, #TODO: verify if this is correct, maybe we want to use config.security.deny_egress
                 deny_read=deny_read,
                 image=config.security.runtime_opts.get("image"),
             )
@@ -228,7 +228,6 @@ async def run_task(
                 runtime_wrap=runtime_wrap,
             )
             first_obs = server.first_obs(task_name)
-            experiment.win_levels = (first_obs.info or {}).get("win_levels")
             first_message = builder.build_first_message(problem.render_obs_text(first_obs))
 
             with (

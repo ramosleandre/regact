@@ -1,0 +1,28 @@
+# @package _global_
+# Research profile: a real run on offline ARC-AGI-3 with a coding-CLI agent, the
+# anti-cheat defenses on (shadow-replay re-scores on a trusted env), and a video of
+# the final controller. Swap the agent/model on the CLI:
+#
+#   python -m regact.run_exp experiment=research
+#   python -m regact.run_exp experiment=research agent=codex 'task_names=[ls20]'
+#   python -m regact.run_exp experiment=research agent=claude agent.model=opus
+agent:
+  name: claude
+  model: opus
+problem:
+  name: arc_agi
+  lifecycle: single_instance
+  kwargs:
+    operation_mode: offline
+    environments_dir: environnement
+features:
+  - controller
+security:
+  sandbox: auto           # confine the agent subprocess where a backend exists
+  deny_egress: true       # only the agent's declared LLM host is reachable
+shadow_replay: true       # re-score by replaying the actions on a trusted env (~2x eval)
+record_video: true
+limits:
+  keep_alive: 350
+  walltime_s: 3600        # 1h per game
+experiment_name: research

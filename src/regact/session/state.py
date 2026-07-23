@@ -32,7 +32,6 @@ class ExperimentState:
     exit_reason: str | None = None  # set at teardown; None while the run is still going
     # cheat attempts: forbidden-arg keyword hits (unsandboxed) or OS-denied results (sandboxed).
     cheat_attempts: int = 0
-    win_levels: int | None = None  # total levels to win (from the game's first observation)
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
     schema_version: int = 1

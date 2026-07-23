@@ -104,8 +104,33 @@ def load_game(experiment_dir: str, game: str) -> GameView:
     turns = _group_turns(_load_events(base / "logs" / "transcript.jsonl"))
     submissions = _load_submissions(base / "workdir" / "submissions")
     config = _load_json(base / "config.json") or {}
+    _enrich_derived_metrics(game, submissions, config)
     _tag_tool_calls(turns, submissions)
     return GameView(name=game, state=state, turns=turns, submissions=submissions, config=config)
+
+
+def _enrich_derived_metrics(
+    game: str, submissions: list[SubmissionView], config: dict[str, Any]
+) -> None:
+    """Fold each game's own offline score (e.g. ARC's RHAE) into the submission aggregates.
+
+    Delegates to the problem named in the resolved config, so the viewer stays agnostic
+    of any game's metric keys. Best-effort: a missing game library or benchmark leaves the
+    aggregates untouched rather than failing the whole view.
+    """
+    problem_cfg = config.get("problem") or {}
+    name = problem_cfg.get("name")
+    if not name or not submissions:
+        return
+    try:
+        from regact.problems.base import build_problem
+
+        problem = build_problem(name, problem_cfg.get("kwargs") or {})
+        for sub in submissions:
+            if sub.episodes:
+                sub.aggregate.update(problem.derived_submission_metrics(game, sub.episodes))
+    except Exception:  # a viewer must render even if the problem cannot be rebuilt here
+        return
 
 
 def list_artifacts(experiment_dir: str, game: str) -> list[ArtifactFile]:
@@ -274,19 +299,24 @@ def _is_submit_call(call: ToolCallView) -> bool:
 
 
 def _submission_wins(submissions: list[SubmissionView]) -> list[bool]:
-    """Per numbered submission (in order): did it clear a new level vs. all prior ones?"""
+    """Per numbered submission (in order): did it improve on all prior ones?"""
     wins: list[bool] = []
     running = 0.0
     for sub in sorted((s for s in submissions if s.name.isdigit()), key=lambda s: int(s.name)):
-        levels = _submission_levels(sub.aggregate)
-        wins.append(levels > running)
-        running = max(running, levels)
+        progress = _submission_progress(sub.aggregate)
+        wins.append(progress > running)
+        running = max(running, progress)
     return wins
 
 
-def _submission_levels(aggregate: dict[str, Any]) -> float:
-    """Cleared-level count for a submission (falls back to a solved/success signal)."""
-    levels = aggregate.get("mean_levels_completed")
-    if levels is not None:
-        return float(levels)
+def _submission_progress(aggregate: dict[str, Any]) -> float:
+    """A monotone progress signal for a submission, game-agnostic.
+
+    Prefers a game's own graded depth if it reports one (ARC's cleared-level count),
+    else falls back to the universal success signal every game reports — so the
+    'improved?' marking works for any game without naming its metric keys.
+    """
+    depth = aggregate.get("mean_levels_completed")
+    if depth is not None:
+        return float(depth)
     return 1.0 if (aggregate.get("success_rate") or 0) > 0 else 0.0

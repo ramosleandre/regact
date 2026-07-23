@@ -1,0 +1,7 @@
+# @package _global_
+# The base feature set: just the controller (the agent writes a policy and submits it).
+# A feature bundles workdir templates + a prompt fragment + tools + teardown hooks;
+# `controller` is always present. Add a feature by creating another file here whose
+# `features:` list names it (it must be registered via register_feature).
+features:
+  - controller

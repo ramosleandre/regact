@@ -10,8 +10,8 @@ _PROFILE = (
     Path(__file__).resolve().parents[1]
     / "src"
     / "regact"
-    / "config"
-    / "profile"
+    / "conf"
+    / "experiment"
     / "competition.yaml"
 )
 

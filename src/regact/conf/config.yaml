@@ -1,14 +1,16 @@
-# Default research config. Pick groups + override fields on the CLI, e.g.:
+# Default run config. Compose the four agnosticity axes as Hydra groups, and override
+# any field on the CLI:
 #   python -m regact.run_exp agent=claude problem=arc_agi
 #   python -m regact.run_exp agent=codex problem=minigrid agent.args.reasoning_effort=high
+#   python -m regact.run_exp experiment=research        # a whole profile (agent+problem+limits+…)
 defaults:
-  - agent: scripted
-  - problem: arc_agi
+  - agent: scripted        # conf/agent/*        — who writes the code
+  - problem: arc_agi       # conf/problem/*      — the environment (iterates its tasks)
+  - features: controller   # conf/features/*     — the agent-built capabilities
   - _self_
+  - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
 
 task_names: []          # empty = all games of the problem; e.g. 'task_names=[ls20]'
-features:
-  - controller
 execution: sequential
 parallel_workers: 1
 limits:

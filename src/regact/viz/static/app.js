@@ -15,7 +15,15 @@ const clear = (el) => el.replaceChildren();
 const fmt = (n) => (n == null ? "—" : Intl.NumberFormat().format(n));
 const pct = (x) => (x == null ? "—" : (x * 100).toFixed(0) + "%");
 const dur = (s) => { s = Math.round(s || 0); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
-const levels = (m) => `${m.best_levels ?? 0} / ${m.total_levels ?? "?"}`;
+// Game-agnostic: format an opaque aggregate dict as "key val · key val", skipping
+// bookkeeping keys. Each game owns its metric names (ARC: levels/rhae, MiniGrid: reward).
+const _SKIP_KEYS = new Set(["n_episodes", "n_errors"]);
+const fmtMetric = (v) => (v == null ? "—" : typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(2)) : v);
+const aggLine = (agg) =>
+  Object.entries(agg || {})
+    .filter(([k, v]) => !_SKIP_KEYS.has(k) && typeof v === "number")
+    .map(([k, v]) => `${k} ${fmtMetric(v)}`)
+    .join(" · ") || "—";
 
 async function api(path) {
   const r = await fetch(path);
@@ -42,7 +50,7 @@ async function renderDashboard() {
     card.append(h("div", "muted",
       `${g.state.problem_name || "?"} · ${m.n_turns} iters · ${m.n_tool_calls} tools · ${m.n_submissions} submits`));
     card.append(h("div", null, statusBadge(m), " ",
-      h("span", "badge", `levels ${levels(m)}`), " ",
+      h("span", "badge", aggLine(m.final_aggregate)), " ",
       h("span", "badge", dur(m.duration_s)), " ",
       h("span", "badge", `out ${fmt(m.tokens.output)} tok`)));
     card.onclick = () => { location.hash = "game/" + encodeURIComponent(g.name); };
@@ -87,7 +95,7 @@ async function renderOverview(name) {
     kpi("Tool calls", m.n_tool_calls),
     kpi("Submissions", m.n_submissions),
     kpi("Output tokens", fmt(m.tokens.output), `cache ${fmt(m.tokens.cache_read)}`),
-    kpi("Levels", levels(m), `reached / total`),
+    kpi("Score", aggLine(m.final_aggregate), `final submission`),
     kpi("Time", dur(m.duration_s)),
     kpi("Success", pct(m.success_rate)),
     kpi("Thinking", fmt(m.thinking_chars) + " ch"),
@@ -135,10 +143,14 @@ function barChart(title, obj) {
 }
 function trajectory(traj) {
   const wrap = h("div"); wrap.append(h("h2", null, "Score per submission"));
+  // Columns are the union of metric keys any submission reported — so a new game's
+  // metrics show up with no viz change (ARC: success_rate/levels/rhae, MiniGrid: reward/steps).
+  const keys = [];
+  for (const s of traj) for (const k of Object.keys(s.metrics || {})) if (!keys.includes(k)) keys.push(k);
   const t = h("table");
-  t.append(rowEl("th", ["#", "success", "levels", "mean_steps", "error"]));
+  t.append(rowEl("th", ["#", ...keys, "error"]));
   for (const s of traj)
-    t.append(rowEl("td", [s.submission, pct(s.success_rate), s.levels ?? "—", s.mean_steps ?? "—", s.error || ""]));
+    t.append(rowEl("td", [s.submission, ...keys.map((k) => fmtMetric(s.metrics?.[k])), s.error || ""]));
   wrap.append(t); return wrap;
 }
 function cheatsPanel(cheats) {
@@ -267,8 +279,7 @@ async function renderArtifacts(name) {
     const c = h("div", "sub", h("h3", null, "submission " + s.name));
     if (s.error) c.append(h("div", "badge b-bad", s.error));
     const a = s.aggregate || {};
-    c.append(h("div", "muted",
-      `success ${pct(a.success_rate)} · levels ${a.mean_levels_completed ?? "—"} · steps ${a.mean_steps ?? "—"} · n=${a.n_episodes ?? "—"}`));
+    c.append(h("div", "muted", `${aggLine(a)} · n=${a.n_episodes ?? "—"}`));
     for (const v of s.videos || []) {
       const vid = h("video"); vid.controls = true; vid.preload = "metadata";
       vid.src = `/video/${encodeURIComponent(name)}/${encodeURIComponent(s.name)}/${encodeURIComponent(v)}`;

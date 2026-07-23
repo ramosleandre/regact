@@ -67,8 +67,11 @@ def test_metrics_proxies(tmp_path: Path) -> None:
     assert m["tool_histogram"] == {"Bash": 2, "SubmitSolution": 1}
     assert m["n_submissions"] == 1
     assert m["tokens"]["output"] == 17
-    assert m["best_levels"] == 2
-    assert m["submission_trajectory"][0]["submission"] == 0
+    # Game-agnostic: the whole aggregate is passed through opaquely (no named "levels" key).
+    assert m["final_aggregate"]["mean_levels_completed"] == 2
+    traj0 = m["submission_trajectory"][0]
+    assert traj0["submission"] == 0
+    assert traj0["metrics"]["mean_levels_completed"] == 2
 
 
 def test_submit_call_tagged_win_when_a_level_clears(tmp_path: Path) -> None:

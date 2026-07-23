@@ -215,7 +215,7 @@ Use these with the env client in your scripts and controller, e.g.::
     obs = env.step(ACTION4)              # a directional action
     obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)
 
-Valid ids for the current game are in ``obs.available_actions``. ACTION6 is click.
+Valid ids for the current game are in ``obs.available_actions``. ACTION6 is click if she is given to you.
 """
 
 RESET = 0
@@ -386,6 +386,20 @@ class ArcAgiProblem(BaseProblem):
             "success_rate": sum(bool(e.get("success")) for e in episodes) / n,
             "mean_levels_completed": sum(e.get("levels_completed", 0) for e in episodes) / n,
         }
+
+    def derived_submission_metrics(
+        self, task_name: str, raw_episodes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """RHAE — the competition's own metric — from a submission's episodes + the
+        game's per-level human baseline. Absent baseline (or no usable episode) yields
+        no key rather than a crash, so a game without a benchmark simply shows none."""
+        from regact.problems.arc_agi.scoring import rhae_from_results
+
+        baseline = self._task(task_name).baseline_actions
+        if not baseline:
+            return {}
+        rhae = rhae_from_results({"episodes": raw_episodes}, baseline_actions=baseline)
+        return {"rhae": round(rhae.score, 1)} if rhae is not None else {}
 
     def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
         task = self._task(task_name)
