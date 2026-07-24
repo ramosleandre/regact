@@ -1,0 +1,260 @@
+---
+title: Environments
+description: The Problem axis — a game plugs in through the BaseProblem contract by constructor injection, never by import, and iterates its own tasks.
+---
+
+An **environment** is a `Problem`: the plugin that owns everything game-specific.
+It is one of the three swappable axes that meet at the wiring hub
+`orchestration/task.py` (joined by name, never by concrete type). This page covers
+the contract a problem implements, why all game knowledge enters by **injection
+rather than import**, the two environments that exist today, the answer-key
+protection, and how to add your own.
+
+<Note>
+A "problem" is a **task family**, not a single task. `arc_agi` is the ARC-AGI-3
+family; it **iterates** its games through `get_task_names`. One run walks every task
+the problem enumerates (or the subset `task_names` selects). Source:
+`problems/base.py`.
+</Note>
+
+## The contract
+
+Every environment subclasses `BaseProblem` (`problems/base.py`), an ABC whose
+docstring fixes the one invariant its return value must satisfy: `make_env` must
+yield a **gym-like** env (`reset()` -> obs or `(obs, info)`; `step(action)` -> a 4-
+or 5-tuple), because the server-side `WrappedEnv` drives it.
+
+### Abstract methods
+
+Seven methods are required. Each is small and single-purpose.
+
+<ParamField path="make_env(task_name)" type="-> Any">
+  Construct the native env for one task. **Lazy-imports the game library inside the
+  method body** — this is the injection seam (see below).
+</ParamField>
+<ParamField path="get_task_names()" type="-> list[str]">
+  The games/levels this problem iterates. A run loops over exactly this list.
+</ParamField>
+<ParamField path="obs_renderer(task_name, *, mode)" type="-> ObsRenderer">
+  The server-side renderer that turns a native observation into the agent-facing
+  `Obs` for the requested `ObsMode`. May reject an unsupported mode. See
+  [Observation modes](/agnosticity/observation-modes).
+</ParamField>
+<ParamField path="compute_episode_metrics(final_obs, *, steps)" type="-> dict">
+  Per-episode metrics from **generic episode data only** — the universal `Obs`
+  (carrying `reward`/`is_done`/`info`) plus the step count, never a
+  controller-specific rollout type. This keeps the problem layer agnostic of how
+  the episode was produced.
+</ParamField>
+<ParamField path="aggregate_episode_metrics(episodes)" type="-> dict">
+  Roll the per-episode metrics into one run aggregate. This dict **is** what a score
+  means for this game (ARC: `success_rate`/`mean_levels_completed`; MiniGrid:
+  `success_rate`/`mean_steps`/`mean_reward`). See [Scoring](/validity/scoring).
+</ParamField>
+<ParamField path="build_prompt(task_name, *, info_mode)" type="-> str">
+  The game prompt for the first message, built per task and per info level.
+</ParamField>
+<ParamField path="config_kwargs()" type="-> dict">
+  The kwargs needed to **rebuild this problem on the trusted eval side** — so scoring
+  runs a freshly reconstructed problem, not the agent-facing instance.
+</ParamField>
+
+### Optional hooks
+
+The base class supplies no-op defaults for these; a problem overrides only what it
+needs.
+
+<ParamField path="milestone_detector(task_name)" type="-> Callable | None">
+  A per-step detector the wrapper calls to emit milestone strings (ARC: level
+  completion, `WIN`, `GAME_OVER`). `None` by default.
+</ParamField>
+<ParamField path="helper_templates(task_name)" type="-> list[TemplateFile]">
+  Game-specific, **import-free** helper files dropped into the agent's workdir (ARC:
+  action-id constants + the `complex_action` click builder). Distinct from a
+  feature's templates. Empty by default.
+</ParamField>
+<ParamField path="secret_modules()" type="-> tuple[str, ...]">
+  The importable packages that **are** the game engine/data library — the names the
+  sandbox hides on disk. The answer-key protection (see below). Empty by default.
+</ParamField>
+<ParamField path="render_frame(obs)" type="-> Any | None">
+  Colorize one `Obs` into an RGB frame for **video**. Used only when a submitted
+  controller's episodes are recorded, never for the agent's own exploration scripts.
+  `None` (no video) by default.
+</ParamField>
+<ParamField path="render_obs_text(obs)" type="-> str | None">
+  A compact, human-readable **text** rendering of one observation (distinct from
+  `render_frame`'s RGB). This is what carries the dynamic first observation — and the
+  live `available_actions` — into the agent's first message. `None` by default.
+</ParamField>
+<ParamField path="derived_submission_metrics(task_name, raw_episodes)" type="-> dict">
+  Extra scores derived **offline** from a submission's serialized episodes plus an
+  external baseline — e.g. ARC's RHAE, which needs step-level milestones and the
+  per-game human benchmark. Read by the visualizer to display the game's own metric
+  without the viz naming any key. Empty by default. See [Scoring](/validity/scoring).
+</ParamField>
+
+## Injection, not import
+
+The framework's generic layers — `env/` (the server) and `envclient/` (the
+client) — import **nothing** game-specific. All game knowledge enters through the
+problem object's constructor at registration time, and the game library itself is
+imported **lazily, inside `make_env`** (and the per-problem shims), never at module
+top level.
+
+This has a concrete, verifiable consequence: **`problems/arc_agi/problem.py` and
+`problems/minigrid/problem.py` import cleanly without the game extra installed.**
+The task catalog, prompts, and metrics are all reachable on a base install; only
+`make_env` — which runs at eval time — needs `arc_agi`/`arcengine` or
+`gymnasium`/`minigrid`.
+
+<CodeGroup>
+```python ARC-AGI-3 (problems/arc_agi/problem.py)
+def make_env(self, task_name: str) -> Any:
+    task = self._task(task_name)
+    arc_env = self._arcade_instance().make(task.game_id)
+    ...
+    return _ArcGymShim(arc_env)   # native GameAction stays server-side
+```
+
+```python MiniGrid (problems/minigrid/problem.py)
+def make_env(self, task_name: str) -> Any:
+    import gymnasium
+    import minigrid  # noqa: F401  (importing registers the MiniGrid env ids)
+    env = gymnasium.make(self._env_id)
+    ...
+    return _ActionInfoShim(env)
+```
+</CodeGroup>
+
+<Note>
+The env server itself runs as a **thread** inside the orchestrator process, so the
+game library is loaded in-process at eval time — but the agent never touches it. The
+agent's only door is the `EnvClient` that `make_env()` returns in the workdir; the
+native engine and its answer key never cross the [HTTP
+wall](/validity/trusted-untrusted).
+</Note>
+
+## The environments that exist
+
+<Tabs>
+<Tab title="ARC-AGI-3">
+`problems/arc_agi/problem.py` — the ARC-AGI-3 arcade in **offline** mode.
+
+- **Offline and deterministic.** Games load from a committed local
+  `environnement/` directory (no API key); `seed` is ignored.
+- **Engine stays server-side.** A gym shim (`_ArcGymShim`) maps the JSON action the
+  agent sends — an int action id, or `{"action": id, "data": {"x", "y"}}` for the
+  ACTION6 click — to a native `GameAction`, so the conversion never leaves the
+  server. The agent sends JSON and receives `Obs`; it never imports `arcengine`.
+- **Task catalog from metadata.** `problems/arc_agi/tasks.py` scans
+  `<environments_dir>/*/*/metadata.json` (titles, tags, per-level human baselines),
+  so the game list exists even without the `arc` extra. It also supports an online
+  gateway path that enumerates games from a live arcade.
+- **25 public games** offline; the real competition scores 110 hidden games.
+- Ships an import-free helper (`code_library/arc_agi_helper.py`: action-id
+  constants + `complex_action`), a milestone detector, an RGB frame renderer (the
+  official 16-color palette), and a hex-grid text renderer.
+- Defined by `conf/problem/arc_agi.yaml`: `lifecycle: single_instance` (one env per
+  game; `RESET` is a level reset).
+
+<Warning>
+ARC runs `single_instance`: exploration and eval share one persistent env, so
+`obs_mode` other than `RAW` is rejected by `obs_renderer`, and hand-play can leak
+into a controller's score under this lifecycle (logged as a warning). See
+[Scoring](/validity/scoring).
+</Warning>
+</Tab>
+
+<Tab title="MiniGrid">
+`problems/minigrid/problem.py` — a gymnasium MiniGrid task family.
+
+- **Gymnasium-backed and STOCHASTIC**, so **`seed` matters here** (unlike ARC). The
+  same seed makes an episode reproducible; changing it changes the layout.
+- Wraps one configured env id in a plain delegating shim (`_ActionInfoShim`) that
+  attaches `available_actions` (the full discrete action set) to every obs's info —
+  a shim rather than a `gymnasium.Wrapper` so gymnasium stays a lazy import.
+- Default env `MiniGrid-Empty-5x5-v0` (`conf/problem/minigrid.yaml`), `lifecycle:
+  multi_instance` (a fresh env per episode). An optional `fully_obs` flag adds the
+  `FullyObsWrapper`.
+- Re-renders the symbolic obs into RGB via MiniGrid's own tile renderer for video.
+</Tab>
+</Tabs>
+
+## Answer-key protection
+
+`secret_modules()` names the importable packages that **are** the game — its engine
+and data library. These are pip-installed in the same venv as the framework, so the
+OS sandbox (which must allow the whole interpreter prefix for Python to run) would
+otherwise expose their on-disk source. The agent reaches the env only over HTTP and
+never needs them, so the sandbox **hides their source**, closing the read-the-engine
+cheat (e.g. `sed .../arcengine/base_game.py`).
+
+For ARC-AGI-3 that is:
+
+```python
+def secret_modules(self) -> tuple[str, ...]:
+    return ("arcengine", "arc_agi")
+```
+
+<Warning>
+This is prevention-by-absence on the **subprocess** sandbox, so it protects
+subprocess CLI agents (Claude, codex). An in-process Alan agent shares the
+orchestrator's process and filesystem and is not OS-sandboxed — `secret_modules`
+does not constrain it. See [Trusted vs untrusted](/validity/trusted-untrusted) and
+the [Sandbox](/validity/sandbox) page.
+</Warning>
+
+## How to add an environment
+
+<Steps>
+<Step title="Subclass BaseProblem">
+Create `src/regact/problems/<game>/problem.py` with a class that implements the
+seven abstract methods. **Import the game library lazily inside `make_env`** — keep
+the module top level import-free.
+</Step>
+<Step title="Register it by name">
+Call `register_problem("<game>", lambda kwargs: <Game>Problem(**kwargs))` at module
+scope. The registry maps a config **string** to a factory; config never names a
+class.
+</Step>
+<Step title="Wire it into the lazy loader">
+Add one import to `_load_builtins()` in `problems/base.py` so the module
+self-registers on first build (no game lib needed just to import it):
+
+```python
+def _load_builtins() -> None:
+    from regact.problems import arc_agi, minigrid, <game>  # noqa: F401
+```
+</Step>
+<Step title="Add a config group entry">
+Create `src/regact/conf/problem/<game>.yaml` with `name`, `lifecycle`, `obs_mode`,
+`info_mode`, and any problem-specific `kwargs`. This is what `problem=<game>`
+selects.
+</Step>
+<Step title="Write the prompt">
+Add `src/regact/problems/prompts/<game>.md`; `build_prompt` reads it (typically with
+a `{task}` substitution) for the `INFORMATIVE` info mode.
+</Step>
+</Steps>
+
+<Tip>
+Keep the split honest: static, per-task text (goal, action semantics) belongs in
+`build_prompt` so it caches in the system prompt; the dynamic first observation —
+and therefore the live `available_actions` — reaches the agent through
+`render_obs_text`, not through a feature. That is why actions arrive through the
+**problem**, not the controller feature.
+</Tip>
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Observation modes" icon="eye" href="/agnosticity/observation-modes">
+    The `ObsRenderer` seam, the `ObsMode` enum, and why `RAW` is the only mode
+    implemented today.
+  </Card>
+  <Card title="Scoring" icon="ruler" href="/validity/scoring">
+    How `aggregate_episode_metrics` and `derived_submission_metrics` (ARC RHAE)
+    define what a score means.
+  </Card>
+</CardGroup>

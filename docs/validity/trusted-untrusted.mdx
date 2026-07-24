@@ -1,0 +1,235 @@
+---
+title: Trusted vs untrusted
+description: How regact scores an agent's controller with code the agent never wrote, on an environment it never controls — a structural guarantee against self-reported results.
+---
+
+The agent's job is to write `solution.py`: a controller whose `act(obs) -> action`
+is a pure policy (`controllers/base.py`). But a controller is arbitrary Python.
+Nothing stops the agent from making its controller *compute its own score and
+report a good number* — the classic Goodhart failure where the metric measures
+the agent's cleverness at gaming the metric, not its understanding of the game.
+
+regact removes that possibility by construction. The scoring code and the agent
+code are split across a trust boundary in `controllers/executor.py`: the agent's
+controller runs **untrusted** and reports only what the environment returned; the
+score is derived **trusted**, orchestrator-side, by code the agent cannot see or
+influence.
+
+<Note>
+  This is the centerpiece of experiment validity. The guarantee is *structural*
+  — "the agent could not have written the scoring code" — not procedural ("we
+  trust the agent not to cheat"). See also the advisory
+  [detection camera](/validity/sandbox) and [what a score means](/validity/scoring).
+</Note>
+
+## The problem
+
+An agent that both plays the game and scores itself has an incentive and the
+means to conflate the two. If `solution.py` were allowed to call the problem's
+metric, or return a fabricated final observation, the reported number would
+reflect the controller's ability to *produce a convincing result object* rather
+than to *win the game*. A submitted controller could:
+
+- import or reconstruct the scoring function and hand back a perfect aggregate;
+- fabricate a terminal `Obs` with a positive reward it never actually earned;
+- memorise a winning action sequence from an earlier exploration turn and replay
+  it open-loop, dressing up recall as policy.
+
+The split below closes the first two by absence and the third by re-derivation.
+
+## The split
+
+Everything that touches a score is factored so the untrusted half **cannot
+compute one** and the trusted half **runs outside the sandbox**.
+
+<CardGroup cols={2}>
+  <Card title="Untrusted — run_episodes_raw" icon="box">
+    Runs the agent's controller. Records **only what the env returned** — final
+    obs, step count, milestones, the action list, optional frames, or a
+    per-episode fault. Computes **no score**; has **no access** to the scoring
+    function.
+  </Card>
+  <Card title="Trusted — score_episodes / replay_and_score" icon="scale-balanced">
+    Runs orchestrator-side, **outside** the sandbox. Applies the *problem's*
+    metric callables to the raw outcomes. This is where a number first exists.
+  </Card>
+</CardGroup>
+
+### Untrusted: `run_episodes_raw`
+
+`run_episodes_raw` (`controllers/executor.py`) loads `solution.py`, resets the
+env, and drives `controller.act(obs) -> EnvClient.step(action)` for each episode
+via `run_controller` (`controllers/runner.py`). For every episode it appends a
+plain dict of *observed facts only*:
+
+```python
+{
+    "episode": index,
+    "stop_kind": summary.stop_kind,
+    "stop_reason": summary.stop_reason,
+    "milestones": [...],
+    "final_obs": summary.final_obs.to_json(),
+    "steps": summary.total_steps,
+    "frames": summary.frames,
+    "actions": summary.actions,   # ← the recorded action sequence
+}
+```
+
+There is no `metrics` key, no `success`, no aggregate — those words do not exist
+in the untrusted output. A controller fault is caught per episode and recorded as
+`{"episode": index, "error": ...}`, tagged `AGENT_SOLUTION`, so a crashing policy
+is scored as a failure rather than aborting the run.
+
+In a real run this function executes **inside a sandboxed subprocess**:
+`SandboxedExecutor` spawns `python -m regact.controllers.eval_runner`
+(`controllers/eval_runner.py`) wrapped by `sandbox_wrap`. That subprocess reaches
+the env only through the workdir's `framework.make_env` (URL and game id baked
+in), writes the raw episode list to `episodes_raw.json`, and exits. It never sees
+the metric callables — they live only on the orchestrator side that spawned it.
+
+<Note>
+  When the env is in-process (the `scripted` test backend has no socket for a
+  subprocess to dial), `ControllerExecutor` calls `run_episodes_raw` in-process
+  instead. The trust split is identical — the *same* function records the same
+  score-free facts; only the OS sandbox differs. Which executor is used is chosen
+  by `_make_executor` in `features/controller.py`: `SandboxedExecutor` when a
+  `sandbox_wrap` is present, `ControllerExecutor` otherwise.
+</Note>
+
+### Trusted: `score_episodes`
+
+`score_episodes` takes the raw episode list and applies the problem-supplied
+`compute_metrics(final_obs, steps=...)` and `aggregate_metrics([...])` callables.
+The problem owns what a score means (`aggregate_episode_metrics`; see
+[scoring](/validity/scoring)), so this function is metric-agnostic — it just runs
+those callables and stamps an `EvalResult`. Errored episodes are carried through
+as `EpisodeResult(error=...)` and counted into `aggregate["n_errors"]`.
+
+Because `score_episodes` runs in the orchestrator process — never in the sandbox,
+never in code the agent authored — the number it produces cannot be forged by the
+controller.
+
+## Why it is structural
+
+The guarantee does not rest on trusting the agent. It rests on three facts about
+*where code runs and what it can reach*:
+
+<Steps>
+  <Step title="The agent writes only the policy">
+    `solution.py` contributes `act(obs) -> action` and nothing else. The scoring
+    functions are the problem's (`compute_episode_metrics` /
+    `aggregate_episode_metrics`), injected by the orchestrator.
+  </Step>
+  <Step title="The scoring code lives where the agent cannot reach">
+    `score_episodes` / `replay_and_score` run orchestrator-side. The untrusted
+    subprocess is handed only the env URL and the paths it needs to write raw
+    outcomes — never the metric callables. Prevention by absence.
+  </Step>
+  <Step title="The env is not the agent's to control">
+    Actions leave and an `Obs` returns over the HTTP wall (`env/server.py` ↔
+    `envclient/client.py`); the native engine and answer key never cross it. The
+    score is computed on an environment the controller can act *on* but not
+    *rewrite*.
+  </Step>
+</Steps>
+
+The score is therefore computed by code the agent did not write, on an env it
+does not control. That is a property of the wiring, not a policy we ask the agent
+to honour.
+
+## Shadow replay
+
+Recording `final_obs` from the untrusted subprocess still trusts the subprocess
+to report the observation truthfully. Even though it cannot *score*, it could in
+principle hand back a doctored terminal obs, or "win" by replaying a memorised
+action sequence rather than by acting on what it currently sees. **Shadow replay**
+neutralises both.
+
+When `shadow_replay` is enabled, `SandboxedExecutor` routes scoring through
+`replay_and_score` instead of `score_episodes`. That function ignores the
+reported `final_obs` and instead **re-applies the controller's recorded `actions`
+on a fresh trusted env** (`_replay_episode` calls `EnvClient.reset`, then replays
+each action, stopping early if the env signals done), and scores the observation
+*it* obtains:
+
+```python
+final_obs, steps = _replay_episode(env, raw.get("actions", []), seed=...)
+metrics = compute_metrics(final_obs, steps=steps)   # scored on the replay obs
+```
+
+The recorded actions must *actually win on the real env* for the replay to earn a
+good score, so a doctored obs buys nothing. And because the replay re-derives the
+outcome from a fresh reset, a memorised open-loop sequence that only worked
+against one particular game state is exposed when that state is re-rolled — the
+central anti-memorisation lever behind this framework's validity story. The result
+carries `executor="shadow_replay"` so trusted-replay scores are distinguishable
+from directly-reported ones in the artifacts.
+
+<Note>
+  Shadow replay is a run-level knob (`shadow_replay`, threaded through `RunDeps`
+  to `_make_executor`). It only engages under `SandboxedExecutor` **and** when an
+  `env_client` is available; otherwise scoring falls back to `score_episodes` on
+  the reported outcomes.
+</Note>
+
+## Honest limitations
+
+<Warning>
+  Shadow replay's "fresh env" is only as fresh as the env handle it can reset, and
+  that is weaker for single-instance problems.
+
+  **Same handle, not a second native env.** Under `single_instance` ARC,
+  `replay_and_score` resets the *same persistent `EnvClient` handle* the
+  exploration used — not a freshly constructed native environment. The wording
+  "fresh env" in the code refers to `EnvClient.reset`, which for a deterministic
+  offline problem re-rolls level state but does not spin up an independent engine
+  instance. The memorisation defense is therefore softer here than for
+  `multi_instance`, where each episode genuinely gets its own env.
+
+  **Exploration and eval share mutable game state.** Under `single_instance` there
+  is one env per game, and the interactive exploration turns and the controller
+  eval act on the *same* mutable handle. Progress the agent makes by hand during
+  exploration can leak into the controller's score, because the controller is
+  evaluated against a game state that hand-play already advanced. The orchestrator
+  detects this configuration and logs a warning rather than blocking it —
+  `task.py` emits, under key `single_life_controller`:
+
+  ```text
+  WARNING single_life_controller: single-instance + controller: eval reuses the shared env
+  ```
+
+  **Single-life eval semantics are an open question.** For genuinely single-life
+  games, "score the controller" and "score the whole session, hand-play included"
+  are not cleanly separable with one shared env. regact currently surfaces the
+  ambiguity (the warning above) rather than resolving it; treat single-instance
+  controller scores as *session* scores, not isolated-policy scores.
+</Warning>
+
+<Tip>
+  None of these caveats affect `multi_instance` runs, where every episode gets a
+  fresh env and shadow replay's re-roll is unambiguous. When isolated-policy
+  scoring matters most, prefer `multi_instance`.
+</Tip>
+
+## Where scores land
+
+Every submission's `EvalResult` is written to
+`workdir/submissions/<n|final>/results.json`, alongside a verbatim snapshot of the
+evaluated `solution.py` (copied by `_snapshot_solution`, never imported), so each
+submission keeps the exact controller it was scored on. The `executor` field
+records which trusted path produced it (`in_process`, `subprocess`, or
+`shadow_replay`), and `FinalizeControllerHook` re-scores the final `solution.py`
+as the official result on teardown.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Sandbox & isolation" icon="shield" href="/validity/sandbox">
+    The OS sandbox that wraps the untrusted subprocess, and the advisory
+    detection camera.
+  </Card>
+  <Card title="Scoring" icon="calculator" href="/validity/scoring">
+    What a score means per problem — the metric callables that the trusted half
+    applies.
+  </Card>
+</CardGroup>

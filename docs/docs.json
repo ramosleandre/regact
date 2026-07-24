@@ -1,0 +1,58 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "regact",
+  "colors": {
+    "primary": "#0EA5E9",
+    "light": "#38BDF8",
+    "dark": "#0284C7"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Use it",
+            "pages": [
+              "guides/run-an-experiment",
+              "guides/analyze-results",
+              "guides/configuration"
+            ]
+          },
+          {
+            "group": "Agnosticity",
+            "pages": [
+              "agnosticity/overview",
+              "agnosticity/agents",
+              "agnosticity/environments",
+              "agnosticity/features",
+              "agnosticity/observation-modes"
+            ]
+          },
+          {
+            "group": "Validity & isolation",
+            "pages": [
+              "validity/trusted-untrusted",
+              "validity/sandbox",
+              "validity/scoring",
+              "validity/testing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footerSocials": {
+    "github": "https://github.com/"
+  }
+}

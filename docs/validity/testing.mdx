@@ -1,0 +1,220 @@
+---
+title: Testing
+description: How the framework is tested — a deterministic suite built on the scripted agent and a fake in-process env — and how to run the quality gate (make check, markers, doctor).
+---
+
+The test suite is deterministic **by construction**: it never touches an LLM or a
+game library. The whole pipeline is exercised on two doubles — a scripted agent
+that replays canned `AgentEvent`s and a fake in-process env — so the suite is fast,
+offline, and flake-free. This page explains that design, the quality gate, and the
+readiness check you run before a real experiment.
+
+<Note>
+  Tests are the primary evidence for the framework's two central claims —
+  [agnosticity](/agnosticity/overview) (generic layers depend on names and
+  `Capabilities`, never concrete backends) and [validity](/validity/trusted-untrusted)
+  (the score is computed by code the agent didn't write). Where a mechanism is
+  best-effort, the tests say so, and so does this page.
+</Note>
+
+## Deterministic by construction
+
+Two test doubles replace the only two non-deterministic dependencies — the LLM and
+the game — with pure, in-process code:
+
+<CardGroup cols={2}>
+  <Card title="ScriptedAgent" icon="clapperboard">
+    `agent/scripted_agent.py` — a `CodeAgent` that emits a **fixed sequence of events
+    per turn**. Each `send()` consumes the next scripted turn; a turn past the end
+    defaults to `TurnComplete()`. It records `sent` / `injected` messages and the tool
+    list so a test can assert on exactly what the loop did. No LLM, no subprocess.
+  </Card>
+  <Card title="FakeNativeEnv" icon="grip">
+    `testing/fakes.py` — a tiny gym-like 1-D corridor: action `1` moves right,
+    reaching `goal` terminates with reward `1.0`. It has the native `reset` / `step` /
+    `render` shape, so it plugs in behind the same `EnvSession` + `RawRenderer` +
+    lifecycle policy the real env server uses. No game library needed.
+  </Card>
+</CardGroup>
+
+Because both doubles are ordinary Python objects, a test can stand up the **entire
+stack** — the `EnvServer` behind a FastAPI `TestClient`, an `EnvClient`, the
+`ControllerFeature`'s tools and hooks — and drive `run_session` end to end without a
+network, a GPU, or wall-clock waits. `tests/test_loop_integration.py` is the
+canonical example: its `_Stack` wires the real pipeline on doubles, then asserts on
+the on-disk artifacts (`transcript.jsonl`, `experiment_state.json`,
+`submissions/<n>/results.json`) and every exit reason (`agent_exit`, `loop_limit`,
+`interrupted`, `loop_crash`, `agent_api`).
+
+<Tip>
+  A `ScriptedAgent` turn is just a `list[AgentEvent]`. To reproduce a scenario, hand
+  it the exact events you want — e.g.
+  `[[ToolCall("c1", "SubmitSolution", {}), TurnComplete()], [ToolCall("c2", "ExitTask", {}), TurnComplete()]]`
+  submits once, then exits. The loop's behavior is then a pure function of that list.
+</Tip>
+
+## The quality gate
+
+`make check` is the gate — the same three steps CI runs. Every target is a thin
+wrapper over the pinned dev tools (`ruff`, `mypy`, `pytest`) from the project venv
+(the `Makefile` prefers `.venv/bin/python`).
+
+<CodeGroup>
+```bash gate
+make check        # lint + typecheck + unit tests (the CI gate)
+```
+
+```bash individual steps
+make lint         # ruff check src tests
+make format       # ruff format + ruff check --fix (autofix)
+make typecheck    # mypy src            (strict mode, pyproject.toml)
+make test         # pytest -m "not integration and not slow" -q
+make test-all     # pytest -q          (everything, incl. integration + slow)
+```
+</CodeGroup>
+
+<ParamField path="lint" >
+  `ruff check` over `src` and `tests` with the rule set in `pyproject.toml`
+  (`E, F, I, UP, B, SIM, C4, RUF`), line length 100.
+</ParamField>
+
+<ParamField path="typecheck">
+  `mypy src` in **strict** mode. Optional, untyped game/agent backends
+  (`gymnasium`, `minigrid`, `alancode`, `arc_agi`, …) are treated as `Any` via
+  `follow_imports = "skip"`, so strict checks behave identically on a bare CI runner
+  and a dev box with the extras installed.
+</ParamField>
+
+<ParamField path="test">
+  `pytest` with `asyncio_mode = "auto"` (async tests need no decorator) over
+  `tests/`, with `src` on the path. Selects the deterministic subset — see markers
+  below.
+</ParamField>
+
+## pytest markers
+
+Three markers are declared in `pyproject.toml` (`[tool.pytest.ini_options].markers`)
+and used to partition the suite:
+
+| Marker | Meaning | Needs an LLM / game? |
+| --- | --- | --- |
+| `integration` | End-to-end on the doubles — scripted agent + fake env, full pipeline. | No |
+| `live` | Requires a **real** LLM or game backend. Excluded by default. | Yes |
+| `slow` | Slower tests. | No |
+
+A whole module opts in with `pytestmark = pytest.mark.integration` (as
+`tests/test_loop_integration.py` does). Unmarked tests are the plain, fast unit
+tests.
+
+<Warning>
+  **Known selector mismatch (to align).** The two entry points do not select the
+  same set:
+
+  - `make test` runs `pytest -m "not integration and not slow"` — it **skips**
+    `integration` tests.
+  - CI (`.github/workflows/ci.yml`) runs `pytest -m "not live and not slow"` — it
+    **includes** `integration` tests (they need no live backend), excluding only
+    `live` and `slow`.
+
+  So the full-pipeline integration tests run in CI but not in a bare `make test`. To
+  reproduce CI locally, run `make test-all` (or `pytest -m "not live and not slow"`).
+  The intended convergence is for `make test` to also use `not live`; until then, use
+  `make test-all` before pushing.
+</Warning>
+
+## make doctor
+
+Before a real run, `make doctor` (`python -m regact.doctor`) prints a one-line
+`[ ok ]` / `[warn]` / `[fail]` per capability so you learn what works and what to
+install **first**. It is dependency-free and never raises: a missing *optional* piece
+is a `warn`; only a broken *core* is a `fail` (non-zero exit).
+
+<AccordionGroup>
+  <Accordion title="core — hard fails">
+    - **python 3.11 / 3.12** — the pinned interpreter (`requires-python = ">=3.11,<3.13"`).
+    - **regact importable** — the package resolves (else `pip install -e .` or prefix
+      `PYTHONPATH=src`).
+
+    These are the only two checks that can `fail`.
+  </Accordion>
+  <Accordion title="sandbox backend — optional (warn)">
+    Reports any OS sandbox binary on `PATH`: `sandbox-exec` (macOS Seatbelt), `bwrap`
+    (Linux bubblewrap), `apptainer` / `singularity` (HPC). None present → one `warn`
+    that runs proceed with `security.sandbox=none`. This is presence-only; the deep
+    verification lives in the [sandbox conformance probe](/validity/sandbox).
+  </Accordion>
+  <Accordion title="agent backends — optional (warn)">
+    Whether the CLI you intend to run is on `PATH`: `claude` (Claude Code CLI),
+    `codex` (codex CLI), and whether the `alancode` module (in-process Alan backend)
+    is importable.
+  </Accordion>
+  <Accordion title="game extras — optional (warn)">
+    Whether the problem you intend to run is installed: `arc_agi`
+    (`pip install ".[arc]"`) and `minigrid` (`pip install ".[minigrid]"`).
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  `doctor` and `probe` are complementary. `doctor` *reports what is present* (a quick
+  lay-of-the-land); the [`probe`](/validity/sandbox) *attacks* the OS sandbox to
+  verify the R1–R6 isolation contract on the specific host. Run `doctor` first; run
+  `probe` when you need the hardened check.
+</Note>
+
+## What good coverage looks like here
+
+Coverage is targeted at the seams where the framework's claims live, not at raw line
+counts. The load-bearing suites:
+
+<AccordionGroup>
+  <Accordion title="The loop — orchestration on doubles">
+    `tests/test_loop_integration.py` drives `run_session` with a `ScriptedAgent` +
+    `FakeNativeEnv` and asserts every path: submit-then-exit, teardown finalization
+    when the agent never re-submits, graceful stop vs crash (a `StopSignal` still runs
+    teardown, a tool crash does not), the keep-alive limit, and a backend-error exit —
+    plus that the three canonical artifacts land on disk each time.
+  </Accordion>
+  <Accordion title="The config mapping — one schema, two front-ends">
+    `tests/test_config_loader.py` checks that `run_config_from_mapping` and the Kaggle
+    profile loader build the same typed `RunConfig`:
+
+    - **field parity** — enums resolve (`AgentName`, `Lifecycle`, `InfoMode`,
+      `Execution`), and top-level run flags survive the mapping (`record_video`,
+      `shadow_replay` — a guarded regression where they were once silently dropped).
+    - **secret redaction** — `redacted_config_dict` masks `api_key` to
+      `***redacted***` (never written to the on-disk `config.json`), while a `None`
+      key stays `None`.
+    - **experiment-profile override** — an experiment profile *selects* groups via
+      Hydra `defaults`, so `experiment=research agent=codex` yields a real codex agent
+      (not a claude/codex hybrid) while the profile's own fields (e.g.
+      `shadow_replay`) still apply.
+  </Accordion>
+  <Accordion title="The executor split — trusted vs untrusted">
+    The [trusted/untrusted boundary](/validity/trusted-untrusted) is covered by the
+    eval suites (`tests/test_eval.py`, `tests/test_eval_subprocess.py`): the untrusted
+    pass records only what the env returned and computes no score, while the trusted
+    pass applies the problem's metric orchestrator-side. Anti-cheat tagging is checked
+    in `tests/test_anticheat.py`.
+  </Accordion>
+  <Accordion title="The viz metrics — metric-agnostic reads">
+    `tests/test_viz.py` builds a tiny fake experiment dir and checks the reader folds
+    the transcript into turns (thinking → text → tool, `ToolResult` paired to its
+    `ToolCall` by id), reads submissions, and computes proxy metrics. It pins the
+    metric-agnostic contract: the whole submission `aggregate` is passed through
+    opaquely (no hardcoded metric key), a `SubmitSolution` that cleared a level is
+    tagged a win, a `grep` merely *mentioning* the string is **not** counted as a
+    submit, and a forbidden-path tool call is tagged `cheat`.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Sandbox isolation" icon="shield" href="/validity/sandbox">
+    `make probe` verifies the R1–R6 isolation contract **per host** — the deep,
+    attacking counterpart to `doctor`'s presence check.
+  </Card>
+  <Card title="Run an experiment" icon="play" href="/guides/run-an-experiment">
+    Once the gate is green and `doctor` is happy, launch a real run.
+  </Card>
+</CardGroup>

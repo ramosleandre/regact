@@ -63,7 +63,7 @@ bash $WORKDIR/ClusterControl/scripts/pipelines/run_inference_job_ada.sh \
 
 ## 4. Did it work?
 ```bash
-ls $WORKDIR/regact/experiments/adastra/regact_ls20_smoke/ls20/
+ls $WORKDIR/regact/experiments/regact_ls20_smoke/ls20/   # beside the ClusterControl logs/ dir
 #   logs/{transcript.jsonl, events.jsonl, experiment_state.json}
 #   workdir/submissions/<n|final>/results.json   (+ video)
 ```

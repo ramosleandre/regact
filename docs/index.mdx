@@ -1,0 +1,73 @@
+---
+title: regact
+description: A research framework for building agents that interact with an environment, designed around agnosticity so you can run many controlled experiments.
+---
+
+## What it is
+
+**regact is a research framework for building agents that interact with an
+environment.** It drives a *code-writing agent* (a coding CLI such as Claude Code or
+codex, an in-process Alan agent, or a scripted test agent) that plays a **game**
+(ARC-AGI-3, MiniGrid) by using a set of **features** — the always-on one being
+`controller`, which has the agent write a pure `act(obs) -> action` policy and submit it.
+
+The framework exists to make experiments **comparable and valid**. Two properties serve
+that goal:
+
+<CardGroup cols={2}>
+  <Card title="Agnosticity" icon="shuffle">
+    The **agent**, the **environment**, and the **features** are pluggable behind small
+    seams. Swap one, hold the rest fixed — the controlled variable of an experiment.
+  </Card>
+  <Card title="Isolation" icon="shield">
+    The agent reaches the environment only over a localhost HTTP boundary and never
+    imports the game. Its controller is scored by trusted code it did not write — so the
+    score measures understanding, not memorization or cheating.
+  </Card>
+</CardGroup>
+
+## The mental model
+
+One **keep-alive loop** wrapped around **three swappable plugins** meeting at an **HTTP
+wall**. The loop sends a message to the agent, consumes a normalized event stream, runs
+any framework tool the agent calls, re-injects the result, and repeats until the agent
+exits, a limit trips, or an error stops it.
+
+```
+                         orchestration/task.py   ← the one wiring hub
+                         (joins the 3 by name + Capabilities, never by concrete type)
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         ▼                         ▼                          ▼
+    ┌─────────┐              ┌───────────┐              ┌──────────┐
+    │  AGENT  │              │  PROBLEM  │══ HTTP wall ═│ FEATURE  │
+    │CodeAgent│              │(the env)  │  Obs (JSON)  │ Feature  │
+    └────┬────┘              └───────────┘              └────┬─────┘
+         │  AgentEvent stream                                │ Tool / Hook
+         ▼                                                   ▼
+    ┌──────────────────────── orchestration/loop.py ───────────────────┐
+    │  send → consume events → run framework tools → inject → repeat    │
+    │  agnostic: knows only agents / tools / hooks / limits / writers   │
+    └───────────────────────────────────────────────────────────────────┘
+```
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install, run your first experiment, open the visualizer.
+  </Card>
+  <Card title="Core concepts" icon="book" href="/concepts">
+    The three abstractions, the HTTP wall, the run loop.
+  </Card>
+  <Card title="Agnosticity" icon="shuffle" href="/agnosticity/overview">
+    What is pluggable on each axis, and how to add one.
+  </Card>
+  <Card title="Validity & isolation" icon="shield" href="/validity/trusted-untrusted">
+    Trusted vs untrusted, the sandbox, scoring, tests.
+  </Card>
+</CardGroup>
+
+<Note>
+regact is a **testing framework for research**. Everything in these docs is written so a
+result can be reproduced and a claim can be traced to code. Where a mechanism is partial
+or a guarantee is best-effort, the docs say so explicitly.
+</Note>

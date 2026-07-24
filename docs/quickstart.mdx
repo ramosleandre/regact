@@ -1,0 +1,198 @@
+---
+title: Quickstart
+description: Go from a clean checkout to a first run and its visualizer — install, check the machine with make doctor, run three profiles, and find where results land.
+---
+
+This page takes you from zero to a **run + visualizer**. If you only read one thing:
+install, run `make doctor`, then `make run ARGS="experiment=dev"` for the fastest
+end-to-end smoke test (no LLM), and `make viz EXP=...` to inspect it.
+
+## Requirements
+
+<ParamField path="Python" required>
+  **3.11 or 3.12 only** — not 3.13. This is pinned in `pyproject.toml`
+  (`requires-python = ">=3.11,<3.13"`) and re-checked at runtime by `regact.doctor`.
+</ParamField>
+
+<ParamField path="make">
+  Convenient but not required. Every `make` target is a thin wrapper over
+  `python -m regact.<entrypoint>` (see the `Makefile`); the raw commands are shown
+  below each step.
+</ParamField>
+
+<ParamField path="Sandbox backend">
+  **Optional.** An OS sandbox (macOS Seatbelt, Linux `bwrap`, HPC `apptainer` /
+  `singularity`) confines a *subprocess* agent. With none present, runs proceed
+  unconfined (`security.sandbox=none`). See [the sandbox page](/validity/sandbox).
+</ParamField>
+
+The base install pulls only lightweight framework infra (Hydra, httpx, FastAPI,
+uvicorn, imageio, numpy). **Games and agent backends are optional extras** so a base
+install is always clean (`pyproject.toml`).
+
+## Install
+
+<CodeGroup>
+```bash make (recommended)
+python -m venv .venv && . .venv/bin/activate
+make install          # → pip install -e ".[dev]"
+```
+
+```bash raw pip
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+```
+</CodeGroup>
+
+Add the extras you actually run — they are opt-in:
+
+```bash
+pip install -e ".[arc]"        # ARC-AGI-3 game library (arc-agi)
+pip install -e ".[minigrid]"   # MiniGrid (gymnasium + minigrid)
+```
+
+Agent backends are also extras. The `claude` and `codex` adapters shell out to their
+respective CLIs (install those separately, not via pip); the in-process Alan backend is
+`pip install -e ".[agents]"` (the `alancode` package). The `scripted` agent used by the
+`dev` profile needs nothing.
+
+<Warning>
+**macOS `~/Desktop` `.pth` quirk.** Editable installs place `src/` on `sys.path` via a
+simple `.pth` file, which macOS can decline to honor under `~/Desktop`. The fix is to
+**prefix `PYTHONPATH=src`** on the run commands. The `make` targets already do this
+(`RUN := PYTHONPATH=src $(PYTHON)` in the `Makefile`), so if you use `make` you never
+notice. If you run modules by hand under `~/Desktop`, use e.g.
+`PYTHONPATH=src python -m regact.run_exp ...`.
+</Warning>
+
+## Check the machine
+
+Before launching anything, run the readiness check:
+
+```bash
+make doctor           # → python -m regact.doctor
+```
+
+`regact.doctor` prints one `[ ok ]` / `[warn]` / `[fail]` line per capability and
+**never raises**: a missing *optional* piece is a `warn`, only a broken *core* is a
+`fail` (`doctor.py`). It reports four groups:
+
+<AccordionGroup>
+  <Accordion title="core — must be ok">
+    Python is 3.11/3.12, and the `regact` package is importable. Either failing is a
+    hard `fail`; the "not importable" line reminds you to `pip install -e .` or prefix
+    `PYTHONPATH=src`.
+  </Accordion>
+  <Accordion title="sandbox — optional">
+    Which OS-sandbox binaries are on `PATH` (`sandbox-exec`, `bwrap`, `apptainer`,
+    `singularity`). None found is a `warn`: runs work with `security.sandbox=none`
+    only.
+  </Accordion>
+  <Accordion title="agent backends — optional">
+    Whether the `claude` / `codex` CLIs are on `PATH` and whether the in-process
+    `alancode` module imports. Install only the one you run.
+  </Accordion>
+  <Accordion title="game extras — optional">
+    Whether `arc_agi` and `minigrid` import — i.e. whether you installed the matching
+    extra for the problem you want to play.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+`make doctor` only *reports* what is present. To deeply verify the OS sandbox against
+the R1–R6 isolation contract, run the conformance probe: `make probe`
+(`python -m regact.security.probe --sandbox`). See [the sandbox page](/validity/sandbox).
+</Note>
+
+## Run your first experiment
+
+A run is composed by **Hydra**: `make run ARGS="..."` forwards its `ARGS` to
+`python -m regact.run_exp` (`Makefile`, `run_exp.py`). An **experiment profile** selects
+config groups via `defaults` and sets only experiment-specific fields — so a CLI
+override like `agent=codex` still wins over the profile's default choice (see
+`conf/experiment/research.yaml` and [Configuration](/guides/configuration)).
+
+<Steps>
+  <Step title="Smoke-test the whole pipeline — no LLM">
+    ```bash
+    make run ARGS="experiment=dev"
+    ```
+    The `dev` profile (`conf/experiment/dev.yaml`) selects the **scripted** agent — it
+    replays canned events, so **no LLM and no network** are involved — on offline
+    ARC-AGI-3 (`task_names=[ls20]`, `sandbox: none`, `keep_alive: 3`). This is the
+    fastest way to exercise the full loop → eval → artifacts path and confirm your
+    checkout is wired correctly.
+  </Step>
+
+  <Step title="A real ARC-AGI-3 run">
+    ```bash
+    make run ARGS="experiment=research agent=codex 'task_names=[ls20]'"
+    ```
+    The `research` profile (`conf/experiment/research.yaml`) runs a coding-CLI agent on
+    offline ARC-AGI-3 with the anti-cheat defenses on (`shadow_replay: true` re-scores
+    the recorded actions on a trusted env) and records a video of the final controller.
+    Here `agent=codex` overrides the profile's default agent; quote the list so your
+    shell keeps the brackets. Requires the `codex` CLI and `pip install -e ".[arc]"`.
+  </Step>
+
+  <Step title="A different agent × environment pairing">
+    ```bash
+    make run ARGS="agent=claude problem=minigrid"
+    ```
+    No `experiment=` here, so the base `config` defaults apply with just the two groups
+    swapped: the **claude** CLI agent on **MiniGrid**. MiniGrid is *stochastic*, so
+    `seed` matters (the default env is `MiniGrid-Empty-5x5-v0`; see
+    `problems/minigrid/problem.py`). Requires the `claude` CLI and
+    `pip install -e ".[minigrid]"`.
+  </Step>
+
+  <Step title="Open the dashboard">
+    ```bash
+    make viz EXP=experiments/<run>          # → python -m regact.viz.app --experiment <path>
+    ```
+    e.g. `make viz EXP=experiments/dev` (add `PORT=8030` to change the port). The
+    visualizer polls `logs/experiment_state.json` + `logs/transcript.jsonl` and reads
+    the submission aggregates. It is **metric-agnostic**: each game shows its opaque
+    aggregate plus a dynamic per-submission trajectory (ARC shows RHAE / levels,
+    MiniGrid shows reward / steps) — no metric key is hardcoded (`viz/`).
+  </Step>
+</Steps>
+
+<Tip>
+The three abstractions are chosen **by name**, never by class: `agent=`, `problem=`, and
+(for features) the feature list, each resolving to a lazy string → factory registry. Any
+field you see in a profile — `limits.*`, `security.*`, `shadow_replay`, `record_video` —
+is overridable inline on the same command line.
+</Tip>
+
+## Where results land
+
+Each run writes under `experiments/<experiment_name>/`, with **one subdirectory per
+game** (`<experiment_name>` comes from the profile, e.g. `dev` or `research`):
+
+```
+experiments/<name>/<game>/
+├── config.json                       # the resolved RunConfig (api_key REDACTED)
+├── workdir/                          # the agent's sandboxed working directory
+│   └── submissions/
+│       ├── <n>/results.json          # each intermediate submission's scored result
+│       └── final/results.json        # the re-scored final controller
+├── logs/
+│   ├── transcript.jsonl              # the normalized AgentEvent stream
+│   └── experiment_state.json         # live run state, saved per event
+└── video_*.mp4                       # final-controller video (when record_video)
+```
+
+The controller the agent writes lives in `workdir/` as a pure
+`act(obs) -> action` policy; `results.json` files are produced by **trusted** scoring
+code the agent did not write. See [Analyze results](/guides/analyze-results) for reading
+these artifacts and [Trusted vs untrusted](/validity/trusted-untrusted) for why the score
+is computed outside the agent's reach.
+
+<Card title="Next: run a real experiment" icon="flask" href="/guides/run-an-experiment">
+  The full run recipe — profiles, limits, lifecycles, and how the run loop drives the
+  agent.
+</Card>
+<Card title="Then: analyze the results" icon="chart-line" href="/guides/analyze-results">
+  Read the transcript, the submission aggregates, and the visualizer.
+</Card>

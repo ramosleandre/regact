@@ -1,0 +1,230 @@
+---
+title: Isolation & sandbox
+description: The isolation model — prevention by absence, an enforced OS sandbox around the agent subprocess, an advisory forensic detector, and the honest gaps in each.
+---
+
+regact isolates the agent along two axes. First, **prevention by absence**: the game
+engine and answer key run behind an HTTP wall, so they are simply not present in the
+agent's world. Second, an **enforced OS sandbox** around the agent subprocess, backed by
+a small, auditable contract and a conformance probe. A third layer — a forensic
+**detector** — observes but never blocks, by deliberate choice.
+
+The whole security surface lives in `security/`, a stdlib-only leaf that imports no other
+regact module (`security/contract.py` is pure data, `security/runtime.py` takes only paths
+and an argv). Nothing here couples to a specific agent, problem, or feature.
+
+<Note>
+This page is about **confinement of the agent process**. For *why* the score cannot be
+gamed even without a sandbox — the trusted/untrusted split and shadow-replay — see
+[Trusted vs untrusted](/validity/trusted-untrusted).
+</Note>
+
+## Threat model: prevention by absence
+
+The strongest isolation is the one that needs no enforcement: the thing to protect is not
+reachable at all.
+
+- **The game engine and the answer key live behind the HTTP wall, in a different
+  process from a subprocess agent.** The agent's only door to the environment is an
+  `EnvClient` (`envclient/client.py`) returned by the workdir's `make_env()`; it exchanges
+  serialized JSON — an opaque action out, an `Obs` DTO back (`envclient/obs.py`). The native
+  engine, the level data, and the scoring function never cross that wall. They are **absent
+  from the agent's filesystem view**, so there is nothing to open, enumerate, or import.
+  (The env server itself is a *thread* in the orchestrator process, not a standalone one —
+  see the [concepts nuance](/concepts); the boundary is a true process boundary only for a
+  subprocess CLI agent, and none at all for in-process Alan, covered below.)
+- **`secret_modules` additionally hides the engine source on disk.** A problem declares the
+  package names of its engine/data libraries via `BaseProblem.secret_modules()` (ARC:
+  `("arcengine", "arc_agi")`, in `problems/arc_agi/problem.py`). The orchestrator resolves
+  each to its on-disk directory with `importlib.util.find_spec` — **no import**, so a host
+  that lacks the package is simply skipped (`_secret_module_paths` in
+  `orchestration/task.py`) — and feeds them to the sandbox as `deny_read` carve-outs. This
+  is the answer-key protection: even though the agent's interpreter prefix is readable, the
+  game packages inside it are carved back out.
+
+<Warning>
+The env **server** runs as a **thread** in the orchestrator process, not a separate OS
+process. A **subprocess** CLI agent (Claude, codex) is nonetheless a different process, so
+the HTTP wall and the OS sandbox both hold. The **in-process Alan** agent shares the
+orchestrator's process, filesystem, and network — it is **not** OS-sandboxed. Prevention
+by absence still applies to what crosses HTTP, but Alan runs with the orchestrator's
+authority. See [Trusted vs untrusted](/validity/trusted-untrusted) for the two in-process
+reads (`first_obs`, `live_action_count`) that bypass HTTP by design — they are called by
+the trusted orchestrator, never by the agent.
+</Warning>
+
+## Enforced: the OS sandbox
+
+`security/runtime.py` wraps the **agent subprocess** in an OS sandbox. The defense is a
+**filesystem allowlist** — paths outside the workdir are *absent* from the agent's view —
+not a blocklist of techniques, which could never enumerate every trick. The single
+integration point is `wrap_argv`, a pure `argv -> argv` transform that prepends the right
+per-platform launcher; the rest of regact does not depend on which backend runs.
+
+### Backends
+
+`detect()` picks the strongest backend actually available on the host; `resolve()` turns
+`auto` into that concrete choice and passes concrete values through.
+
+<Tabs>
+  <Tab title="none">
+    No sandbox. Used when none is configured, or when `auto` finds no backend. The agent
+    subprocess runs with the orchestrator's normal permissions.
+  </Tab>
+  <Tab title="seatbelt (macOS)">
+    `sandbox-exec` with a deny-by-default SBPL profile: allow only the system layer, the
+    interpreter prefixes, and `allow_read`; the workdir plus `/dev` and the user cache are
+    read-write. File *metadata* (stat) is allowed anywhere (harmless); file *data* reads
+    are confined to the allowlist. Exercised end-to-end by the probe on macOS, including a
+    fully confined authed Claude turn.
+  </Tab>
+  <Tab title="bwrap (Linux)">
+    A bubblewrap mount namespace that binds **only** the allowlist — the games and repo are
+    never bound, so they are absent by construction. `--die-with-parent`, private
+    `/proc`, `/dev`, and a `tmpfs` `/tmp`.
+  </Tab>
+  <Tab title="apptainer (HPC)">
+    A Singularity/Apptainer SIF launched with `--containall --no-home` (mandatory: without
+    them Apptainer auto-mounts `$HOME`/`$PWD`/`$TMP` and the game source stays readable).
+    Requires a prebuilt `.sif` image passed via `security.runtime_opts["image"]`.
+  </Tab>
+  <Tab title="landlock (Linux)">
+    Declared in the enum but **not yet implemented** — it needs a helper binary and
+    `wrap_argv` raises `NotImplementedError` for it.
+  </Tab>
+</Tabs>
+
+### What the allowlist grants and denies
+
+Every backend is **deny-by-default**. Only the workdir, the interpreter, and the explicit
+allowlist are reachable; everything else — every copy of the game, sibling experiments,
+the shared temp dir — is absent. The orchestrator builds the wrapper in
+`orchestration/task.py` from paths the loaded agent declares:
+
+<ParamField path="allow_read" type="list[str]">
+  The regact source directory plus the agent's own `host_read_paths()`. Read-only.
+</ParamField>
+<ParamField path="deny_read" type="list[str]">
+  The `secret_modules` directories, carved back out of the (otherwise readable) interpreter
+  prefix — the answer-key protection. On seatbelt via a trailing `deny file-read*` (last
+  match wins); on bwrap by mounting a `tmpfs` over the path.
+</ParamField>
+<ParamField path="allow_write_prefixes" type="list[str]">
+  The agent's `host_write_prefixes()` — for tools that write files with random leaf names
+  (e.g. Claude Code's `/tmp/claude-<rand>-cwd`) that a subpath rule cannot name.
+</ParamField>
+<ParamField path="deny_egress" type="bool">
+  When set, block external network but keep loopback (seatbelt); see the honest gap for
+  bwrap below.
+</ParamField>
+
+The agent's declaration hooks live on `CodeAgent` and return **plain `list[str]`**
+(`host_read_paths()`, `host_egress_hosts()`, `host_write_prefixes()`), precisely so the
+security layer never has to import an adapter. The workdir is passed a `TMPDIR` inside
+itself, so the agent has scratch space without exposing `/tmp`.
+
+### The egress allow-list proxy
+
+When `deny_egress` is on and the agent declares egress hosts, the orchestrator starts an
+`EgressProxy` (`security/egress_proxy.py`) on a loopback port and points the agent's
+`HTTPS_PROXY`/`HTTP_PROXY` at it (with `NO_PROXY=127.0.0.1,localhost`). The proxy tunnels
+`CONNECT` requests only to `host_egress_hosts()` and their subdomains (e.g. codex:
+`api.openai.com`), and returns **403** for anything else. It runs in the orchestrator,
+*outside* the sandbox, so it reaches the allowed hosts on the agent's behalf. It knows only
+host names — never which agent or game it serves.
+
+## Advisory: the detection camera
+
+`security/detection.py` + `security/policy.py` are a **forensic detector**, not a gate.
+They read the tool-call stream the run already receives and **count + log** suspicious
+activity into `experiment.cheat_attempts` — they **never block**.
+
+- `flag_tool_call(name, args, policy)` scans a tool call's textual arguments for forbidden
+  path substrings or forbidden module imports drawn from `default_policy()` (game modules
+  `arc_agi`/`arcengine`/`gymnasium`/`minigrid`, escape modules `importlib`/`ctypes`, and
+  path fragments like `arcengine/`).
+- `flag_os_denial(output)` detects an **egress** denial in a tool *result* — a DNS failure
+  or the proxy's `403` — because a keyword list cannot enumerate every external host. It is
+  deliberately **network-only**: a sandbox's file denials are indistinguishable from benign
+  friction (`ps`/`kill`/temp files all report "operation not permitted"), so the keyword
+  scan owns the file/module side.
+
+<Tip>
+Non-blocking is a **deliberate, kept design choice**. The OS sandbox in `runtime.py`
+provides the actual confinement; the detector exists for *observability* — so an experiment
+can report **what the agent attempted**, which is itself a research signal about the agent's
+behavior. The policy lists are defense-in-depth, not the enforcement boundary.
+</Tip>
+
+## The R1–R6 contract and the conformance probe
+
+The sandbox promises the same six invariants on **every** platform; only the enforcing
+mechanism differs. They are stated as pure data in `security/contract.py` so the promise is
+*checkable*, not merely asserted.
+
+| Invariant | Intent | Meaning |
+| --- | --- | --- |
+| **R1** workdir | allow | Read & write its own workdir + framework + venv (must work) |
+| **R2** secret | deny | Cannot read the game files or climb out of the workdir |
+| **R3** write | deny | Can write only its workdir (+ `/tmp`), not framework/venv/games |
+| **R4** loopback | allow | Can reach localhost (the env server + a local LLM) |
+| **R5** egress | deny | Cannot reach the external internet (scored runs) |
+| **R6** no-escape | deny | A child process inherits the restriction (no escape) |
+
+`security/probe.py` runs a **cheat catalog** and checks each invariant on the current host.
+A `deny` check runs an *attack that must fail*; an `allow` check runs a *legitimate use
+that must succeed*; a check is `defended` when the outcome matches the intent. It is both
+importable (`run_probe` returns structured `CheckResult`s for the test suite) and runnable,
+so the same checks produce a conformance table by hand on Jean-Zay / Adastra / Kaggle.
+
+<Steps>
+  <Step title="Run the probe">
+    `make probe` — equivalently `python -m regact.security.probe --sandbox` — re-executes
+    the probe inside the auto-detected sandbox, forbidding a stand-in secret's directory.
+  </Step>
+  <Step title="Read the verdict">
+    Each row prints `DEFENDED` or `*** VULNERABLE ***`; a nonzero exit means at least one
+    breach. Run it once **without** a sandbox (expected vulnerable) and once **inside** one
+    (expected defended) to verify the change on a new host.
+  </Step>
+</Steps>
+
+## Honest gaps
+
+<Warning>
+These are real limitations of the current implementation. Naming them is the point — the
+sandbox is a research artifact, not a security product.
+
+- **`sandbox=auto` resolves to `none` when no backend is available.** `detect()` returns
+  `NONE` and `wrap_argv` runs the argv unwrapped. This is a best-effort default, **not a
+  guarantee**; a "require a sandbox or refuse to run" mode is a possible future.
+- **The probe verifies R1, R2, R3, R5, R6 — but not R4 (loopback).** The catalog in
+  `run_probe` has no `allow`-loopback check, so localhost reachability is asserted by the
+  backend design, not measured by the probe.
+- **Under bwrap, `deny_egress` also severs loopback.** `_bwrap` implements egress denial
+  with `--unshare-net`, which isolates the whole network namespace — including loopback — so
+  the env server and the egress proxy become **unreachable**. This is a real **local-Linux**
+  gap (a fine-grained "deny external, keep loopback" needs a seccomp filter, a later
+  backend). It is **moot on HPC/Kaggle**, where external egress is intrinsically absent, so
+  `deny_egress` need not be requested there.
+- **The egress proxy is a boundary only if direct routing is independently blocked.** It
+  works by *environment variables* (`HTTPS_PROXY`/`HTTP_PROXY`), which are voluntary; the
+  proxy constrains egress only when the OS sandbox (or the platform) also denies a direct
+  external route.
+- **In-process Alan is not sandboxed.** `runtime.py` wraps only the agent *subprocess*.
+  The Alan and scripted adapters run in-process and carry the orchestrator's authority; the
+  eval subprocess is also skipped when the agent is in-process (`eval_wrap = None`).
+</Warning>
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Trusted vs untrusted" icon="scale-balanced" href="/validity/trusted-untrusted">
+    Why the score is safe even without a sandbox: the untrusted controller run vs. the
+    trusted, orchestrator-side scoring and shadow-replay.
+  </Card>
+  <Card title="Testing" icon="flask" href="/validity/testing">
+    The deterministic scripted-agent + fake-env tests, pytest markers, and how the probe
+    plugs into the suite.
+  </Card>
+</CardGroup>

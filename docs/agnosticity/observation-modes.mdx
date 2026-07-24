@@ -1,0 +1,175 @@
+---
+title: Observation modes
+description: The server-side observation renderer — the cross-cutting agnosticity axis that fixes how the agent perceives an environment, independent of which agent, problem, or feature is loaded.
+---
+
+The observation renderer is a fourth, cross-cutting agnosticity axis. Alongside
+[agents](/agnosticity/agents), [problems (environments)](/agnosticity/environments),
+and features, it decides one thing: **how a native environment observation becomes
+what the agent actually sees.** Because it runs server-side and cannot be supplied
+by the agent, swapping it changes the agent's *perception* of a fixed environment
+without touching the agent, the problem's dynamics, or the loaded features.
+
+## The single server-side seam
+
+There is exactly one place where a native observation turns into an agent-facing
+observation: `ObsRenderer.render(native_obs, info) -> Obs` in `env/renderer.py`.
+
+```python env/renderer.py
+class ObsRenderer(ABC):
+    @abstractmethod
+    def render(self, native_obs: object, info: dict[str, Any] | None) -> Obs: ...
+```
+
+This seam is invoked by the trusted env server, not by the agent. The server's
+`WrappedEnv` holds the configured renderer and calls it on every `reset` and
+`step` — `WrappedEnv._render` in `env/wrapped_env.py` does
+`obs = self._renderer.render(native_obs, info)` and then stamps `obs.reward` /
+`obs.is_done` — before the resulting `Obs` is serialized and sent across the wire.
+
+<Note>
+Because `render` executes server-side and its output is the only observation that
+crosses the HTTP boundary, it is the **sole** place for observation processing:
+parsing, grid flattening, or a future VLM caption all belong here. The agent
+receives the *result*; it never runs the renderer.
+</Note>
+
+### Why "server-side and un-overridable" matters for validity
+
+The agent's only door into the environment is the `EnvClient` returned by the
+workdir's `make_env()` (see [Environments](/agnosticity/environments)). That client
+receives an already-rendered `Obs`. Nothing the agent writes — no controller, no
+tool, no exploration script — can change *how* the world is rendered into that
+`Obs`. It can only read what the renderer chose to expose.
+
+This is a validity property, not merely an implementation detail. The framework,
+not the agent, fixes the perceptual interface. An agent cannot quietly grant itself
+a richer view (for example, reach past a caption to the underlying pixels), so the
+observation modality stays a controlled experimental variable rather than something
+the agent can renegotiate. See [Trusted vs untrusted](/validity/trusted-untrusted)
+for the broader boundary this sits inside.
+
+## The `Obs` DTO
+
+`render` returns an `Obs` (`envclient/obs.py`) — a plain data container with no game
+logic and no reference to the native engine. It is what crosses the HTTP wall as
+JSON, symmetric under `to_json` / `from_json`.
+
+<ParamField path="frame" type="Any">
+  The rendered grid / pixels the renderer chose to expose (or `None`). Whatever the
+  renderer put here *is* the agent's view of the world.
+</ParamField>
+<ParamField path="reward" type="float | None">
+  Scalar reward for the transition, stamped by `WrappedEnv` after `render`.
+</ParamField>
+<ParamField path="is_done" type="bool" default="False">
+  Whether the episode terminated, stamped by `WrappedEnv` after `render`.
+</ParamField>
+<ParamField path="available_actions" type="list[Action]">
+  The actions valid *now*. Populated by the renderer, typically from `info`.
+</ParamField>
+<ParamField path="info" type="dict[str, Any]">
+  Extra per-step metadata (state flags, counters, milestones). Free-form and
+  game-specific.
+</ParamField>
+
+<Note>
+The `Obs` is deliberately generic. An action is `Any` and kept opaque on the wire
+(an `int` for MiniGrid, a `{"action": ..., "data": {...}}` dict for ARC); the agent
+learns each game's schema by exploring, and the container never encodes it.
+</Note>
+
+## Per-problem renderers
+
+Each problem supplies its renderer through `BaseProblem.obs_renderer(task_name, *, mode)`
+(`problems/base.py`). This keeps rendering co-located with the problem that knows the
+native observation's shape, while the seam and the DTO stay generic.
+
+<CardGroup cols={3}>
+  <Card title="RawRenderer" icon="arrow-right">
+    Pass-through. `env/renderer.py` returns `Obs(frame=native_obs, ...)` unchanged
+    and pulls `available_actions` from `info`. The generic default.
+  </Card>
+  <Card title="ArcRenderer" icon="table-cells">
+    ARC-AGI-3 (`problems/arc_agi/problem.py`). Reads `native_obs.frame` — the stack
+    of 64×64 int grids — and makes it JSON-safe via `jsonify`; scalar metadata
+    (state, levels) is already in `info`. Import-free: needs no arc library.
+  </Card>
+  <Card title="MiniGridRenderer" icon="grip">
+    MiniGrid (`problems/minigrid/problem.py`). Passes the gym observation through,
+    made JSON-safe with `jsonify` (numpy arrays → nested lists), with
+    `available_actions` from `info`.
+  </Card>
+</CardGroup>
+
+The shared `jsonify` helper (`env/renderer.py`) converts numpy arrays and scalars to
+nested lists so the frame survives the boundary as plain JSON — the mechanism that
+lets both grid-based problems reuse the same generic `Obs`.
+
+<Note>
+`available_actions` reaches the agent's *prompt* through the **problem's**
+`render_obs_text` / `build_prompt`, not through a feature. The renderer places the
+actions on the `Obs`; the problem renders them into the first-message text. See the
+prompt-assembly note in [Environments](/agnosticity/environments).
+</Note>
+
+## Observation modes today
+
+`obs_mode` is a field on `ProblemConfig` (`config/schema.py`, default `ObsMode.RAW`),
+and `obs_renderer` receives it as `mode`. It is the knob that *selects* which
+renderer a problem returns.
+
+<Warning>
+**Only `ObsMode.RAW` is implemented.** The `ObsMode` enum in `config/schema.py`
+defines just `RAW = "raw"`; the comment records that `ascii` / `structured` /
+`vlm_caption` "land with their renderers (Later)." They are **planned, not working** —
+do not configure or rely on them. A problem's `obs_renderer` rejects an unsupported
+mode: both `ArcAgiProblem` and `MiniGridProblem` raise a `RegactError` (category
+`ENV_RUNTIME`, message `obs_mode ... not supported yet`) for any `mode is not
+ObsMode.RAW`.
+</Warning>
+
+```python config/schema.py
+class ObsMode(StrEnum):
+    RAW = "raw"
+    # ascii / structured / vlm_caption land with their renderers (Later).
+```
+
+```python problems/arc_agi/problem.py
+def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
+    if mode is not ObsMode.RAW:
+        raise RegactError(
+            ErrorCategory.ENV_RUNTIME, f"arc_agi: obs_mode {mode!r} not supported yet"
+        )
+    return ArcRenderer()
+```
+
+## Why this is an agnosticity axis
+
+`obs_mode` selects a renderer at the single seam, so it is the seam through which
+you could hold the agent, the problem, and the features fixed while changing *only*
+how the agent perceives the same environment — a raw grid, an ASCII rendering, or a
+VLM caption of that grid — and measure the effect. The observation modality becomes
+an independent, framework-controlled experimental variable rather than a property
+of the agent or a side effect of the environment.
+
+<Tip>
+Today this axis has one setting (`RAW`), so it is a *latent* knob: the seam,
+the `mode` parameter, and the per-problem dispatch already exist, but the
+alternative renderers do not. When an `ascii` or `vlm_caption` renderer is added
+behind a new `ObsMode`, the axis becomes an experimental dimension you can sweep
+without editing agents, problems, or features.
+</Tip>
+
+## Where it sits
+
+<CardGroup cols={2}>
+  <Card title="Environments" icon="gamepad" href="/agnosticity/environments">
+    The problem abstraction that owns `make_env`, the native observation, and the
+    per-problem renderer this page selects.
+  </Card>
+  <Card title="Trusted vs untrusted" icon="shield-halved" href="/validity/trusted-untrusted">
+    The boundary that makes the renderer un-overridable and the score computed by
+    code the agent did not write.
+  </Card>
+</CardGroup>

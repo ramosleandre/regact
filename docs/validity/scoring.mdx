@@ -1,0 +1,227 @@
+---
+title: Scoring
+description: What the numbers mean and how to trust them — each problem owns its metric, ARC additionally reports the competition's RHAE, and the visualizer stays metric-agnostic.
+---
+
+A score in regact answers two separate questions: **how well did the controller
+play**, and **can that number be trusted as a measure of understanding**. This page
+covers the first. The metric belongs to the problem, not the framework: each game
+defines its own aggregate through `aggregate_episode_metrics`, ARC-AGI-3 additionally
+reports the competition's own **RHAE** score, and the visualizer displays whatever a
+game emits without hard-coding a single key. The second question — trust — is answered
+by the [trusted / untrusted split](/validity/trusted-untrusted), and the
+warning below explains why that split exists at all.
+
+<Note>
+Whatever the metric, it is applied by the **trusted side** (`controllers/executor.py`,
+running outside the sandbox), on episodes recorded by the **untrusted side** (the
+agent's controller in a sandboxed subprocess, which computes no score and never sees
+the scoring function). The score is computed by code the agent did not write. See
+[Trusted vs untrusted](/validity/trusted-untrusted).
+</Note>
+
+## Each problem owns its metric
+
+The metric is not a framework concern. `BaseProblem` (`problems/base.py`) declares two
+abstract methods that every game implements, and the framework only ever handles the
+**plain dict** they return — it never interprets a key:
+
+<ParamField path="compute_episode_metrics(final_obs, *, steps)" type="dict">
+Per-episode metrics from **generic episode data only** — the universal `Obs`
+(carrying `reward` / `is_done` / `info`) plus the step count, never a
+controller-specific rollout type. This keeps the problem layer agnostic of *how* the
+episode was produced.
+</ParamField>
+
+<ParamField path="aggregate_episode_metrics(episodes)" type="dict">
+Rolls the per-episode dicts into one run aggregate. A **plain dict of numbers**; the
+framework stores and displays it opaquely.
+</ParamField>
+
+The two built-in problems report different keys, and that is the point — nothing
+downstream assumes a shared vocabulary:
+
+<Tabs>
+<Tab title="ARC-AGI-3">
+`ArcAgiProblem.aggregate_episode_metrics` (`problems/arc_agi/problem.py`) returns:
+
+```python
+{
+    "n_episodes": n,
+    "success_rate": <fraction with state == "WIN">,
+    "mean_levels_completed": <mean levels cleared per episode>,
+}
+```
+
+Per episode, `compute_episode_metrics` derives `success` (`state == "WIN"`), `steps`,
+`levels_completed`, and `win_levels` from `final_obs.info`. ARC is **deterministic**,
+so the `seed` hyperparameter does not affect these.
+</Tab>
+<Tab title="MiniGrid">
+`MiniGridProblem.aggregate_episode_metrics` (`problems/minigrid/problem.py`) returns:
+
+```python
+{
+    "n_episodes": n,
+    "success_rate": <fraction terminated with reward > 0>,
+    "mean_steps": <mean episode length>,
+    "mean_reward": <mean episode reward>,
+}
+```
+
+Per episode, `success` is `is_done and reward > 0` (a **truncation is not a success**).
+MiniGrid is **stochastic**, so the `seed` hyperparameter matters here: reproducing a
+number requires reproducing the seed.
+</Tab>
+</Tabs>
+
+<Note>
+`n_episodes` is bookkeeping, not a metric. The visualizer skips it when plotting
+(`viz/metrics.py`), so it never shows up as a score dimension.
+</Note>
+
+## RHAE — the competition's real metric for ARC
+
+`aggregate_episode_metrics` answers "won / did not win", but ARC-AGI-3 does not score
+that way: the competition rewards **few actions**, not just wins. A win in 20 actions
+against a human baseline of 10 is a far weaker result than a win in 8. To judge an
+offline run by the metric that actually scores the competition, ARC computes **RHAE**
+(`problems/arc_agi/scoring.py`), mirroring the official
+`arc_agi.scorecard.EnvironmentScoreCalculator` and the formula the Milestone-1 winners
+compute locally.
+
+### The formula
+
+For each level `l` (1-indexed) that the controller **completed** with `a > 0` actions,
+given the per-level human baseline `b`:
+
+<Steps>
+<Step title="Per-level efficiency">
+`efficiency = min(115, (b / a)^2 * 100)`. Matching the human takes `a = b` and scores
+100; being twice as efficient scores 400, but the cap holds it at **115** (surpassing
+the human earns no unbounded credit). Uncompleted levels score **0**. Source:
+`rhae_score`, constant `_LEVEL_CAP = 115.0`.
+</Step>
+<Step title="Level weighting">
+Each level's weight is its 1-indexed number `l`, so deeper levels count more. The raw
+score is `sum(efficiency_l * w_l) / sum(w_l)` over **all** levels of the game (not just
+the reached ones).
+</Step>
+<Step title="Cap by fraction reached">
+The result is capped at `sum(w_l for scored levels) / sum(w_l) * 100`. You **cannot
+bank credit on levels you never reached** — a brilliant level 1 does not inflate the
+score of a game you abandoned at level 2.
+</Step>
+</Steps>
+
+With **no baseline**, `rhae_score` returns `0.0` rather than crashing — a game without a
+published benchmark simply does not contribute a RHAE number.
+
+### What it needs
+
+RHAE cannot be computed from the aggregate alone; it needs **step-level** data and an
+**external** baseline:
+
+<CardGroup cols={2}>
+<Card title="Milestones" icon="flag">
+Actions-per-level is derived from the **"level completed" milestones**
+(`actions_per_level_from_milestones`): each milestone carries the `step` at which a
+level was cleared, and the actions for a level are the steps since the previous
+completion. The trailing uncompleted level is not counted. Milestones come from
+`_milestone_detector` in `problems/arc_agi/problem.py`.
+</Card>
+<Card title="Human baseline" icon="user">
+The per-level `baseline_actions` for a game, read from its `metadata.json` (offline) or
+the served arcade listing (online) into `ArcAgiTask` (`problems/arc_agi/tasks.py`).
+</Card>
+</CardGroup>
+
+Because RHAE reads the raw episode dicts (including `milestones`), not just the
+per-episode `metrics`, it is exposed through the **`derived_submission_metrics`** hook
+— the `BaseProblem` seam for exactly this case:
+
+```python
+def derived_submission_metrics(self, task_name, raw_episodes) -> dict[str, Any]:
+    baseline = self._task(task_name).baseline_actions
+    if not baseline:
+        return {}
+    rhae = rhae_from_results({"episodes": raw_episodes}, baseline_actions=baseline)
+    return {"rhae": round(rhae.score, 1)} if rhae is not None else {}
+```
+
+An absent baseline or an unusable episode yields **no key** rather than an error, so the
+result folds cleanly into the aggregate the viz reads.
+
+<Warning>
+RHAE on an offline run is an **estimate**, not the competition score. Offline runs the
+**25 public games**, whose per-level baselines are known. The real competition is over
+**110 hidden games** whose baselines are private and out-of-distribution. A strong
+offline RHAE is a much better signal than "won / did not win", but it is a proxy —
+`problems/arc_agi/scoring.py` says so in its module docstring.
+</Warning>
+
+<Tip>
+For a human-readable recap of an offline ARC run, `summarize_run`
+(`problems/arc_agi/scoring.py`) prints one line per game plus an aggregate. A game that
+did not score shows a **status** (`no-run` / `no-submit` / `0-levels` / `no-baseline`)
+rather than a bare dash, so the recap tells you *where* the pipeline stopped, not merely
+that a number is missing.
+</Tip>
+
+## The visualizer is metric-agnostic
+
+The dashboard (`viz/`, launched with `make viz EXP=…`) never names a metric. It reads
+each game's opaque aggregate and renders it generically, so a new problem's keys appear
+with **no viz change**:
+
+- **Opaque aggregate.** `_final_aggregate` (`viz/metrics.py`) returns the whole metric
+  dict of the `final` submission (else the last numbered one). `app.js` formats it as
+  `key val · key val`, skipping bookkeeping keys — it does not know whether it is
+  showing `rhae`, `mean_reward`, or something a future problem invents.
+- **Dynamic trajectory.** `_submission_trajectory` carries **every numeric key** of each
+  numbered submission under `metrics`, so the dashboard can plot whichever dimensions a
+  game emits (ARC: `rhae` / `levels`, MiniGrid: `reward` / `steps`) to show whether the
+  agent improved across submissions.
+- **Derived metrics folded in.** `_enrich_derived_metrics` (`viz/reader.py`) calls the
+  problem's `derived_submission_metrics` to fold RHAE into the aggregates — delegating to
+  the problem named in the resolved config, so the viewer stays agnostic of any game's
+  metric keys. It is **best-effort**: a missing game library or benchmark leaves the
+  aggregates untouched rather than failing the whole view.
+
+<Note>
+The agnostic viz is a direct consequence of "each problem owns its metric". Because the
+score is a plain dict the framework never interprets, the same dashboard renders any
+game — see [Environments](/agnosticity/environments) for the full `BaseProblem`
+contract.
+</Note>
+
+## Why trust matters: Goodhart
+
+<Warning>
+**A score can reward memorization over understanding.** ARC-AGI-3 is deterministic, so a
+controller that records the *exact action sequence* from an exploration run and replays
+it open-loop can score highly on a public game while modeling nothing — it has fit the
+path, not the rules. Under [Goodhart's law](/validity/trusted-untrusted), the moment the
+number becomes the target, the number stops measuring the thing you wanted.
+
+This is precisely **why** the framework separates a **trusted** scorer from an
+**untrusted** player, offers **shadow-replay** to re-run recorded actions on a fresh
+env, and builds toward **anti-memorization** checks. regact is built to measure
+*understanding* — a policy that generalizes — not path-replay. The full mechanism, its
+current strength, and its honest gaps live on
+[Trusted vs untrusted](/validity/trusted-untrusted).
+</Warning>
+
+## Where the numbers live
+
+Scores are written to disk per submission and re-read by the viewer:
+
+- `experiments/<name>/<game>/workdir/submissions/<n|final>/results.json` — a submission's
+  serialized `episodes` (with `milestones`) and its `aggregate`.
+- The viz polls `logs/experiment_state.json` + `logs/transcript.jsonl` and reads those
+  submission aggregates, enriching them with `derived_submission_metrics` on the way in.
+
+<Card title="Read the trust story next" icon="shield-halved" href="/validity/trusted-untrusted">
+How the score is computed by code the agent did not write, on an env it does not
+control — plus shadow-replay and the honest caveats under single-instance ARC.
+</Card>

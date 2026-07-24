@@ -64,7 +64,7 @@ PYTHONPATH=src python -m regact.run_exp agent=codex problem=arc_agi \
 
 Competition (Kaggle profile YAML):
 ```bash
-PYTHONPATH=src python -m regact.run_kaggle --config src/regact/config/profile/competition.yaml \
+PYTHONPATH=src python -m regact.run_kaggle --config src/regact/conf/experiment/competition.yaml \
     --games ls20 ft09 --parallel 2
 ```
 

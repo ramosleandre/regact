@@ -1,0 +1,135 @@
+---
+title: Analyze results
+description: Read a finished regact run — the artifacts each task writes to disk, the visualizer that renders them, the submission trajectory, and the exit-reason vocabulary.
+---
+
+A regact run produces one directory per game under `experiments/<name>/<game>/`. Everything you need to reconstruct what the agent did — the prompt it received, every normalized event, each submission it scored, and the final teardown score — is a flat file in that tree. This page is a map of those files, the visualizer that reads them, and the small vocabularies (metric keys, exit reasons) you will meet.
+
+<Note>
+The files here are the *record*. What the numbers mean is scored elsewhere: see [Scoring](/validity/scoring). Why you can trust them — a score computed by code the agent never wrote, on an env it does not control — is [Trusted vs untrusted](/validity/trusted-untrusted).
+</Note>
+
+## Artifacts on disk
+
+One task run (`run_task`, `orchestration/task.py`) lays down this tree:
+
+```
+experiments/<name>/<game>/
+├── config.json                          # resolved RunConfig, api_key REDACTED
+├── logs/
+│   ├── transcript.jsonl                 # the normalized AgentEvent stream (one JSON/line)
+│   ├── experiment_state.json            # live task state, re-saved on every event
+│   ├── output.log                       # human-readable log
+│   └── events.jsonl                     # structured LogRecord stream
+└── workdir/
+    ├── solution.py                      # the controller the agent is writing (live)
+    ├── code_library/ …                  # feature-shipped helpers (base_controller.py, …)
+    └── submissions/
+        ├── 0/  { results.json, solution.py, video_0.mp4 … }
+        ├── 1/  { results.json, solution.py, video_0.mp4 … }
+        └── final/ { results.json, solution.py, video_0.mp4 … }
+```
+
+<ParamField path="config.json" type="resolved RunConfig">
+  The exact configuration this task ran under, written once at task start via `redacted_config_dict` (`orchestration/task.py`). The **`api_key` is redacted** here — this is the safe file to attach to a bug report or commit. It records agent, problem, features, `limits`, `security`, `seed`, `record_video`, `shadow_replay` — the whole resolved config, so a run is reproducible from the directory alone.
+</ParamField>
+
+<ParamField path="logs/transcript.jsonl" type="one JSON object per line">
+  The canonical, **provider-independent** event stream. The keep-alive loop writes every normalized `AgentEvent` here (`obs/transcript.py`), so a run reads identically whether the backend was Alan, Claude, or Codex. Each line is `{"type": <EventName>, …fields}`. The event union (`agent/events.py`): `SystemPrompt`, `UserMessage`, `TextDelta`, `ThinkingDelta`, `ToolCall`, `ToolResult`, `TurnComplete` (carries `usage`), `AgentError` (carries `category` + `message`). The framework records its own inputs too — the system prompt and each message it sent — so the file is the *whole* session, not just the agent's replies.
+</ParamField>
+
+<ParamField path="logs/experiment_state.json" type="ExperimentState (live)">
+  The task's live state, written early and re-saved **on every event** with an atomic tmpfile-swap so a poller never reads a half-written file (`session/state.py`). Field names are load-bearing for the viewer. Key fields: `submission_count`, `last_submission_results`, `duration_s` (wall-clock so far), `env_moves` (live env step count), `cheat_attempts` (the advisory camera's forensic count), `last_error_category`, and `exit_reason` — **`None` while the run is still going**, set once at teardown. This is the file the visualizer polls to show live progress and the final status.
+</ParamField>
+
+<ParamField path="workdir/submissions/<n|final>/results.json" type="EvalResult">
+  One scored submission. Numbered dirs `0, 1, 2, …` are written each time the agent calls `SubmitSolution` (indexed by `submission_count`, `tools/submit_solution.py`); `final/` is written once at teardown by `FinalizeControllerHook`, which re-scores the final `solution.py` on the non-aborted exit path. Shape (`obs/result.py`, `EvalResult.to_json`):
+
+  ```json
+  {
+    "task": "<game>",
+    "aggregate": { "n_episodes": 1, "success_rate": 1.0, "mean_levels_completed": 3.0 },
+    "episodes": [ { "episode": 0, "stop_kind": "...", "milestones": [...], "metrics": {...}, "error": null } ],
+    "error": null,
+    "error_category": null,
+    "executor": "subprocess"
+  }
+  ```
+
+  `aggregate` is a plain, **problem-owned** dict (ARC: `success_rate` / `mean_levels_completed`; MiniGrid: `success_rate` / `mean_steps` / `mean_reward`) — no metric key is fixed by the framework. Each submission dir also snapshots the exact `solution.py` that produced it (verbatim copy, `_snapshot_solution`), so post-run you can read the precise controller behind any number.
+</ParamField>
+
+<ParamField path="workdir/submissions/<n|final>/video_*.mp4" type="episode recording (optional)">
+  Present only when `record_video` is set **and** the problem supplies a `render_frame` hook. One file per evaluation episode, named `video_<episode>.mp4` (e.g. `video_0.mp4`), written next to that submission's `results.json` (`_write_episode_videos`, `controllers/executor.py`).
+</ParamField>
+
+<Tip>
+`logs/output.log` and `logs/events.jsonl` are the operational logs (structured `LogRecord`s tagged by `component`/`phase`/`error_category`, `obs/errors.py`). Reach for them when a run failed and you need to attribute *where* — they are the visualizer's "logs" tab, not part of the score.
+</Tip>
+
+## The visualizer
+
+```bash
+make viz EXP=experiments/<name>        # optionally PORT=8030
+```
+
+This serves a local web app (`viz/app.py`) that reads the directory above. It **polls** `experiment_state.json` and `transcript.jsonl` and reads the submission aggregates (`viz/reader.py`), so it updates as a run progresses — a long single turn (e.g. a Codex `exec`) shows its growing duration live, because the loop re-saves state per event.
+
+What it shows per game:
+
+<CardGroup cols={2}>
+  <Card title="Conversation, grouped into turns" icon="comments">
+    The flat transcript is folded into **turns** (`_group_turns`): each turn keeps its thinking, text, and tool calls in chronological order, pairs every `ToolResult` to its `ToolCall` by `id`, and carries the turn's token `usage`. The system prompt and framework messages render inline, so you see exactly what the agent was told.
+  </Card>
+  <Card title="Per-game metrics" icon="chart-simple">
+    The game's opaque `aggregate` dict plus live state (duration, env moves, cheat count, exit reason). **Metric-agnostic**: no key is hardcoded — it renders whatever the problem reported.
+  </Card>
+  <Card title="Per-submission trajectory" icon="arrow-trend-up">
+    Each numbered submission and `final`, with its aggregate, per-episode rows, and any videos — laid out in order so you can watch the score move across submissions (see below).
+  </Card>
+  <Card title="Videos + authored code" icon="film">
+    Inline playback of `video_*.mp4`, and the agent-authored Python from the workdir (`solution.py`, `code_library/…`) via the artifacts tab.
+  </Card>
+</CardGroup>
+
+<Note>
+**The viz is metric-agnostic by construction.** It never names a game's metric keys. For a game that exposes a derived offline score, the reader folds it in by delegating to the problem itself (`derived_submission_metrics`, `_enrich_derived_metrics`) — best-effort, so a missing game library just leaves the aggregate untouched. Concretely: **ARC** shows `rhae` and `mean_levels_completed`; **MiniGrid** shows `mean_reward` and `mean_steps`. Both come from the same rendering path.
+</Note>
+
+## Reading the submission trajectory
+
+The core question a run answers is *did the agent improve as it iterated?* The keep-alive loop lets the agent submit repeatedly, so the numbered submissions `0, 1, 2, …` are its successive attempts and `final` is the teardown re-score. Read them in order.
+
+The visualizer marks each numbered submission that **improved on all prior ones** as a *win* (`_submission_wins`, `viz/reader.py`), matching the k-th `SubmitSolution` call to the k-th submission so a winning submit is highlighted in the conversation. The "improved?" signal is game-agnostic: it prefers a game's own graded depth if it reports one — ARC's `mean_levels_completed` — and otherwise falls back to the universal `success_rate` every game reports. A flat or declining trajectory (many submissions, no new wins) is itself a finding.
+
+<Warning>
+Under **`single_instance` ARC** with the controller feature, exploration and evaluation share one mutable env handle, and the teardown re-score resets the *same* persistent `EnvClient` rather than a truly fresh env. Hand-play during exploration can leak into a controller's score. The loop logs this as a `single_life_controller` warning at task start (`orchestration/task.py`); read the trajectory with that caveat and see [Trusted vs untrusted](/validity/trusted-untrusted) for the full nuance.
+</Warning>
+
+## The exit reason vocabulary
+
+Every task returns exactly one **exit reason** string (`run_session`, `orchestration/loop.py`), persisted as `experiment_state.json:exit_reason` and shown by the viz as the game's status. It tells you *how* the loop stopped:
+
+| Exit reason | Meaning |
+| --- | --- |
+| `agent_exit` | The agent called `ExitTask` — a clean, agent-initiated stop. |
+| `loop_limit` | The keep-alive turn cap (`limits.keep_alive`) was reached. |
+| `walltime_limit` | The `limits.walltime_s` budget elapsed; a watchdog aborted the agent mid-turn. Not an error. |
+| `interrupted` | An external stop signal (e.g. Ctrl-C) fired between turns. |
+| `loop_crash` | An uncaught framework exception escaped a turn. Teardown is **skipped** — no `final/` submission is written. |
+| *`<error_category>`* | A backend error in the stream stopped the loop, recorded as the raw `ErrorCategory` value. |
+
+The `<error_category>` values come from the `ErrorCategory` enum (`obs/errors.py`): `agent_api` (LLM endpoint — auth, rate-limit, timeout, context overflow), `agent_solution` (the agent's own code raised on import / `get_controller` / `act()`), `env_runtime` (the env's `step`/`reset`/`make` raised, or an obs failed to decode), and `eval_harness` (orchestration — a build failed, a task mismatch, no result file). `loop_limit` and `loop_crash` also exist as `ErrorCategory` values but reach `exit_reason` through the dedicated paths above.
+
+<AccordionGroup>
+  <Accordion title="How to triage an unexpected exit">
+    Start with `experiment_state.json:exit_reason` and `last_error_category`, then open `logs/events.jsonl` for the matching `ERROR` record — it carries the `component` and `phase` that pin down *where* it raised. `agent_solution` points you at the snapshotted `solution.py` in the last submission dir; `agent_api` and `env_runtime` point outward (endpoint or game library). A `loop_crash` means teardown was skipped, so trust the last **numbered** submission, not `final/` (which will be absent).
+  </Accordion>
+  <Accordion title="Why an aborted walltime run is still valid">
+    `walltime_limit` is a budget stop, not a fault: the watchdog cancels the agent, but the loop still runs teardown hooks (re-scoring the final `solution.py` into `final/`). The trajectory up to that point is real. Only `loop_crash` and, by design, `interrupted`/errors leave teardown incomplete for aborted reasons (`_ABORTED_REASONS`).
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+The `cheat_attempts` count you see is **advisory forensics**, never a gate — the detection camera counts suspicious tool calls (forbidden path/module keywords, egress denials) but never blocks them (`security/detection.py`). Read it as evidence about behavior, not as a pass/fail. Details in [Trusted vs untrusted](/validity/trusted-untrusted).
+</Note>

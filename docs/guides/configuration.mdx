@@ -1,0 +1,345 @@
+---
+title: Configuration reference
+description: The full RunConfig knob reference — where Hydra config lives, every field group, the experiment-profile pattern, and an honest list of the knobs that are loaded but not yet enforced.
+---
+
+Every regact run is described by one typed object, `RunConfig` (`config/schema.py`). Both
+front-ends build the *same* object: `run_exp` lets Hydra compose it from the `conf/` groups,
+and `run_kaggle` loads a single YAML profile. Everything downstream — the keep-alive loop, the
+three plugins, the sandbox — consumes only `RunConfig`, never the raw YAML.
+
+<Note>
+This page is a field-by-field reference. For *why* the config axes are the way they are (names,
+not classes; three swappable plugins meeting at an HTTP wall), see
+[/agnosticity/overview](/agnosticity/overview).
+</Note>
+
+## Where config lives
+
+Two directories, one typed object.
+
+<CardGroup cols={2}>
+  <Card title="conf/ — the Hydra groups" icon="folder">
+    One group per axis, each a directory of interchangeable YAML files:
+    `conf/agent/`, `conf/problem/`, `conf/features/`, `conf/experiment/`.
+    `conf/config.yaml` is the root that composes them.
+  </Card>
+  <Card title="config/ — the typed schema" icon="code">
+    `config/schema.py` defines `RunConfig` and its nested dataclasses (every closed
+    choice is a `str`-valued `Enum`). `config/loader.py` maps any plain mapping onto
+    that schema, coercing enums and numeric strings by hand.
+  </Card>
+</CardGroup>
+
+The `conf/` groups exactly mirror the plugin axes documented in
+[/agnosticity/overview](/agnosticity/overview): pick a file from each group and you have chosen
+one agent, one problem, and a list of features by *name*.
+
+<CodeGroup>
+```bash run_exp (Hydra)
+# Compose the groups on the CLI; override any leaf field with dotted paths.
+python -m regact.run_exp agent=claude problem=arc_agi
+python -m regact.run_exp agent=codex problem=minigrid agent.args.reasoning_effort=high
+python -m regact.run_exp experiment=research        # a whole profile at once
+```
+
+```bash run_kaggle (YAML profile)
+# No Hydra — one profile YAML loaded straight into RunConfig.
+python -m regact.run_kaggle                          # packaged competition profile
+python -m regact.run_kaggle --config my_profile.yaml --games ls20 --parallel 2
+```
+</CodeGroup>
+
+Both paths funnel through `run_config_from_mapping` in `config/loader.py`, so the two front-ends
+can never diverge on what a field *means*.
+
+## Anatomy of `RunConfig`
+
+`RunConfig` (`config/schema.py`) is one dataclass with two required plugin blocks (`agent`,
+`problem`) and a set of run-level knobs. Every field below is sourced to that file.
+
+### `agent` — who writes the code
+
+`AgentConfig`. Selects the backend by name (`AgentName` enum) and, for backends that need it,
+where its model lives.
+
+<ParamField path="agent.name" type="AgentName (enum)" required>
+  One of `alan` (in-process, executes tools itself), `claude` / `codex` (subprocess CLIs),
+  or `scripted` (replays canned events, for tests). Resolved to a concrete adapter by the
+  `build_agent` registry in `agent/base.py` — the config never names a class.
+</ParamField>
+
+<ParamField path="agent.model" type="str | None" default="null">
+  The model identifier passed to the backend, e.g. `opus` for the Claude CLI or
+  `openai/<served-name>` for a vLLM/SGLang endpoint. `null` lets the backend use its own default.
+</ParamField>
+
+<ParamField path="agent.base_url" type="str | None" default="null">
+  An OpenAI-compatible endpoint URL. `null` means "use the CLI's own auth" (e.g. a Claude
+  subscription). See the forwarding note below — not every backend reads this.
+</ParamField>
+
+<ParamField path="agent.api_key" type="str | None" default="null">
+  API key for `base_url`. Redacted in on-disk artifacts (`_SECRET_FIELDS` in `config/schema.py`
+  masks it before `config.json` is written). See the forwarding note below.
+</ParamField>
+
+<ParamField path="agent.args" type="dict[str, Any]" default="{}">
+  Backend-specific parameters, passed through opaquely. Examples from the shipped configs:
+  `permission_mode`, `effort` (Claude, `conf/agent/claude.yaml`); `permission_mode`,
+  `max_output_tokens`, `memory`, `context_window` (Alan, `conf/agent/alan.yaml`).
+</ParamField>
+
+<Note>
+**`base_url` / `api_key` are only forwarded by backends that need them.** The shared CLI base
+class `_CliAgent` (`agent/cli_agent.py`) takes both but does *not* forward them — its comment
+states "base_url/api_key are only forwarded by a subclass that needs them." So the **Claude CLI
+base class does not forward them** (it authenticates via the CLI's own subscription); **Alan**
+forwards both to reach its configured endpoint (`agent/alan_adapter.py`); **Codex** falls back
+to `OPENAI_API_KEY`. Setting `base_url`/`api_key` on a Claude run has no effect.
+</Note>
+
+### `problem` — the environment
+
+`ProblemConfig`. Selects a problem family by name (the family iterates its own games) and how
+it is presented to the agent.
+
+<ParamField path="problem.name" type="str" required>
+  The problem family, e.g. `arc_agi` (offline, deterministic) or `minigrid` (wraps Gymnasium
+  MiniGrid, stochastic). Resolved by the `build_problem` registry (`problems/base.py`). Empty
+  `task_names` means "all games of this problem."
+</ParamField>
+
+<ParamField path="problem.lifecycle" type="Lifecycle (enum)" default="multi_instance">
+  `multi_instance` = a fresh env per episode. `single_instance` = one env per game, where
+  `RESET` is a level reset (the ARC competition mode). Under `single_instance`, exploration and
+  the final eval share the *same* mutable game state — see [the caveat below](#lifecycle-caveat).
+</ParamField>
+
+<ParamField path="problem.obs_mode" type="ObsMode (enum)" default="raw">
+  How the server-side `ObsRenderer` (`env/renderer.py`) turns a native observation into the
+  agent-facing `Obs`.
+
+  <Warning>
+  **Only `raw` exists today.** `schema.py` marks `ascii` / `structured` / `vlm_caption` as
+  "Later" — they land with their renderers. A problem's `obs_renderer()` may reject an
+  unsupported mode. Do not assume any mode but `raw` works.
+  </Warning>
+</ParamField>
+
+<ParamField path="problem.info_mode" type="InfoMode (enum)" default="informative">
+  How much the prompt tells the agent. `informative` gives the full task description (obs,
+  actions, goal); `minimal` makes the agent discover the rules by interaction. Consumed by the
+  problem's `build_prompt(task, info_mode)`.
+</ParamField>
+
+<ParamField path="problem.seed" type="int | None" default="null">
+  Env seed. **Matters for stochastic envs (MiniGrid); ignored by deterministic ARC** — the
+  schema comment says so explicitly.
+</ParamField>
+
+<ParamField path="problem.kwargs" type="dict[str, Any]" default="{}">
+  Problem-specific constructor arguments passed straight to `make_env`. For ARC:
+  `operation_mode` (`offline` = 25 public games / `online` = gateway games) and
+  `environments_dir` (local game data). For MiniGrid: the Gymnasium env id (default
+  `MiniGrid-Empty-5x5-v0`).
+</ParamField>
+
+### `features` — the agent-built capabilities
+
+<ParamField path="features" type="list[str]" default="[controller]">
+  The list of features to load, by name (`build_features`, `features/base.py`). A run loads a
+  *list*; each feature bundles workdir templates, a prompt fragment, tools, and hooks. The only
+  built-in is `controller` (always on): it ships `base_controller.py` + a `solution.py` stub,
+  the `SubmitSolution` / `ExitTask` tools, and the teardown hook that re-scores the final
+  `solution.py`. See [/agnosticity/features](/agnosticity/features).
+</ParamField>
+
+<ParamField path="tools" type="dict[str, bool]" default="{}">
+  Cross-cutting tool toggles. **Loaded but not yet consumed** — see the [inactive-knobs
+  warning](#currently-inactive-or-partial-knobs).
+</ParamField>
+
+### `limits` — budgets and stopping conditions
+
+`LimitsConfig`. Where a run stops. Numeric fields are coerced to `int` by the loader (env-var
+interpolation can hand them over as strings).
+
+<ParamField path="limits.keep_alive" type="int" default="150">
+  Max idle agent turns before the keep-alive loop gives up. (The shipped `conf/config.yaml`
+  raises the default to `350`; the `dev` / `competition` profiles drop it to `3` for fast plumbing runs.)
+</ParamField>
+
+<ParamField path="limits.max_moves" type="int" default="2500">
+  Max `env.step` calls per controller rollout during eval.
+</ParamField>
+
+<ParamField path="limits.n_episodes" type="int" default="1">
+  Eval episodes per submission. Under `multi_instance`, more episodes = better statistics
+  (a fresh env each time).
+</ParamField>
+
+<ParamField path="limits.walltime_s" type="int | None" default="null">
+  Wall-clock budget for the whole task (per game), in seconds. `null` = no limit.
+</ParamField>
+
+<ParamField path="limits.token_budget" type="int | None" default="null">
+  <Warning>
+  **Loaded but NOT yet enforced.** The field exists on `LimitsConfig` and is parsed by the
+  loader, but nothing in the loop consumes it yet. Setting it has no effect today.
+  </Warning>
+</ParamField>
+
+<ParamField path="limits.env_step_budget" type="int | None" default="null">
+  Hard cap on env steps per env (anti-runaway). `null` = off. Under `single_instance` this
+  budget is shared with the eval, so set it generously (the shipped comment suggests ~20000).
+</ParamField>
+
+### `security` — isolation
+
+`SecurityConfig`. Wraps the agent **subprocess** only. Full contract and honest gaps live in
+[/validity/sandbox](/validity/sandbox); the knobs are:
+
+<ParamField path="security.sandbox" type="SandboxRuntime (enum)" default="auto">
+  Which OS sandbox wraps the agent subprocess: `auto` | `none` | `seatbelt` (macOS) | `bwrap`
+  (Linux) | `apptainer` (HPC SIF). `landlock` is declared in the enum but its helper is not
+  yet built.
+
+  <Warning>
+  `auto` resolves to the strongest backend *available on the host*, which can be `none` if no
+  backend is present — it is not a guarantee of confinement. In-process backends (`alan`,
+  `scripted`) are never wrapped; they run with the orchestrator's authority.
+  </Warning>
+</ParamField>
+
+<ParamField path="security.deny_egress" type="bool" default="false">
+  When `true`, blocks external internet except the loaded agent's declared host(s), routed via a
+  localhost allow-list proxy (`security/egress_proxy.py`). See
+  [/validity/sandbox](/validity/sandbox) for the `bwrap` loopback caveat.
+</ParamField>
+
+<ParamField path="security.runtime_opts" type="dict[str, Any]" default="{}">
+  Backend-specific sandbox extras, e.g. `image=<file>.sif` for Apptainer.
+</ParamField>
+
+### Run-level knobs
+
+<ParamField path="record_video" type="bool" default="true">
+  Record a video of the final controller eval, driven by the problem's `render_frame`. Writes
+  `video_*.mp4` into the game's experiment dir.
+</ParamField>
+
+<ParamField path="shadow_replay" type="bool" default="false">
+  Re-score by replaying the recorded actions on a trusted env (anti-cheat; roughly doubles eval
+  cost). The score is then derived by code the agent did not write. Under `single_instance` ARC
+  this resets the same persistent `EnvClient` handle rather than a truly fresh native env — see
+  [/validity/sandbox](/validity/sandbox). (The shipped `conf/config.yaml` enables it by default.)
+</ParamField>
+
+<ParamField path="execution" type="Execution (enum)" default="sequential">
+  `sequential` or `parallel`. `run_kaggle --parallel N` sets this to `parallel` when `N > 1`.
+</ParamField>
+
+<ParamField path="parallel_workers" type="int" default="1">
+  Worker count when `execution: parallel` (e.g. games run concurrently against one shared endpoint).
+</ParamField>
+
+<ParamField path="task_names" type="list[str]" default="[]">
+  The games to run. Empty = all games of the problem. E.g. `task_names=[ls20]`.
+</ParamField>
+
+<ParamField path="experiment_name" type="str | None" default="null">
+  Names the output directory: artifacts land under `output_root/<experiment_name>/<game>/`.
+</ParamField>
+
+<ParamField path="output_root" type="str" default="experiments">
+  Root directory for all run artifacts.
+</ParamField>
+
+## The experiment-profile pattern
+
+A profile in `conf/experiment/` bundles a whole run — which agent, which problem, and the
+experiment-specific fields — so `python -m regact.run_exp experiment=research` sets everything
+at once. Three profiles ship: **`dev`** (scripted agent, no LLM, fastest smoke test),
+**`research`** (Claude + anti-cheat on), **`competition`** (Kaggle: Alan + local vLLM).
+
+The key discipline: a profile **SELECTS groups via `defaults:` overrides and sets only the fields
+no group owns.** It must not re-write a group's leaf values — that way a CLI override still wins.
+
+<CodeGroup>
+```yaml conf/experiment/research.yaml
+# @package _global_
+defaults:
+  - override /agent: claude       # SELECT the group; args come from conf/agent/claude.yaml
+  - override /problem: arc_agi
+
+# Experiment-specific fields only (owned by no group):
+security:
+  sandbox: auto
+  deny_egress: true
+shadow_replay: true
+record_video: true
+limits:
+  keep_alive: 350
+  walltime_s: 3600
+experiment_name: research
+```
+
+```bash Why this matters
+# The profile SELECTS claude, but a CLI `agent=codex` still overrides the choice,
+# because research.yaml never re-wrote the agent's own fields — it only picked a group.
+python -m regact.run_exp experiment=research agent=codex 'task_names=[ls20]'
+#   -> runs codex, with codex's own args from conf/agent/codex.yaml
+```
+</CodeGroup>
+
+<Warning>
+**`competition.yaml` is the deliberate exception: it keeps inline values.** It is a dual-door
+profile — the same file feeds Hydra (`experiment=competition`) *and* `run_kaggle`. Because
+`run_kaggle` loads it with `OmegaConf.load` (`build_run_config_from_profile` in `run_kaggle.py`)
+and passes the raw mapping straight to `run_config_from_mapping`, **the Hydra `defaults:` block is
+never processed on that path.** So `competition.yaml` writes its `agent:` / `problem:` / `features:`
+blocks inline (with `${oc.env:...}` interpolation) rather than selecting groups, so both doors see
+a complete config.
+</Warning>
+
+## Currently inactive or partial knobs
+
+Honest limitations are a feature of a testing framework. These fields are accepted by the schema
+and the loader but are **not fully wired** today:
+
+<AccordionGroup>
+  <Accordion title="limits.token_budget — loaded, not enforced">
+    Present on `LimitsConfig` and parsed by `config/loader.py`, but no component in the loop
+    consumes it. Setting it changes nothing yet.
+  </Accordion>
+  <Accordion title="tools — loaded, not consumed">
+    The `RunConfig.tools` dict of cross-cutting toggles is parsed into the typed config but is
+    not read by any feature or the loop. It is reserved for a future tool-gating mechanism.
+  </Accordion>
+  <Accordion title="obs_mode — only raw is implemented">
+    `ObsMode` declares `ascii` / `structured` / `vlm_caption`, but only `raw` has a renderer
+    today (`schema.py` marks the rest "Later"). Requesting another mode depends on the problem's
+    `obs_renderer()` and will typically be rejected.
+  </Accordion>
+  <Accordion title="sandbox=landlock — declared, no helper">
+    `SandboxRuntime.LANDLOCK` exists in the enum (`security/runtime.py`) but its wrapper is not
+    yet built; selecting it will not confine the subprocess.
+  </Accordion>
+</AccordionGroup>
+
+<a id="lifecycle-caveat" />
+
+<Note>
+**`single_instance` shared state.** Under `single_instance`, the agent's exploration and the
+final controller eval reuse the same env, so hand-play can leak into a controller's score. This
+is logged as a warning rather than blocked; the trusted re-scoring path (`shadow_replay`) is the
+mitigation. Details in [/validity/sandbox](/validity/sandbox).
+</Note>
+
+<Tip>
+Every leaf here is overridable on the `run_exp` CLI with a dotted path
+(`limits.walltime_s=3600`, `agent.args.effort=max`, `security.sandbox=none`), and on the
+`run_kaggle` side via the profile YAML or the `--games` / `--parallel` / `--output-root` /
+`--agent` flags.
+</Tip>

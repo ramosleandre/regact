@@ -1,0 +1,274 @@
+---
+title: Run an experiment
+description: The practical how-to for launching a regact run — one command, the four config axes, experiment profiles, the two front-ends, and the lifecycle choice.
+---
+
+A regact run pairs three swappable plugins — an **agent** (who writes the code), a
+**problem** (the environment), and one or more **features** (the agent-built
+capabilities) — and drives them through a single keep-alive loop. This page is the
+operational how-to: how to start a run, how to pick and override each plugin, and
+what the run-level knobs mean. For the exhaustive knob reference see
+[/guides/configuration](/guides/configuration); for reading what a run produced see
+[/guides/analyze-results](/guides/analyze-results).
+
+## The one command
+
+```bash
+make run ARGS="agent=claude problem=arc_agi"
+```
+
+`make run` (Makefile target `run`) wraps `python -m regact.run_exp` and forwards
+everything in `ARGS` verbatim as Hydra CLI overrides. `run_exp` (`run_exp.py`) is a
+thin `@hydra.main` entry point: Hydra composes `conf/config.yaml`, the composed
+tree is flattened to a plain dict with `OmegaConf.to_container`, and
+`run_config_from_mapping` (`config/loader.py`) maps it to the typed `RunConfig`
+(`config/schema.py`). That `RunConfig` is the only object the rest of the system
+consumes.
+
+<Note>
+  Running `python -m regact.run_exp ...` directly is equivalent to `make run
+  ARGS="..."`. The `make` wrapper exists so the invocation is uniform with the
+  other targets (`make run-kaggle`, `make viz`, `make probe`).
+</Note>
+
+## Compose the four axes
+
+`conf/config.yaml` declares one Hydra group per agnosticity axis and a default
+choice for each:
+
+```yaml
+defaults:
+  - agent: scripted        # conf/agent/*        — who writes the code
+  - problem: arc_agi       # conf/problem/*      — the environment (iterates its tasks)
+  - features: controller   # conf/features/*     — the agent-built capabilities
+  - _self_
+  - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
+```
+
+Select a group by naming its file (without `.yaml`), and override any leaf field
+with a dotted path:
+
+<CodeGroup>
+```bash Select groups
+# Swap agent and problem; keep the default features (controller).
+make run ARGS="agent=codex problem=minigrid"
+```
+
+```bash Override a field
+# Same groups, but reach into a group's own args and a top-level limit.
+make run ARGS="agent=codex problem=arc_agi \
+  problem.lifecycle=single_instance limits.walltime_s=3600"
+```
+</CodeGroup>
+
+The four axes and the groups that ship today:
+
+<ParamField path="agent" default="scripted">
+  `conf/agent/*`. Values: `alan`, `claude`, `codex`, `scripted`. Selects the
+  `AgentConfig` (name, `model`, `base_url`, `api_key`, backend-specific `args`).
+  See [/agnosticity/agents](/agnosticity/agents).
+</ParamField>
+
+<ParamField path="problem" default="arc_agi">
+  `conf/problem/*`. Values: `arc_agi` (offline, deterministic), `minigrid`
+  (stochastic gymnasium MiniGrid, default `env_id=MiniGrid-Empty-5x5-v0`). A
+  problem iterates all its games unless you set `task_names`. See
+  [/agnosticity/environments](/agnosticity/environments).
+</ParamField>
+
+<ParamField path="features" default="controller">
+  `conf/features/*`. A run loads a **list** of features. Only `controller` ships
+  today (it is effectively always on — it provides the `SubmitSolution` /
+  `ExitTask` tools and the `act(obs) -> action` contract). See
+  [/agnosticity/features](/agnosticity/features).
+</ParamField>
+
+<ParamField path="experiment" optional>
+  `conf/experiment/*`. An optional named profile that overrides the three axes
+  above plus run-level fields. Values: `dev`, `research`, `competition`.
+</ParamField>
+
+Anything on `RunConfig` is overridable inline — `limits.n_episodes=8`,
+`security.sandbox=none`, `shadow_replay=false`, `record_video=false`,
+`execution=parallel parallel_workers=4`, `task_names=[ls20]`.
+
+## Experiment profiles
+
+A profile is a one-word shorthand for a coherent bundle of choices. The three that
+exist live in `conf/experiment/`:
+
+<CardGroup cols={3}>
+  <Card title="dev" icon="bolt">
+    Fastest end-to-end smoke. `scripted` agent (no LLM — replays canned events),
+    one game (`task_names=[ls20]`), `sandbox=none`, `keep_alive=3`. Use it to
+    exercise the loop → eval → artifacts pipeline after a plumbing change.
+  </Card>
+  <Card title="research" icon="flask">
+    A real offline run: `claude` (model `opus`) on `arc_agi`, `sandbox=auto`,
+    `deny_egress=true`, `shadow_replay=true`, `record_video=true`,
+    `walltime_s=3600` per game. The anti-cheat defenses are on.
+  </Card>
+  <Card title="competition" icon="trophy">
+    Kaggle ARC-AGI-3: in-process `alan` agent against a local vLLM endpoint,
+    `sandbox=none` (the kernel is already isolated), env-var interpolated model /
+    endpoint. Also `run_kaggle`'s default profile — see below.
+  </Card>
+</CardGroup>
+
+### The defaults-override pattern
+
+Hydra profiles do not rewrite a group's values — they **select** the group via
+`defaults` entries and then set only the fields no group owns. `research.yaml`,
+for example, begins:
+
+```yaml
+# @package _global_
+defaults:
+  - override /agent: claude       # conf/agent/claude.yaml (model: opus, its args)
+  - override /problem: arc_agi     # conf/problem/arc_agi.yaml (single_instance, offline)
+security:
+  sandbox: auto
+  # … experiment-specific fields only …
+```
+
+Because the profile only *chooses* `agent: claude`, a later CLI override wins:
+
+```bash
+make run ARGS="experiment=research agent=codex"
+```
+
+This composes the research profile's problem, limits, and security, but the
+**agent** is `codex` — and its `model` / `args` come from `conf/agent/codex.yaml`,
+not from the profile. Combine freely: `experiment=research agent=claude
+agent.model=sonnet 'task_names=[ls20]'`.
+
+<Warning>
+  The competition profile is the exception: it holds **inline** `agent:` and
+  `problem:` blocks rather than a `defaults` list. That is deliberate — it is
+  dual-door. `run_kaggle` loads it with `OmegaConf.load`, which reads the file as a
+  plain mapping and ignores any `defaults` key, so a Hydra-style profile would lose
+  its group selections there. Keep competition inline; keep `dev`/`research` as
+  `defaults`-style profiles.
+</Warning>
+
+## Two front-ends, one RunConfig
+
+There are two ways to launch, and both terminate in the same
+`run_config_from_mapping(...) -> RunConfig -> run_experiment(...)` path
+(`orchestration/experiment.py`).
+
+<Tabs>
+  <Tab title="run_exp (Hydra)">
+    ```bash
+    make run ARGS="experiment=research agent=codex 'task_names=[ls20]'"
+    ```
+    Hydra composes `conf/config.yaml`, applies CLI overrides and sweeps, and hands
+    a dict to the loader. This is the research / local front-end. Hydra `chdir` is
+    off — the Scheduler owns where things run.
+  </Tab>
+  <Tab title="run_kaggle (YAML profile)">
+    ```bash
+    make run-kaggle ARGS="--games ls20"
+    ```
+    `run_kaggle` (`run_kaggle.py`) takes **no Hydra**. It loads one profile YAML via
+    `--config` (default: the packaged `competition.yaml`) straight into
+    `run_config_from_mapping`, then applies a few argparse flags for the notebook
+    cell: `--games`, `--parallel`, `--output-root`, `--agent`. It is the Kaggle /
+    competition front-end and, for `arc_agi`, prints an RHAE recap at the end.
+  </Tab>
+</Tabs>
+
+Because both build the same typed `RunConfig`, everything downstream — the loop,
+the sandbox, the scoring, the artifacts — is identical regardless of which door you
+came through.
+
+## Lifecycle choice
+
+`problem.lifecycle` (the `Lifecycle` enum) decides how episodes relate to the
+environment, and it has real consequences:
+
+<AccordionGroup>
+  <Accordion title="single_instance — one env per game, RESET = level reset">
+    One environment is created per game and kept alive; a new "episode" is a level
+    reset on that persistent handle, not a fresh construction. This is ARC's mode
+    (`conf/problem/arc_agi.yaml`). Two honest caveats:
+
+    - **Eval reuses the same handle.** Under `single_instance`, `shadow_replay`'s
+      `replay_and_score` resets the *same* persistent `EnvClient` rather than
+      spinning up a second native env (`controllers/executor.py`) — weaker than the
+      "fresh env" wording used for `multi_instance`.
+    - **Exploration and eval share mutable game state**, so hand-play performed
+      during exploration can leak into a controller's measured score. The run logs
+      this as a warning rather than preventing it.
+
+    Set `limits.env_step_budget` generously here (e.g. `20000`) — the budget is
+    shared between exploration and eval.
+  </Accordion>
+  <Accordion title="multi_instance — fresh env per episode">
+    A brand-new environment is constructed for every eval episode. This is
+    MiniGrid's default (`conf/problem/minigrid.yaml`). Here `limits.n_episodes > 1`
+    buys you genuine statistics: more independent rollouts, aggregated by the
+    problem's `aggregate_episode_metrics`.
+  </Accordion>
+</AccordionGroup>
+
+**`n_episodes`** (`limits.n_episodes`, default `1`) is the number of eval episodes
+per submission. Under `multi_instance` more episodes tighten the estimate; under
+`single_instance` they are level resets on the shared env.
+
+**`seed`** (`problem.seed`) matters only for **stochastic** environments. MiniGrid
+is stochastic — the seed fixes the layout, so pin it for reproducibility. ARC is
+deterministic and **ignores** the seed entirely (`config/schema.py`,
+`ProblemConfig.seed`).
+
+<Warning>
+  `limits.token_budget` is parsed into `RunConfig` (`config/schema.py`,
+  `LimitsConfig.token_budget`) but is **not yet enforced** — setting it has no
+  effect on a run today. Use `limits.walltime_s`, `limits.max_moves`,
+  `limits.keep_alive`, or `limits.env_step_budget` for actual budgeting.
+</Warning>
+
+## Concrete invocations
+
+<CodeGroup>
+```bash Smoke test (no LLM)
+# Fastest end-to-end check: scripted agent, one game, no sandbox.
+make run ARGS="experiment=dev"
+```
+
+```bash Research run on one ARC game
+# Claude on offline ARC, single-instance, 1h budget, anti-cheat on.
+make run ARGS="experiment=research agent=claude 'task_names=[ls20]'"
+```
+
+```bash MiniGrid with statistics
+# Stochastic env: pin the seed and average over 10 fresh episodes.
+make run ARGS="agent=codex problem=minigrid \
+  problem.seed=0 limits.n_episodes=10"
+```
+
+```bash Kaggle front-end
+# YAML-profile door: competition profile, override the game list.
+make run-kaggle ARGS="--games ls20"
+```
+</CodeGroup>
+
+<Tip>
+  Before a first real run, `make doctor` (`python -m regact.doctor`) reports
+  machine readiness — Python, the agent CLIs, which sandbox backend is available,
+  and optional extras. `make probe` separately checks the isolation contract on the
+  current host.
+</Tip>
+
+## Where to next
+
+<CardGroup cols={2}>
+  <Card title="Configuration reference" icon="sliders" href="/guides/configuration">
+    Every field on `RunConfig`: all `limits`, `security`, execution, obs/info
+    modes, and per-group knobs.
+  </Card>
+  <Card title="Analyze results" icon="chart-line" href="/guides/analyze-results">
+    The on-disk artifacts under `experiments/<name>/<game>/` and the live
+    visualizer (`make viz EXP=...`).
+  </Card>
+</CardGroup>

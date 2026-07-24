@@ -1,0 +1,191 @@
+---
+title: Features
+description: The Feature axis — self-contained capabilities a run turns on, each bundling workdir templates, a prompt fragment, tools, and teardown hooks, assembled by a feature-agnostic core.
+---
+
+## What a feature is
+
+A **feature** is a self-contained capability a run turns on. A run loads a **list** of
+features, and the core assembles itself from that set: the bootstrap writes each feature's
+workdir files, the prompt builder appends each fragment, the tool surface is the union of
+each feature's tools, and teardown fires each feature's hooks. The core code never names a
+specific feature — it iterates the list (`Feature` ABC, `features/base.py`).
+
+Features are **independent**: there is no dependency graph. The registry is a lazy
+string → factory map, so the config names a feature by string and never imports a feature
+class (`register_feature` / `build_features` in `features/base.py`). One feature is always
+present — `controller`, the base — and it is the only built-in today.
+
+<Note>
+This is one of the three swappable axes of the framework, alongside the **agent** and the
+**problem** (the environment). See [Core concepts](/concepts) for how the three meet at the
+wiring hub (`orchestration/task.py`) and the HTTP wall.
+</Note>
+
+## The four parts
+
+Every feature bundles exactly four things. Two are **static** (they render the workspace and
+prompt before the run is live); two are **runtime** (they wire the live run's tools and
+teardown). This split is the whole shape of the ABC.
+
+| Part | Signature | What it produces |
+| --- | --- | --- |
+| Templates | `templates(ctx: FeatureContext) -> list[TemplateFile]` | Files scaffolded into the agent's workdir |
+| Prompt fragment | `prompt_fragment(ctx: FeatureContext) -> str \| None` | Markdown appended to the agent's **first message** |
+| Tools | `tools(deps: RunDeps) -> list[Tool]` | Framework tools exposed to the agent, wired to the run |
+| Hooks | `hooks(deps: RunDeps) -> list[Hook]` | Framework-run work fired at a lifecycle phase (e.g. teardown) |
+
+A `TemplateFile` is a neutral `(relpath, content)` pair (`workspace/templates.py`) — the
+same primitive a **problem** emits from `helper_templates`, which keeps problems decoupled
+from features. A feature is **stateless**: it reads its inputs and returns these lists; it
+never stores `ctx` or `deps` (`Feature` docstring, `features/base.py`).
+
+## Static vs runtime inputs
+
+The two input types are deliberately distinct, and the distinction is what keeps the base
+feature-agnostic.
+
+<Tabs>
+  <Tab title="FeatureContext (static)">
+    Everything a feature needs to **render itself** before a run is live — used by
+    `templates` and `prompt_fragment` (`features/base.py`):
+
+    <ParamField path="problem_name" type="str">The selected problem's registry name.</ParamField>
+    <ParamField path="task_name" type="str">The task/game within that problem.</ParamField>
+    <ParamField path="workdir" type="str">The agent's working directory.</ParamField>
+  </Tab>
+  <Tab title="RunDeps (runtime)">
+    Run-scoped dependencies the orchestrator owns and hands to a feature once a run is
+    live — used by `tools` and `hooks` (`features/base.py`). Selected fields:
+
+    <ParamField path="env_client" type="EnvClient">The **agnostic** door to the environment (HTTP client).</ParamField>
+    <ParamField path="experiment" type="ExperimentState">Live run state (task name, submission results, cheat log).</ParamField>
+    <ParamField path="solution_path" type="str">Path to the file the agent edits and submits.</ParamField>
+    <ParamField path="submissions_dir" type="str">Where scored submissions are written.</ParamField>
+    <ParamField path="n_episodes / max_moves" type="int">Eval budget per submission.</ParamField>
+    <ParamField path="compute_episode_metrics / aggregate_episode_metrics" type="Callable">The problem's metric callables (a feature computes no score itself).</ParamField>
+    <ParamField path="sandbox_wrap" type="Callable | None">Wraps an argv for the OS sandbox; `None` selects an in-process executor.</ParamField>
+    <ParamField path="render_frame / record_video" type="Callable / bool">One obs → RGB frame, for the eval video.</ParamField>
+    <ParamField path="seed" type="int | None">Base seed for eval episodes (episode *i* uses `seed + i`); `None` is unseeded.</ParamField>
+    <ParamField path="shadow_replay" type="bool">Re-score by replaying recorded actions on a trusted env.</ParamField>
+    <ParamField path="lifecycle" type="Lifecycle">`single_instance` or `multi_instance`.</ParamField>
+  </Tab>
+</Tabs>
+
+<Warning>
+`RunDeps` carries the **agnostic `EnvClient`**, not a controller executor. A controller
+feature builds its own `ControllerExecutor` (or `SandboxedExecutor`) *from* that client
+(`_make_executor` in `features/controller.py`). This is deliberate: the base `RunDeps` type
+stays free of controller-specific imports, so the feature machinery never depends on how any
+one feature evaluates itself. It is the same agnosticity rule the HTTP wall enforces for the
+environment.
+</Warning>
+
+## Worked example: the controller feature
+
+The `controller` feature (`features/controller.py`, `name = "controller"`) is the only
+built-in and is always on. It owns everything controller-specific and demonstrates all four
+parts.
+
+<AccordionGroup>
+  <Accordion title="templates → workdir files" icon="folder">
+    Three files (`ControllerFeature.templates`):
+
+    - `code_library/base_controller.py` — the contract the agent subclasses, mirroring
+      `controllers/base.BaseController`.
+    - `code_library/example_controller.py` — a trivial worked example (`act` returns the
+      first available action).
+    - `solution.py` — the stub the agent implements and submits (a `Controller` class plus a
+      `get_controller()` factory).
+
+    `make_env.py` is **not** here — it is env- and lifecycle-specific and is written by the
+    workspace base, not the feature (module docstring, `features/controller.py`).
+  </Accordion>
+  <Accordion title="prompt_fragment → first-message text" icon="message">
+    Returns the contents of `features/prompts/controller.md`. The prose lives in markdown
+    next to the module (like the system and game prompts), so wording is edited without
+    touching code. It explains the controller contract: a controller is a pure policy
+    `act(obs) -> action`; the agent **writes the code**, then runs and submits it, rather
+    than replying with actions by hand. It is re-instantiated per episode (`__init__` is the
+    per-episode reset), and it never imports the environment.
+  </Accordion>
+  <Accordion title="tools → framework tools" icon="wrench">
+    Two tools (`ControllerFeature.tools`), each wired with the run's executor and
+    experiment state:
+
+    - `SubmitSolution` — scores the current `solution.py` against the environment and writes
+      a numbered submission; the agent may submit as many times as it likes.
+    - `ExitTask` — ends the run when the agent is satisfied.
+  </Accordion>
+  <Accordion title="hooks → teardown re-scoring" icon="arrow-rotate-right">
+    One hook (`ControllerFeature.hooks`): `FinalizeControllerHook`, phase
+    `HookPhase.TEARDOWN`. On every non-aborted exit path it re-scores the **final**
+    `solution.py` as the official result, writing it to `submissions/final`. This guards the
+    common failure where the agent edits `solution.py` and exits (or runs out of turns)
+    without re-submitting, so the last numbered submission no longer reflects the file on
+    disk (`FinalizeControllerHook` docstring, `features/controller.py`).
+  </Accordion>
+</AccordionGroup>
+
+The controller the agent actually writes is tiny — `BaseController.act(obs) -> action`
+(`controllers/base.py`), a pure policy with no `reset()` (instantiation *is* the
+per-episode reset). How that controller is executed and scored — sandboxed subprocess for
+real runs, trusted re-scoring at teardown — is the subject of
+[Trusted vs untrusted](/validity/trusted-untrusted).
+
+## What hooks are for
+
+A `Hook` is **framework-run work** the loop fires at a lifecycle phase — code the agent did
+not write and cannot intercept. A feature captures whatever a hook needs via
+`hooks(deps)`, so `Hook.run()` takes no arguments and returns an `EvalResult` to record (or
+`None`) (`features/base.py`).
+
+`HookPhase` currently exposes one point the loop actually observes: `TEARDOWN` (session end,
+on every non-aborted exit path). Environment steps live behind the HTTP wall, so they are
+**not** loop phases and cannot be hooked (`HookPhase` docstring). A `POST_SUBMIT` phase is
+noted in the source as arriving with the anti-cheat scan.
+
+Typical hook shapes:
+
+- **Re-verify a submission** — re-score the final artifact under trusted code, as
+  `FinalizeControllerHook` does.
+- **World-model replay** — replay recorded actions against a fresh environment and compare.
+  **Shadow-replay is exactly this shape**: the same “re-run recorded actions on a trusted
+  env and re-derive the score” pattern (the `shadow_replay` field on `RunDeps` feeds it).
+
+## How to add a feature
+
+<Steps>
+  <Step title="Subclass Feature">
+    Create `features/<name>.py` with a `Feature` subclass. Set `name`, and implement the
+    four methods — `templates`, `prompt_fragment`, `tools`, `hooks`. Return an empty list
+    (or `None` for the fragment) for any part the feature does not use.
+  </Step>
+  <Step title="Register it">
+    Call `register_feature(<Class>.name, <Class>)` at module import so it self-registers.
+  </Step>
+  <Step title="Make it discoverable">
+    Add one import line to `_load_builtins()` in `features/base.py` so the module is loaded
+    (and thus registered) on first use of the registry.
+  </Step>
+  <Step title="Add a config group">
+    Add `conf/features/<name>.yaml` so a run can select the feature by name. The core is
+    untouched by all of this.
+  </Step>
+</Steps>
+
+## Clarification: where available actions come from
+
+`available_actions` do **not** reach the agent through the feature. They are part of the
+`Obs` DTO returned across the HTTP wall, and they surface in the prompt via the **problem**:
+`build_prompt` (system prompt) and `render_obs_text` (first message). The prompt builder
+appends a *generic* features intro plus each feature's fragment, but the observation content
+— including the action set — is the problem's responsibility, not the feature's
+(`prompt/builder.py`).
+
+<Tip>
+Rule of thumb: a **feature** describes a *capability and its deliverable* (write a
+controller; submit it; get it re-scored). A **problem** describes the *world and its
+observations* (what an obs looks like, which actions are available). Keep the two responsibilities
+separate and the core stays agnostic to both.
+</Tip>

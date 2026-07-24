@@ -1,0 +1,263 @@
+---
+title: Agnosticity
+description: The design principle that lets regact vary one experimental axis at a time — three swappable plugins plus a cross-cutting renderer, each behind a lazy string→factory registry, joined only by name.
+---
+
+## Why agnosticity
+
+regact exists to make experiments **comparable**. A controlled experiment varies **one**
+variable and holds the rest fixed; the conclusion is only valid if nothing else moved. So
+the framework is built so that each thing you might want to vary is a distinct, pluggable
+**axis**, and everything else the run touches stays byte-for-byte identical when you swap it.
+
+Concretely: the agent, the environment, and the feature set are three independent plugins,
+and how an observation is rendered is a fourth cross-cutting one. Each is named in config as
+a **string or enum** — never as a concrete class — and resolved through a registry at build
+time. That is what lets you write `agent=claude problem=arc_agi` and change exactly one of
+those tokens for the next run.
+
+<Note>
+An axis is an **experimental knob**. Holding the others fixed is a property of the code, not
+a convention you have to remember: the generic layers never mention a concrete plugin, so
+there is no path by which swapping the agent could quietly change how a problem is scored.
+</Note>
+
+## The mental model
+
+One **keep-alive loop** (`orchestration/loop.py`) wrapped around three swappable plugins
+that meet at an **HTTP wall**. The single place all three are wired together is
+`orchestration/task.py` — it joins them **by name and by a `Capabilities` record**, never by
+concrete type.
+
+```
+                       orchestration/task.py   ← the one wiring hub
+                       (joins the 3 by name + Capabilities, never by concrete type)
+                                 │
+       ┌──────────────────────────┼──────────────────────────┐
+       ▼                          ▼                           ▼
+  ┌─────────┐               ┌───────────┐               ┌──────────┐
+  │  AGENT  │               │  PROBLEM  │══ HTTP wall ══│ FEATURE  │
+  │CodeAgent│               │ (the env) │  Obs (JSON)   │ Feature  │
+  └────┬────┘               └───────────┘               └────┬─────┘
+       │  AgentEvent stream                                  │ Tool / Hook
+       ▼                                                     ▼
+  ┌──────────────────────── orchestration/loop.py ──────────────────────┐
+  │  send → consume events → run framework tools → inject → repeat       │
+  │  agnostic: knows only agents / tools / hooks / limits / writers      │
+  └─────────────────────────────────────────────────────────────────────┘
+```
+
+The loop is fully generic: it drives a `CodeAgent`, consumes a normalized `AgentEvent`
+stream, runs whatever `Tool`s and `Hook`s it was handed, and stops on a limit — it names no
+agent, no game, and no feature.
+
+## The axes
+
+Three abstractions are true plugins; the fourth is a server-side seam that cuts across all
+three.
+
+<CardGroup cols={2}>
+  <Card title="Agent" icon="robot" href="/agnosticity/agents">
+    Which code-writing backend plays the game — `CodeAgent` in `agent/base.py`.
+    Vary it to compare models/CLIs (Claude, codex, Alan, scripted).
+  </Card>
+  <Card title="Environment" icon="gamepad" href="/agnosticity/environments">
+    Which game the agent solves — `BaseProblem` in `problems/base.py`.
+    Vary it to compare tasks (ARC-AGI-3, MiniGrid).
+  </Card>
+  <Card title="Feature" icon="puzzle-piece" href="/agnosticity/features">
+    What capability the agent uses or builds — `Feature` in `features/base.py`.
+    A run loads a **list**; `controller` is always on.
+  </Card>
+  <Card title="Observation mode" icon="eye" href="/agnosticity/observation-modes">
+    How a native observation becomes the agent-facing `Obs` — `ObsRenderer` in
+    `env/renderer.py`. Cross-cutting: server-side, per-problem.
+  </Card>
+</CardGroup>
+
+| Axis | Contract (ABC) | Registry | Named in config as | Add one |
+| --- | --- | --- | --- | --- |
+| **[Agent](/agnosticity/agents)** | `CodeAgent` (`agent/base.py`) | `build_agent` (if-chain over `AgentName`) | `AgentName` enum | enum branch + `<name>_adapter.py` + `conf/agent/<name>.yaml` |
+| **[Environment](/agnosticity/environments)** | `BaseProblem` (`problems/base.py`) | `register_problem` / `build_problem` (lazy `_load_builtins`) | free string, e.g. `"arc_agi"` | `problems/<game>/problem.py` + one `_load_builtins` line + `conf/problem/<game>.yaml` |
+| **[Feature](/agnosticity/features)** | `Feature` (`features/base.py`) | `register_feature` / `build_features` (lazy) | list of strings | `features/<name>.py` + one `_load_builtins` line + `conf/features/<name>.yaml` |
+| **[Observation mode](/agnosticity/observation-modes)** | `ObsRenderer` (`env/renderer.py`) | supplied by the problem's `obs_renderer()` | `ObsMode` enum on `ProblemConfig` | a renderer subclass returned per mode by the problem |
+
+<Note>
+Only **`ObsMode.RAW`** exists today. `schema.py` marks `ascii`/`structured`/`vlm_caption` as
+"Later", and a problem's `obs_renderer()` may reject a mode it does not support. See
+[Observation modes](/agnosticity/observation-modes) — do not assume other modes work.
+</Note>
+
+## The registry pattern
+
+Every axis follows the same shape: an **abstract base class** for the contract, plus a
+**lazy string→factory registry** that maps a config token to a concrete builder, importing
+each backend only on the branch that needs it. Config therefore names a **string or enum**,
+never a class.
+
+<Tabs>
+  <Tab title="Agent">
+    `AgentName` is a `StrEnum`; `build_agent` is an if-chain that imports each adapter lazily
+    on its own branch, so the base module never pulls a backend SDK
+    (`agent/base.py`):
+
+    ```python
+    def build_agent(config: AgentConfig) -> CodeAgent:
+        if config.name is AgentName.SCRIPTED:
+            from regact.agent.scripted_agent import ScriptedAgent
+            return ScriptedAgent()
+        if config.name is AgentName.ALAN:
+            from regact.agent.alan_adapter import AlanAgent
+            return AlanAgent(config.args)
+        # … CLAUDE, CODEX …
+        raise ValueError(f"unknown agent {config.name!r}")
+    ```
+  </Tab>
+  <Tab title="Problem">
+    A dict registry keyed by a free string, populated by `_load_builtins()` on first build —
+    so a base install needs no game library installed to import the module
+    (`problems/base.py`):
+
+    ```python
+    def build_problem(name: str, kwargs: dict[str, Any]) -> BaseProblem:
+        _load_builtins()
+        try:
+            return _REGISTRY[name](kwargs)
+        except KeyError:
+            raise ValueError(f"unknown problem {name!r}; registered: {sorted(_REGISTRY)}")
+
+    def _load_builtins() -> None:
+        from regact.problems import arc_agi, minigrid  # self-register on import
+    ```
+  </Tab>
+  <Tab title="Feature">
+    Same registry shape; a run resolves a **list** of names to instances
+    (`features/base.py`):
+
+    ```python
+    def build_features(names: list[str]) -> list[Feature]:
+        _load_builtins()
+        return [_REGISTRY[name]() for name in names]
+
+    def _load_builtins() -> None:
+        from regact.features import controller  # the only built-in, always present
+    ```
+  </Tab>
+</Tabs>
+
+The consequence is that **adding a plugin is additive at the edges; the core is untouched.**
+A new agent, problem, or feature is a new module plus one registration line plus a config
+file — no generic layer changes.
+
+<Steps>
+  <Step title="Add an agent">
+    An `AgentName` enum value, a `build_agent` branch, `agent/<name>_adapter.py` subclassing
+    `CodeAgent`, and `conf/agent/<name>.yaml`.
+  </Step>
+  <Step title="Add a problem">
+    `problems/<game>/problem.py` subclassing `BaseProblem` and calling `register_problem`,
+    one line in `_load_builtins()`, and `conf/problem/<game>.yaml`.
+  </Step>
+  <Step title="Add a feature">
+    `features/<name>.py` subclassing `Feature` and calling `register_feature`, one line in
+    `_load_builtins()`, and `conf/features/<name>.yaml`.
+  </Step>
+</Steps>
+
+## The rule contributors follow
+
+<Warning>
+**A generic layer never imports an agent-, problem-, or feature-specific type.** This is the
+contract that keeps the axes independent. When you extend regact, uphold it: push
+plugin-specific knowledge behind the ABC; keep the loop, the security layer, and the shared
+DTOs free of concrete plugin names.
+</Warning>
+
+The codebase realizes this rule in several concrete ways:
+
+- **Data, not types, describes a backend.** The loop and the tool-exposure layer branch on a
+  frozen `Capabilities` dataclass (`agent/capabilities.py`) — e.g. `control_actions`
+  (`"native_tools"` vs `"client_cli"`), `executes_tools` — never on the adapter's class. In
+  `task.py`, the wiring reads `agent.capabilities()` to decide how to expose the framework
+  tools; degradation is data-driven.
+- **The security layer imports no adapter.** A `CodeAgent` **declares** what the sandbox must
+  allow via `host_read_paths()`, `host_egress_hosts()`, and `host_write_prefixes()`, each
+  returning plain `list[str]`. So `security/` can build a deny-by-default allowlist for the
+  loaded agent without ever importing an agent type.
+- **A problem hands back generic episode data.** `compute_episode_metrics` takes the universal
+  `Obs` and a step count — never a controller-specific rollout type — so the problem layer
+  stays agnostic of how the episode was produced.
+- **`RunDeps` carries the agnostic `EnvClient`, not a controller executor.** A controller
+  feature builds its **own** `ControllerExecutor` from it (`features/controller.py`), so the
+  base feature machinery never depends on controller-specific imports.
+- **The viz names no metric key.** The dashboard passes each game's whole final aggregate
+  through opaquely as `final_aggregate` and renders every numeric key each game reports, so a
+  new game needs no viz change (`viz/metrics.py`).
+
+## Honest limitations: the small leaks
+
+Agnosticity is a strong invariant across the generic layers, but two **advisory** subsystems
+knowingly hardcode a few plugin-specific strings. Both are documented, deliberate trade-offs
+in layers that **never block a run** — they are defense-in-depth and display, not the load-
+bearing seams. The enforcing paths (the OS sandbox, the HTTP wall, trusted scoring) stay
+fully agnostic.
+
+<AccordionGroup>
+  <Accordion title="Anti-cheat policy hardcodes game module names (security/policy.py)">
+    `default_policy()` seeds its blocklists with literal game identifiers:
+
+    ```python
+    _GAME_MODULES = ("arc_agi", "arcengine", "gymnasium", "minigrid")
+    # …
+    forbidden_path_substrings=frozenset(
+        {"environnement", "environment_files", "arcengine/", "arc_agi/"}
+    )
+    ```
+
+    This policy feeds two **non-enforcing** layers: the AST scan on the agent's submitted code
+    (`scan.py`) and the tool-call flagger (`detection.py`), which only log into
+    `experiment.cheat_attempts`. It is a heuristic camera, not a wall. The real answer-key
+    protection is agnostic and by-absence: a problem lists its engine packages via
+    `secret_modules()` and the OS sandbox hides their on-disk source — no plugin names appear
+    in the enforcing path. Tracked in memory as `cheat-policy-review`.
+  </Accordion>
+  <Accordion title="A couple of viz spots name a metric key (viz/reader.py, viz/metrics.py)">
+    The visualizer is metric-agnostic by design — it renders each game's opaque aggregate and
+    a dynamic per-submission trajectory. But two convenience signals name specific keys:
+
+    - `_submission_progress()` (`viz/reader.py`) prefers a game's graded depth
+      `mean_levels_completed` and falls back to `success_rate` to mark "did this submission
+      improve?" — a monotone progress heuristic.
+    - `game_metrics()` (`viz/metrics.py`) surfaces `success_rate` as a top-level proxy
+      alongside the opaque `final_aggregate`.
+
+    These are display heuristics: a game that reports neither key still shows its full opaque
+    aggregate and trajectory, so the dashboard degrades gracefully rather than breaking. They
+    are not on any scoring or control path.
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+The distinction to keep in mind: the **enforcing** seams — the HTTP wall (`env/server.py` ↔
+`envclient/client.py`), the OS sandbox (`security/runtime.py`), and trusted scoring
+(`controllers/executor.py`) — carry no plugin-specific type. The **advisory** seams (the
+cheat camera, the dashboard heuristics) are where the handful of hardcoded strings live, by
+choice. See [Trusted vs untrusted](/validity/trusted-untrusted) for the enforcing side.
+</Tip>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Agents" icon="robot" href="/agnosticity/agents">
+    `Capabilities`, the four adapters, and the sandbox-declaration hooks.
+  </Card>
+  <Card title="Environments" icon="gamepad" href="/agnosticity/environments">
+    `BaseProblem`, the gym shim behind the HTTP wall, and `secret_modules()`.
+  </Card>
+  <Card title="Features" icon="puzzle-piece" href="/agnosticity/features">
+    Templates, prompt fragments, tools, hooks — and the always-on `controller`.
+  </Card>
+  <Card title="Observation modes" icon="eye" href="/agnosticity/observation-modes">
+    The single server-side rendering seam and why only `RAW` exists today.
+  </Card>
+</CardGroup>

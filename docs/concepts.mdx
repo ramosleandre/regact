@@ -1,0 +1,293 @@
+---
+title: Core concepts
+description: The conceptual spine of regact — one keep-alive loop, three swappable plugins, and the HTTP wall between the agent and the game.
+---
+
+regact is one **keep-alive loop** wrapped around **three swappable plugins** — an
+**agent**, a **problem** (the environment), and a list of **features** — that meet at an
+**HTTP wall**. A single wiring hub, `orchestration/task.py`, joins the three *by name and
+by [`Capabilities`](/agnosticity/agents)*, never by concrete type. Understand those four
+pieces and you understand the framework.
+
+```
+                         orchestration/task.py   ← the one wiring hub
+                         (joins the 3 by name + Capabilities, never by concrete type)
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         ▼                         ▼                          ▼
+    ┌─────────┐              ┌───────────┐              ┌──────────┐
+    │  AGENT  │              │  PROBLEM  │══ HTTP wall ═│ FEATURE  │
+    │CodeAgent│              │(the env)  │  Obs (JSON)  │ Feature  │
+    └────┬────┘              └───────────┘              └────┬─────┘
+         │  AgentEvent stream                                │ Tool / Hook
+         ▼                                                   ▼
+    ┌──────────────────────── orchestration/loop.py ───────────────────┐
+    │  send → consume events → run framework tools → inject → repeat    │
+    │  agnostic: knows only agents / tools / hooks / limits / writers   │
+    └───────────────────────────────────────────────────────────────────┘
+```
+
+## The keep-alive loop
+
+One run drives one game to completion. The path from config to artifacts is a straight
+line through five files:
+
+<Steps>
+  <Step title="Config → run_experiment">
+    A typed `RunConfig` (`config/schema.py`) enters `run_experiment`
+    (`orchestration/experiment.py`), which builds the problem from `config.problem` and
+    resolves the task list — `config.task_names` if set, else `problem.get_task_names()`.
+  </Step>
+  <Step title="run_experiment → Scheduler → task">
+    The `Scheduler` (`orchestration/scheduler.py`) calls `run_task`
+    (`orchestration/task.py`) once per task. Runs are sequential by default; with
+    `execution=parallel` an `asyncio.Semaphore` bounds concurrency, and each task gets its
+    own env server, workdir, and agent session (no shared mutable state).
+  </Step>
+  <Step title="task → loop">
+    `run_task` stands up the env server + HTTP transport, bootstraps the workdir from the
+    features, wires each feature's tools/hooks with a `RunDeps`, assembles the prompt, and
+    hands everything to `run_session` (`orchestration/loop.py`).
+  </Step>
+  <Step title="loop → artifacts">
+    `run_session` sends the first message, then loops: consume the agent's event stream,
+    run any framework tool the agent called, inject the result, repeat. It stops on the
+    agent's request, a limit, an interrupt, a backend error, or a crash, then fires
+    teardown hooks and writes the final state.
+  </Step>
+</Steps>
+
+The loop is **provider-independent by construction**. Its module docstring is explicit:
+it imports neither the executor nor a problem; it knows only agents, framework tools,
+hooks, limits, and writers — all generic interfaces. Three properties matter:
+
+- **It is driven by a normalized event stream.** Every adapter translates its backend's
+  native output into one `AgentEvent` union (`agent/events.py`: `TextDelta`,
+  `ThinkingDelta`, `ToolCall`, `ToolResult`, `TurnComplete`, `AgentError`, plus
+  `SystemPrompt`/`UserMessage` recorded for the viewer). The loop branches on those event
+  types, never on a backend message class.
+- **It mirrors every event to `transcript.jsonl`.** `_run_turn` writes each event to the
+  canonical `TranscriptWriter` as it arrives, so the transcript is the single normalized
+  record of the whole session — inputs included.
+- **It runs the framework tools it recognizes.** When a `ToolCall` names a tool the loop
+  owns (submit/exit), `_execute_framework_tool` runs it and injects the result back into
+  the agent. Feature-specific end-of-run work arrives as `Hook` objects the loop fires by
+  phase — currently `TEARDOWN`, on every non-aborted exit path (`_run_teardown_hooks`).
+
+<Note>
+The keep-alive design is why a run is a *conversation*, not a single call: after each
+turn the loop sends a fixed keep-alive message ("Continue working… or call ExitTask when
+you are done") until a stop condition in `_decide_stop` trips —
+`limits.keep_alive` turns, `walltime_s`, an `ExitTask`, or an interrupt.
+</Note>
+
+## The three abstractions
+
+Each axis is an **abstract base class plus a lazy string → factory registry**. Config
+names each plugin with a **string or enum, never a class**, so the generic layers never
+import a concrete plugin. Adding one is always the same shape: write a subclass, register
+a name, add one config file.
+
+| Abstraction | ABC (defining file) | Registry | Add one by… |
+| --- | --- | --- | --- |
+| **[Agent](/agnosticity/agents)** | `CodeAgent` (`agent/base.py`) | `build_agent` (if-chain over `AgentName`) | new `AgentName` + `build_agent` branch + `<name>_adapter.py` + `conf/agent/<name>.yaml` |
+| **[Problem](/agnosticity/environments)** (the env) | `BaseProblem` (`problems/base.py`) | `register_problem` / `build_problem` | `problems/<game>/problem.py` subclass + `register_problem` + one `_load_builtins()` line + `conf/problem/<game>.yaml` |
+| **[Feature](/agnosticity/features)** | `Feature` (`features/base.py`) | `register_feature` / `build_features` | `features/<name>.py` subclass + `register_feature` + one `_load_builtins()` line + `conf/features/<name>.yaml` |
+
+<CardGroup cols={3}>
+  <Card title="Agent" icon="robot" href="/agnosticity/agents">
+    The thing that plays. A `CodeAgent` is described by a frozen `Capabilities` dataclass
+    (`agent/capabilities.py`) and emits the normalized `AgentEvent` union. Adapters that
+    exist: `alan_adapter.py` (in-process, `executes_tools=True`,
+    `control_actions="native_tools"`), `claude_adapter.py` + `codex_adapter.py`
+    (subprocess CLIs subclassing `_CliAgent`, `control_actions="client_cli"`), and
+    `scripted_agent.py` (replays canned events, for tests).
+  </Card>
+  <Card title="Problem" icon="gamepad-2" href="/agnosticity/environments">
+    The environment behind the wall. Abstract methods: `make_env`, `get_task_names`,
+    `obs_renderer`, `compute_episode_metrics`, `aggregate_episode_metrics`, `build_prompt`,
+    `config_kwargs`. `arc_agi` is offline and deterministic (keeps `arcengine`/`arc_agi`
+    server-side behind a gym shim); `minigrid` wraps Gymnasium and is **stochastic**, so
+    `seed` matters (default `MiniGrid-Empty-5x5-v0`).
+  </Card>
+  <Card title="Feature" icon="puzzle" href="/agnosticity/features">
+    A composable capability the agent uses or builds. A run loads a **list** of features;
+    each bundles four things — `templates`, `prompt_fragment`, `tools`, `hooks`. The only
+    built-in is `controller` (always on): it ships `base_controller.py` + a `solution.py`
+    stub, provides `SubmitSolution` + `ExitTask`, and registers a teardown hook that
+    re-scores the final `solution.py`.
+  </Card>
+</CardGroup>
+
+<AccordionGroup>
+  <Accordion title="Agent — Capabilities and sandbox-declaration hooks">
+    The loop and tool-exposure layer branch on the frozen `Capabilities` dataclass, never
+    on the adapter type — degradation is data-driven. Fields:
+
+    <ParamField path="system_prompt" type='"replace" | "append"'>
+      Whether regact owns the whole system prompt (Alan) or appends to the backend's base
+      prompt (Claude `--append-system-prompt`).
+    </ParamField>
+    <ParamField path="control_actions" type='"native_tools" | "client_cli"'>
+      How submit/exit reach the agent: in-process Python `Tool` objects (only an in-process
+      agent) vs. the workdir client CLI over HTTP (any subprocess CLI agent).
+    </ParamField>
+    <ParamField path="permission_hooks" type="bool">Supports `PreToolUse` hooks (path confinement, etc.).</ParamField>
+    <ParamField path="streams_tool_calls" type="bool">Surfaces `ToolCall` events in its stream.</ParamField>
+    <ParamField path="supports_inject" type="bool">Accepts mid-turn injected messages.</ParamField>
+    <ParamField path="writes_native_transcript" type="bool">Writes its own session dir (`.alan` / `.claude`).</ParamField>
+    <ParamField path="executes_tools" type="bool" default="False">
+      The agent runs its own native tools (Alan, via alancode), so the loop must **not** also
+      run them (it would double-submit) — it only observes. Default `False`: the loop runs
+      the framework tools when it sees the agent's `ToolCall`.
+    </ParamField>
+
+    Separately, `CodeAgent` exposes three **sandbox-declaration hooks** — `host_read_paths()`,
+    `host_egress_hosts()`, `host_write_prefixes()` — that each return a plain `list[str]`.
+    They exist so the [security layer](/validity/sandbox) can build a deny-by-default
+    allowlist for the *loaded* agent without ever importing an adapter type.
+  </Accordion>
+  <Accordion title="Problem — optional hooks beyond the abstract methods">
+    Optional hooks a problem may override: `milestone_detector`, `helper_templates`,
+    `secret_modules` (engine package names the sandbox hides — the answer-key protection),
+    `render_frame`, `render_obs_text`, and `derived_submission_metrics` (offline scores
+    derived from raw episodes + a baseline, e.g. ARC's RHAE, read by the visualizer). The
+    critical discipline: `make_env` **lazy-imports the game library inside the method**, so
+    the game never enters the orchestrator's import graph.
+  </Accordion>
+  <Accordion title="Feature — the four parts and RunDeps">
+    A feature bundles `templates(ctx) -> list[TemplateFile]` (workdir files),
+    `prompt_fragment(ctx) -> str | None` (appended to the first message),
+    `tools(deps) -> list[Tool]`, and `hooks(deps) -> list[Hook]`. The static side takes a
+    `FeatureContext` (`problem_name`, `task_name`, `workdir`); the runtime side takes a
+    `RunDeps` (the live run: `env_client`, `experiment`, `solution_path`, `n_episodes`,
+    metric callables, `sandbox_wrap`, `seed`, `shadow_replay`, …).
+
+    <Warning>
+    `RunDeps` carries the **agnostic `EnvClient`, not a controller executor**. A controller
+    feature builds its *own* executor from that client, keeping `features/base.py` free of
+    controller-specific imports.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## The wiring hub
+
+`orchestration/task.py` is the **only** place the three abstractions are joined, and it
+does so by **name and by `Capabilities`, never by `isinstance`**. Two decisions make this
+concrete:
+
+- **The env client comes from the workdir.** `run_task` registers an `EnvSession` on an
+  `EnvServer`, fronts it over a transport, and bootstraps the workdir so its `make_env()`
+  reads an env URL + game id and returns an `EnvClient`. The agent's code path to the
+  environment is that client — nothing more.
+- **Tool exposure branches on capability, not type.** `run_task` reads
+  `agent.capabilities()` and routes accordingly: `client_cli` binds the control tools to
+  the server for the CLI to reach over HTTP; an `executes_tools` agent (Alan) is handed the
+  tools but the loop runs none; otherwise the loop itself owns the framework tools. The
+  same `run_task` serves Alan, Claude, codex, and the scripted backend unchanged.
+
+## The HTTP wall
+
+The agent **never imports the game.** The environment lives behind a localhost HTTP
+boundary: `EnvServer` (FastAPI, `env/server.py`) on one side, `EnvClient` (httpx,
+`envclient/client.py`) on the other. Only serialized JSON crosses — an opaque action out,
+and an `Obs` DTO back.
+
+The `Obs` DTO (`envclient/obs.py`) is a plain data container with symmetric
+`to_json`/`from_json` and five fields:
+
+<ParamField path="frame" type="Any">The rendered grid/pixels the renderer chose to expose (or `None`).</ParamField>
+<ParamField path="reward" type="float | None" />
+<ParamField path="is_done" type="bool" default="False" />
+<ParamField path="available_actions" type="list[Action]">Whatever the env's `step` accepts; opaque on the wire.</ParamField>
+<ParamField path="info" type="dict[str, Any]" />
+
+The native engine and the answer key **never cross** — the isolation is
+**prevention-by-absence**, not a filter. This is the mechanism that makes a controller's
+score measure *understanding* rather than memorization; see
+[Trusted vs untrusted](/validity/trusted-untrusted).
+
+<Warning>
+**Honest nuance: it is a thread boundary, not always a process boundary.** The env server
+runs as a **thread inside the orchestrator process**, not a separate process. A subprocess
+CLI agent (Claude, codex) is still its own process, so the boundary holds for it. But
+**in-process Alan shares the orchestrator's process, filesystem, and network — Alan is not
+OS-sandboxed.** The wall is an information boundary (the game object and answer key are
+never handed across); it is an OS boundary only for subprocess agents.
+</Warning>
+
+<Note>
+**Two in-process reads bypass HTTP by design.** `server.first_obs(task_name)` (the first
+observation, to build the first message) and `server.live_action_count(task_name)` (the
+live step count, for the viewer) are called by the **trusted orchestrator**, not by the
+agent — so they do not weaken the wall.
+</Note>
+
+### Where observations are rendered
+
+`ObsRenderer.render(native_obs, info) -> Obs` (`env/renderer.py`) is the **single
+server-side seam** that turns a native observation into the agent-facing `Obs`. It runs
+server-side and **cannot be supplied by the agent**, so it is the only place for parsing or
+VLM-captioning. `RawRenderer` passes the native obs through; `ArcRenderer` /
+`MiniGridRenderer` are per-problem.
+
+<Warning>
+The `ObsMode` enum currently has **only `RAW`**; `schema.py` marks `ascii` / `structured`
+/ `vlm_caption` as *"Later"*. `obs_mode` is a `ProblemConfig` field, and a problem's
+`obs_renderer()` may reject a mode it does not support. See
+[Observation modes](/agnosticity/observation-modes).
+</Warning>
+
+Note that `available_actions` reach the agent through the **problem's**
+`render_obs_text` / `build_prompt` (the first message carries the dynamic first
+observation), **not** through a feature — everything static lives in the cached system
+prompt, and only the live observation is dynamic.
+
+## The controller
+
+The unit the agent writes is a **`Controller`**: a pure policy,
+`BaseController.act(obs) -> action` (`controllers/base.py`, 22 lines). Instantiation *is*
+the per-episode reset — there is no `reset()` — and the controller **never receives the
+env**: the orchestrator drives `act` and applies whatever action it returns.
+
+```python
+class BaseController:
+    def __init__(self, *args, **kwargs):
+        """Set up for a fresh episode. Keep any cross-step state on ``self``."""
+
+    def act(self, obs):
+        """Return an action that the env accepts for the given observation."""
+        raise NotImplementedError
+```
+
+The always-on `controller` feature (`features/controller.py`) scaffolds this contract into
+the workdir (`base_controller.py`, a worked example, and a `solution.py` stub), explains
+`act(obs) -> action` via `features/prompts/controller.md`, provides the `SubmitSolution`
+and `ExitTask` tools, and registers `FinalizeControllerHook` — the teardown hook that
+re-scores the final `solution.py` on disk as the official result (guarding the common case
+where the agent edits `solution.py` and exits without re-submitting).
+
+<Tip>
+The controller is a *policy the agent authors*, evaluated by code the agent did not write,
+on an env it does not control. That separation — writer here, scorer there — is the heart
+of regact's validity story. Follow it into
+[Trusted vs untrusted](/validity/trusted-untrusted).
+</Tip>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Swap an agent" icon="robot" href="/agnosticity/agents">
+    Capabilities, the adapter contract, and the four steps to add a backend.
+  </Card>
+  <Card title="Add an environment" icon="gamepad-2" href="/agnosticity/environments">
+    `BaseProblem`, the gym shim, secret modules, and lazy game imports.
+  </Card>
+  <Card title="Write a feature" icon="puzzle" href="/agnosticity/features">
+    Templates, prompt fragments, tools, hooks, and `RunDeps`.
+  </Card>
+  <Card title="Trusted vs untrusted" icon="shield" href="/validity/trusted-untrusted">
+    Why the score is honest: untrusted play, trusted scoring, shadow replay.
+  </Card>
+</CardGroup>

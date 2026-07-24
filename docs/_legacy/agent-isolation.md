@@ -134,14 +134,7 @@ files are never bound into the agent's view (R2). *(Process separation of the en
 server and the evaluator is the next implementation step; today the HTTP object
 boundary is in place and the sandbox provides the filesystem confinement.)*
 
-**(c) The deliverable scan — feature-specific.** Each feature validates *its own*
-deliverable. The controller feature statically scans `solution.py` (AST) before it
-runs and rejects code that imports the game library or calls an escape hatch — a
-contract on the *shape of the submission*, with a clear error. This is hygiene on the
-artifact, not OS-level confinement, and it lives with the feature so a different
-feature can apply different rules.
-
-**(d) The detection signal — observe, never block.** Independently of the sandbox, a
+**(c) The detection signal — observe, never block.** Independently of the sandbox, a
 cheap scan over the agent's tool-call arguments flags any call that names a forbidden
 path or module. It **never blocks** (the sandbox is what blocks); it **records** the
 attempt as a forensic signal: a `cheat_attempt` count on the run state and a WARNING

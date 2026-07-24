@@ -187,12 +187,12 @@ isolation contract is checked per host by the conformance probe (`make probe`).
 
 ## Docs
 
-| Doc | What |
-|---|---|
-| [docs/agents-setup.md](docs/agents-setup.md) | install + authenticate the CLI agents; full config reference |
-| [docs/agent-isolation.md](docs/agent-isolation.md) | the anti-cheat / sandbox design (threat model, invariants R1–R6) |
-| [docs/sandbox-testing.md](docs/sandbox-testing.md) | verify the sandbox per machine (the conformance probe) |
-| [docs/contexte_isolation_state.md](docs/contexte_isolation_state.md) | **read first on a new machine** — current isolation state |
+Full documentation lives in [`docs/`](docs/) as a [Mintlify](https://mintlify.com) site
+(MDX): get-started, guides (run an experiment, analyze results, configuration), the
+**agnosticity** axes (agents, environments, features, observation modes), and
+**validity & isolation** (trusted vs untrusted, the sandbox, scoring, testing). Preview
+it locally with `mintlify dev` from `docs/`. Earlier design notes are kept under
+[`docs/_legacy/`](docs/_legacy/).
 
 ## Layout
 

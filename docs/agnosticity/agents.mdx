@@ -1,0 +1,222 @@
+---
+title: Agents
+description: The Agent axis — a single CodeAgent contract that the loop drives, described by a frozen Capabilities dataclass so tool routing degrades on data, never on adapter type.
+---
+
+An **agent** is one of the three swappable plugins that meet at regact's HTTP
+wall. The keep-alive loop (`orchestration/loop.py`) never names a concrete
+backend: it drives everything through one abstract base class, and it branches
+on a frozen `Capabilities` record — never on `isinstance`. Adding a new
+backend (a CLI, a local model, an in-process agent) is a matter of implementing
+the contract and declaring what it supports.
+
+<Note>
+  `orchestration/task.py` is the single wiring hub. It joins the agent, the
+  problem, and the features by **name and `Capabilities`**, never by concrete
+  type. See [/agnosticity/overview](/agnosticity/overview) for the shared shape
+  of all three axes.
+</Note>
+
+## The contract
+
+Every backend is wrapped as a `CodeAgent` (`agent/base.py`) and driven **only**
+through this ABC. Because the methods are abstract, a backend that forgets one
+fails at construction rather than silently at runtime.
+
+<ParamField path="start(...)" type="async">
+  Configure and launch the agent against a workdir (`cwd`) and an LLM endpoint
+  (`model`, `base_url`, `api_key`, `system_prompt`, `tools`, `env`). The optional
+  `runtime_wrap: Callable[[list[str]], list[str]]` wraps the agent's subprocess
+  argv to run inside an OS sandbox — supplied by the trusted orchestrator, so
+  the agent never sees or constructs it.
+</ParamField>
+
+<ParamField path="send(message)" type="AsyncIterator[AgentEvent]">
+  Run one turn and stream normalized events (see below).
+</ParamField>
+
+<ParamField path="inject(message)" type="async">
+  Queue a user message to be delivered on the next turn.
+</ParamField>
+
+<ParamField path="abort()" type="async">
+  Interrupt the current turn.
+</ParamField>
+
+<ParamField path="close()" type="async">
+  Release all resources (subprocess, sockets, sessions).
+</ParamField>
+
+<ParamField path="capabilities()" type="Capabilities">
+  The static description the loop branches on.
+</ParamField>
+
+### Sandbox-declaration hooks
+
+Three further hooks on `CodeAgent` let a backend declare what the OS sandbox
+must permit. They return **plain `list[str]`** by design, so the security layer
+(`security/`) can build a deny-by-default allowlist without ever importing an
+adapter type. Each backend names only its own paths and hosts — a loaded
+sandbox therefore contains no other backend's carve-outs.
+
+| Hook | Returns | Example |
+| --- | --- | --- |
+| `host_read_paths()` | Host config/auth dirs that must be readable inside the sandbox | Claude: `~/.claude`, `~/.claude.json`, `~/.npm` (+ Keychain paths on macOS); codex: its isolated home |
+| `host_egress_hosts()` | External hosts the backend must reach (for the egress-allowlist proxy) | Claude: `api.anthropic.com`; codex: `api.openai.com`, `auth.openai.com`, `chatgpt.com` |
+| `host_write_prefixes()` | Path **prefixes** under which the backend writes scratch files with random leaf names | Claude Code on macOS: `/tmp/claude-` |
+
+The default for all three is an empty list. In-process backends (Alan,
+scripted) are not wrapped in a subprocess sandbox, so they declare nothing — the
+hooks exist for symmetry.
+
+<Tip>
+  These hooks are the seam between this page and
+  [/validity/sandbox](/validity/sandbox): the sandbox reads exactly these three
+  lists to compose an OS confinement profile around the agent subprocess.
+</Tip>
+
+### The normalized event union
+
+`send()` yields values from a closed `AgentEvent` union (`agent/events.py`).
+Every adapter translates its backend's native output into these dataclasses; the
+loop consumes **only** these, never a backend's message classes — that is what
+keeps orchestration provider-independent.
+
+| Event | Meaning |
+| --- | --- |
+| `TextDelta` | A chunk of assistant-visible text |
+| `ThinkingDelta` | A chunk of reasoning/thinking text |
+| `ToolCall` | The agent invoked a tool (`id`, `name`, `input`) |
+| `ToolResult` | The result handed back for a tool call (`id`, `output`, `is_error`) |
+| `TurnComplete` | The agent finished one turn (`final_text`, `usage`) |
+| `AgentError` | A backend/LLM error normalized to an `ErrorCategory` |
+| `SystemPrompt` | The system prompt the framework gave the agent (recorded once, for the viewer) |
+| `UserMessage` | A framework message to the agent — first message / keep-alive (for the viewer) |
+
+## Capabilities
+
+`Capabilities` (`agent/capabilities.py`) is a `@dataclass(frozen=True)`. The loop
+and the tool-exposure layer branch on **this data**; degradation is therefore
+data-driven, and a new backend describes its own surface without touching the
+loop.
+
+<ParamField path="system_prompt" type='"replace" | "append"'>
+  How regact's system prompt is applied. `"replace"` — regact owns the whole
+  prompt (Alan's `custom_system_prompt`); `"append"` — regact adds to the
+  backend's base prompt (Claude's `--append-system-prompt`).
+</ParamField>
+
+<ParamField path="control_actions" type='"native_tools" | "client_cli"'>
+  How framework actions (submit / exit) reach the agent. `"native_tools"` —
+  in-process Python `Tool` objects (only an in-process agent, i.e. Alan);
+  `"client_cli"` — the agent calls them via the workdir client CLI over HTTP
+  (any subprocess CLI agent).
+</ParamField>
+
+<ParamField path="permission_hooks" type="bool">
+  The backend supports `PreToolUse`-style hooks (path confinement, etc.).
+</ParamField>
+
+<ParamField path="streams_tool_calls" type="bool">
+  The backend surfaces `ToolCall` events in its stream.
+</ParamField>
+
+<ParamField path="supports_inject" type="bool">
+  The backend accepts mid-turn injected messages (otherwise injection is
+  prepended on the next turn).
+</ParamField>
+
+<ParamField path="writes_native_transcript" type="bool">
+  The backend writes its own session directory (`.alan` / `.claude`).
+</ParamField>
+
+<ParamField path="executes_tools" type="bool" default="False">
+  The agent executes its **own** native tools (Alan, via alancode) — so the loop
+  must **not** also run them (that would double-submit); it only observes.
+  `False` (default): the loop runs the framework tools when it sees the agent's
+  `ToolCall` (the scripted test backend relies on this).
+</ParamField>
+
+<Warning>
+  Tool routing keys on `control_actions` and `executes_tools`, **the data** —
+  never on the adapter class. A backend that misreports these will be driven
+  incorrectly, but the loop stays unchanged. This is the whole point of the
+  Capabilities indirection.
+</Warning>
+
+## The agents that exist
+
+<CardGroup cols={2}>
+  <Card title="claude" icon="terminal">
+    Subprocess CLI (Claude Code), subclasses `_CliAgent` (`agent/cli_agent.py`).
+    `control_actions="client_cli"`, `system_prompt="append"`,
+    `permission_hooks=True`, `supports_inject=False`.
+    Declares `~/.claude*` reads and `api.anthropic.com` egress.
+    `agent/claude_adapter.py`.
+  </Card>
+  <Card title="codex" icon="terminal">
+    Subprocess CLI (Codex), subclasses `_CliAgent`.
+    `control_actions="client_cli"`, `system_prompt="replace"`,
+    `permission_hooks=False`, `supports_inject=False`. Runs against an isolated
+    codex home; egress to `api.openai.com` / `auth.openai.com` / `chatgpt.com`.
+    `agent/codex_adapter.py`.
+  </Card>
+  <Card title="alan" icon="microchip">
+    **In-process** agent driven against an OpenAI-compatible endpoint.
+    `control_actions="native_tools"`, `system_prompt="replace"`,
+    `executes_tools=True` (alancode runs the framework tools; the loop only
+    observes). Declares no host paths — it is not subprocess-sandboxed.
+    `agent/alan_adapter.py`.
+  </Card>
+  <Card title="scripted" icon="flask">
+    Replays canned events; **no LLM**. `control_actions="native_tools"`,
+    `permission_hooks=False`, `writes_native_transcript=False`. The deterministic
+    backend for tests. `agent/scripted_agent.py`.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Alan and scripted are **in-process**: they share the orchestrator's process,
+  filesystem, and network, and are **not** OS-sandboxed. The subprocess CLI
+  agents (claude, codex) are separate processes, so the isolation boundary holds
+  for them. See [/validity/sandbox](/validity/sandbox).
+</Warning>
+
+## How to add an agent
+
+<Steps>
+  <Step title="Add the enum member">
+    Add a value to `AgentName` (a `StrEnum`) in `config/schema.py`, e.g.
+    `MYAGENT = "myagent"`.
+  </Step>
+  <Step title="Wire the registry branch">
+    Add an `if config.name is AgentName.MYAGENT:` branch to `build_agent`
+    (`agent/base.py`) that lazily imports and returns your adapter. The lazy
+    import keeps this module free of backend SDKs.
+  </Step>
+  <Step title="Implement the adapter">
+    Create `agent/myagent_adapter.py` implementing every abstract method of
+    `CodeAgent`. Return an accurate `Capabilities` from `capabilities()`. For a
+    subprocess CLI you can subclass `_CliAgent` (`agent/cli_agent.py`) and
+    provide the command; for an in-process backend, drive it directly.
+  </Step>
+  <Step title="Declare sandbox needs">
+    Override `host_read_paths()`, `host_egress_hosts()`, and
+    `host_write_prefixes()` if the backend is a subprocess that reaches config,
+    auth, or the network. Return plain strings only.
+  </Step>
+  <Step title="Add the Hydra config group file">
+    Create `conf/agent/myagent.yaml` with at least `name: myagent` plus any
+    `model` and `args`. It is then selectable via
+    `python -m regact.run_exp agent=myagent`.
+  </Step>
+</Steps>
+
+<Note>
+  `base_url` and `api_key` are fields on `AgentConfig` (`config/schema.py`), but
+  only backends that need them forward them. Alan uses `base_url` to reach a
+  local OpenAI-compatible server (e.g. SimpleLM / SGLang on HPC) and accepts a
+  dummy `api_key`; the CLI agents default to their own subscription auth and
+  leave `base_url` unset. `api_key` is a secret field and is redacted from the
+  persisted `config.json`.
+</Note>
