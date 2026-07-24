@@ -12,12 +12,11 @@ Scheduler.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 
 from regact.agent.base import CodeAgent, build_agent
-from regact.config.schema import AgentName, Lifecycle, RunConfig
+from regact.config.schema import AgentName, Lifecycle, RunConfig, redacted_config_dict
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
@@ -125,7 +124,7 @@ async def run_task(
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
-        json.dump(dataclasses.asdict(config), handle, indent=2, default=str)
+        json.dump(redacted_config_dict(config), handle, indent=2, default=str)
 
     server = _build_server(config, problem, task_name)
     in_process = config.agent.name is AgentName.SCRIPTED

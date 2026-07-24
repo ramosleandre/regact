@@ -81,6 +81,8 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             deny_egress=bool(sec.get("deny_egress", False)),
             runtime_opts=dict(sec.get("runtime_opts") or {}),
         ),
+        record_video=bool(data.get("record_video", True)),
+        shadow_replay=bool(data.get("shadow_replay", False)),
         experiment_name=data.get("experiment_name"),
         output_root=str(data.get("output_root", "experiments")),
     )

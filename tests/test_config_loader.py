@@ -1,9 +1,10 @@
 """Unit tests: the shared dict -> RunConfig mapper + the Kaggle profile loader."""
 
+import json
 from pathlib import Path
 
 from regact.config.loader import run_config_from_mapping
-from regact.config.schema import AgentName, Execution, InfoMode, Lifecycle
+from regact.config.schema import AgentName, Execution, InfoMode, Lifecycle, redacted_config_dict
 from regact.run_kaggle import build_run_config_from_profile
 
 _PROFILE = (
@@ -46,6 +47,38 @@ def test_mapping_defaults() -> None:
     assert config.features == ["controller"]
     assert config.execution is Execution.SEQUENTIAL
     assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE
+
+
+def test_mapping_preserves_toplevel_run_flags() -> None:
+    """record_video / shadow_replay must survive the mapping (regression: they were dropped,
+    so a `shadow_replay: true` config silently ran with the anti-cheat replay OFF)."""
+    on = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "arc_agi"},
+            "record_video": False,
+            "shadow_replay": True,
+        }
+    )
+    assert on.record_video is False
+    assert on.shadow_replay is True
+    # And the documented defaults when absent.
+    off = run_config_from_mapping({"agent": {"name": "scripted"}, "problem": {"name": "arc_agi"}})
+    assert off.record_video is True
+    assert off.shadow_replay is False
+
+
+def test_redacted_config_dict_masks_api_key() -> None:
+    """config.json must never carry a real api_key (it lands in the experiment dir)."""
+    config = run_config_from_mapping(
+        {"agent": {"name": "claude", "api_key": "sk-secret-123"}, "problem": {"name": "arc_agi"}}
+    )
+    dumped = redacted_config_dict(config)
+    assert dumped["agent"]["api_key"] == "***redacted***"
+    assert "sk-secret-123" not in json.dumps(dumped)
+    # A None key (the common CLI-auth case) stays None, not the mask.
+    plain = run_config_from_mapping({"agent": {"name": "claude"}, "problem": {"name": "arc_agi"}})
+    assert redacted_config_dict(plain)["agent"]["api_key"] is None
 
 
 def test_competition_profile_loads() -> None:
@@ -94,3 +127,21 @@ def test_run_exp_hydra_composes_a_config() -> None:
     assert config.agent.args["permission_mode"] == "bypassPermissions"  # from the claude group
     assert config.agent.args["effort"] == "high"  # CLI override
     assert config.features == ["controller"]
+
+
+def test_experiment_profile_respects_cli_agent_override() -> None:
+    """An experiment profile SELECTS groups (defaults: override /agent), it must not merge
+    a partial agent dict — else `experiment=research agent=codex` yields a claude/codex
+    hybrid and the wrong backend launches (regression guard)."""
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    import regact
+
+    conf_dir = str(Path(regact.__file__).parent / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="config", overrides=["experiment=research", "agent=codex"])
+    config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
+    assert config.agent.name is AgentName.CODEX  # the CLI choice wins, not the profile's
+    assert "reasoning_effort" in config.agent.args  # codex's own args, no claude leftovers
+    assert config.shadow_replay is True  # the profile's experiment field still applies

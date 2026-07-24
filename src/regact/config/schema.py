@@ -7,11 +7,16 @@ closed choice is a ``str``-valued ``Enum``.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from regact.security.runtime import SandboxRuntime
+
+# Config fields whose values are secrets and must never be written to run artifacts.
+_SECRET_FIELDS = frozenset({"api_key"})
+_REDACTED = "***redacted***"
 
 
 class AgentName(StrEnum):
@@ -96,3 +101,23 @@ class RunConfig:
     shadow_replay: bool = False
     experiment_name: str | None = None
     output_root: str = "experiments"
+
+
+def redacted_config_dict(config: RunConfig) -> dict[str, Any]:
+    """Serialize a :class:`RunConfig` with secret fields masked, for run artifacts.
+
+    ``dataclasses.asdict`` would write ``agent.api_key`` verbatim into ``config.json``;
+    a configured key would then sit in the experiment dir in plaintext. This masks any
+    field named in ``_SECRET_FIELDS`` (recursively) while leaving the rest untouched.
+    """
+
+    def _mask(value: Any, key: str | None = None) -> Any:
+        if key in _SECRET_FIELDS and value is not None:
+            return _REDACTED
+        if isinstance(value, dict):
+            return {k: _mask(v, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_mask(v) for v in value]
+        return value
+
+    return {k: _mask(v, k) for k, v in dataclasses.asdict(config).items()}

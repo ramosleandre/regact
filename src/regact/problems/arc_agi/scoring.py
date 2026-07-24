@@ -122,9 +122,13 @@ def _latest_results_json(game_output_dir: str) -> dict[str, object] | None:
     if os.path.isfile(final):
         path = final
     else:
+        numbered = sorted(
+            (d for d in os.listdir(subs) if d.isdigit()),
+            key=int,
+        )
         candidates = [
             os.path.join(subs, d, "results.json")
-            for d in sorted(os.listdir(subs))
+            for d in numbered
             if os.path.isfile(os.path.join(subs, d, "results.json"))
         ]
         if not candidates:

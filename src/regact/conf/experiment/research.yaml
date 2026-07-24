@@ -1,22 +1,19 @@
 # @package _global_
 # Research profile: a real run on offline ARC-AGI-3 with a coding-CLI agent, the
 # anti-cheat defenses on (shadow-replay re-scores on a trusted env), and a video of
-# the final controller. Swap the agent/model on the CLI:
+# the final controller.
 #
 #   python -m regact.run_exp experiment=research
 #   python -m regact.run_exp experiment=research agent=codex 'task_names=[ls20]'
 #   python -m regact.run_exp experiment=research agent=claude agent.model=opus
-agent:
-  name: claude
-  model: opus
-problem:
-  name: arc_agi
-  lifecycle: single_instance
-  kwargs:
-    operation_mode: offline
-    environments_dir: environnement
-features:
-  - controller
+#
+# It SELECTS config groups (never re-writes their values), so a CLI `agent=codex` still
+# overrides the choice below — the group's own args come from conf/agent/codex.yaml.
+defaults:
+  - override /agent: claude       # conf/agent/claude.yaml (model: opus, its args)
+  - override /problem: arc_agi     # conf/problem/arc_agi.yaml (single_instance, offline)
+
+# Experiment-specific fields only (not owned by any group):
 security:
   sandbox: auto           # confine the agent subprocess where a backend exists
   deny_egress: true       # only the agent's declared LLM host is reachable

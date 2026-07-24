@@ -26,6 +26,9 @@ from regact.envclient.client import EnvClient
 # Placeholder baked into a scripted run's workdir; that backend never calls it.
 _IN_PROCESS_URL = "http://127.0.0.1:0"
 
+# How long to wait for the uvicorn thread to bind its port before giving up.
+_STARTUP_TIMEOUT_S = 30.0
+
 
 @dataclass
 class EnvConnection:
@@ -74,7 +77,16 @@ async def _running_uvicorn(server: EnvServer) -> AsyncIterator[str]:
     thread = threading.Thread(target=uv_server.run, daemon=True)
     thread.start()
     try:
+        # Wait for startup, but fail fast if the thread dies (uvicorn swallows a bind
+        # error inside it, so a dead thread that never set `started` is the signal) or
+        # a timeout elapses — otherwise this loop would spin forever.
+        deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT_S
         while not uv_server.started:
+            if not thread.is_alive():
+                raise RuntimeError("env server thread exited before startup (port bind failed?)")
+            if asyncio.get_event_loop().time() > deadline:
+                uv_server.should_exit = True
+                raise TimeoutError(f"env server did not start within {_STARTUP_TIMEOUT_S}s")
             await asyncio.sleep(0.02)
         port = uv_server.servers[0].sockets[0].getsockname()[1]
         yield f"http://127.0.0.1:{port}"
