@@ -73,7 +73,6 @@ class LimitsConfig:
     max_moves: int = 2500  # max env.step per controller rollout (eval)
     n_episodes: int = 1  # eval episodes per submission (MULTI_INSTANCE: more = better stats)
     walltime_s: int | None = None  # wall-clock budget for the whole task (per game)
-    token_budget: int | None = None
     env_step_budget: int | None = None  # hard cap on env steps per env (anti-runaway; None = off)
 
 
@@ -92,7 +91,6 @@ class RunConfig:
     problem: ProblemConfig
     task_names: list[str] = field(default_factory=list)  # empty = all games of the problem
     features: list[str] = field(default_factory=lambda: ["controller"])
-    tools: dict[str, bool] = field(default_factory=dict)  # cross-cutting tool toggles
     execution: Execution = Execution.SEQUENTIAL
     parallel_workers: int = 1
     limits: LimitsConfig = field(default_factory=LimitsConfig)

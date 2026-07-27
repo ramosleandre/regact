@@ -43,7 +43,7 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
     for name in ("keep_alive", "max_moves", "n_episodes"):
         if name in fields and fields[name] is not None:
             fields[name] = int(fields[name])
-    for name in ("walltime_s", "token_budget", "env_step_budget"):
+    for name in ("walltime_s", "env_step_budget"):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
@@ -72,7 +72,6 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         ),
         task_names=list(data.get("task_names") or []),
         features=list(data.get("features") or ["controller"]),
-        tools=dict(data.get("tools") or {}),
         execution=Execution(data.get("execution", Execution.SEQUENTIAL)),
         parallel_workers=int(data.get("parallel_workers", 1)),
         limits=_limits_from(data.get("limits") or {}),

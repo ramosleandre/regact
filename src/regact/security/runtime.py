@@ -24,12 +24,15 @@ macOS.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
+
+logger = logging.getLogger(__name__)
 
 Argv = list[str]
 Wrapper = Callable[[Argv], Argv]
@@ -74,6 +77,21 @@ def resolve(runtime: SandboxRuntime) -> SandboxRuntime:
     return detect() if runtime is SandboxRuntime.AUTO else runtime
 
 
+def _log_resolved(requested: SandboxRuntime, resolved: SandboxRuntime) -> None:
+    """Record which backend a run actually got — the run is unconfined on ``none``.
+
+    ``auto`` silently degrades to ``none`` on a host with no backend, so a run can be
+    unsandboxed without asking for it. Log it (WARNING when unconfined, INFO otherwise)
+    so the choice is visible in the run's log rather than assumed from the config.
+    """
+    if resolved is SandboxRuntime.NONE:
+        auto = requested is SandboxRuntime.AUTO
+        reason = "no backend detected on this host" if auto else "configured"
+        logger.warning("sandbox: NOT confined (requested=%s, %s)", requested.value, reason)
+    else:
+        logger.info("sandbox: %s (requested=%s)", resolved.value, requested.value)
+
+
 def make_wrapper(
     runtime: SandboxRuntime,
     *,
@@ -93,6 +111,7 @@ def make_wrapper(
     subtrees (the game engine/data packages) back out of the allowed interpreter prefix.
     """
     resolved = resolve(runtime)
+    _log_resolved(runtime, resolved)
 
     def wrap(argv: Argv) -> Argv:
         return wrap_argv(
