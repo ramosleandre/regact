@@ -31,9 +31,7 @@ def resolve_run_dir(config: RunConfig, *, output_root: str | None = None) -> str
     if output_root is not None:
         return os.path.abspath(output_root)
     stamp = datetime.now().strftime(_STAMP_FORMAT)
-    return os.path.abspath(
-        os.path.join(config.output_root, config.experiment_name or "run", stamp)
-    )
+    return os.path.abspath(os.path.join(config.output_root, config.experiment_name or "run", stamp))
 
 
 def _link_latest(run_dir: str) -> None:
