@@ -24,7 +24,7 @@ def game_metrics(game: GameView) -> dict[str, Any]:
     tokens = _token_totals(game)
     tools = _tool_histogram(game)
     submissions = _submission_trajectory(game)
-    cheats = _cheat_calls(game)  # re-derived from the transcript with the CURRENT policy
+    flagged = _flagged_calls(game)  # re-derived from the transcript with the CURRENT policy
     return {
         "n_turns": len(game.turns),
         "n_tool_calls": sum(tools.values()),
@@ -42,14 +42,15 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         "exit_reason": game.state.get("exit_reason"),  # None while running
         "exit_requested": game.state.get("exit_requested"),
         # Re-derived count (current policy), so the KPI matches the conversation/panel — not the
-        # live state count, which may be stale (an older, noisier policy version).
-        "cheat_attempts": len(cheats),
-        "cheats": cheats,
+        # live state count, which may be stale (an older, noisier policy version). A keyword
+        # match is a lower bound on attempts, never a cheat rate.
+        "flagged_tool_calls": len(flagged),
+        "flagged_calls": flagged,
     }
 
 
-def _cheat_calls(game: GameView) -> list[dict[str, Any]]:
-    """Each cheat-flagged tool call: the tool, a short arg preview, and why it was flagged."""
+def _flagged_calls(game: GameView) -> list[dict[str, Any]]:
+    """Each flagged tool call: the tool, a short arg preview, and why it matched."""
     out: list[dict[str, Any]] = []
     for i, turn in enumerate(game.turns):
         for call in turn.tools:

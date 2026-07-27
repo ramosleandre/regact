@@ -16,7 +16,7 @@ from omegaconf import OmegaConf
 
 from regact.config.loader import run_config_from_mapping
 from regact.config.schema import AgentName, Execution, RunConfig
-from regact.orchestration.experiment import run_experiment
+from regact.orchestration.experiment import resolve_run_dir, run_experiment
 
 _DEFAULT_PROFILE = Path(__file__).parent / "conf" / "experiment" / "competition.yaml"
 
@@ -63,15 +63,16 @@ def run_kaggle(argv: list[str] | None = None) -> int:
     if args.agent is not None:
         config.agent.name = AgentName(args.agent)
 
-    reasons = asyncio.run(run_experiment(config))
+    run_dir = resolve_run_dir(config)
+    reasons = asyncio.run(run_experiment(config, output_root=run_dir))
     for task, reason in reasons.items():
         print(f"{task}: {reason}")
 
-    _print_arc_summary(config, list(reasons))
+    _print_arc_summary(config, list(reasons), run_dir)
     return 0
 
 
-def _print_arc_summary(config: RunConfig, tasks: list[str]) -> None:
+def _print_arc_summary(config: RunConfig, tasks: list[str], run_dir: str) -> None:
     """Print the ARC-AGI-3 RHAE recap when the problem is arc_agi (no-op otherwise).
 
     Kept behind the problem-name check so this generic entrypoint never imports an
@@ -85,8 +86,7 @@ def _print_arc_summary(config: RunConfig, tasks: list[str]) -> None:
     env_dir = str(config.problem.kwargs.get("environments_dir") or "environnement")
     catalog = discover_tasks(env_dir)  # offline metadata carries the human baselines
     baselines = {t: (catalog[t].baseline_actions if t in catalog else None) for t in tasks}
-    exp_name = config.experiment_name or "experiment"
-    print("\n" + summarize_run(config.output_root, exp_name, tasks, baselines))
+    print("\n" + summarize_run(run_dir, tasks, baselines))
 
 
 if __name__ == "__main__":

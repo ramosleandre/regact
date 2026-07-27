@@ -199,17 +199,18 @@ def _game_status(game_dir: str, results: dict[str, object] | None) -> str:
 
 
 def summarize_run(
-    output_root: str,
-    experiment_name: str,
+    run_dir: str,
     tasks: Sequence[str],
     baselines: Mapping[str, Sequence[int] | None],
 ) -> str:
     """A human-readable RHAE recap of an offline run: one line per game + an aggregate.
 
-    ``baselines`` maps game key -> per-level human baseline (from the task catalog). A game
-    that did not score shows a STATUS (no-run / no-submit / 0-levels / no-baseline) instead
-    of a bare dash, so the recap explains where the pipeline stopped. Returns the formatted
-    block (the caller prints it) so this stays testable.
+    ``run_dir`` is the directory that run owns (each run is timestamped, so the path
+    cannot be rebuilt from the config alone). ``baselines`` maps game key -> per-level
+    human baseline (from the task catalog). A game that did not score shows a STATUS
+    (no-run / no-submit / 0-levels / no-baseline) instead of a bare dash, so the recap
+    explains where the pipeline stopped. Returns the formatted block (the caller prints
+    it) so this stays testable.
     """
     lines = [
         f"=== ARC-AGI-3 run summary ({len(tasks)} games) — RHAE proxy (offline) ===",
@@ -219,7 +220,7 @@ def summarize_run(
     wins = 0
     status_counts: dict[str, int] = {}
     for task in tasks:
-        game_dir = os.path.join(output_root, experiment_name, task)
+        game_dir = os.path.join(run_dir, task)
         results = _latest_results_json(game_dir)
         status = _game_status(game_dir, results)
         rhae = rhae_from_results(results, baseline_actions=baselines.get(task)) if results else None

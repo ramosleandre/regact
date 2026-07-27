@@ -61,3 +61,22 @@ async def test_run_experiment_runs_all_tasks(tmp_path: Path) -> None:
     # Per-task output dirs were created.
     assert (tmp_path / "g1" / "logs" / "experiment_state.json").exists()
     assert (tmp_path / "g2" / "logs" / "experiment_state.json").exists()
+
+
+def test_each_run_gets_its_own_timestamped_dir(tmp_path: Path) -> None:
+    """Two runs of the same experiment name must not share a directory, or the second
+    would overwrite the first's logs/scaffold and interleave its submissions."""
+    from regact.orchestration.experiment import resolve_run_dir
+
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED),
+        problem=ProblemConfig(name="fake_exp"),
+        experiment_name="same_name",
+        output_root=str(tmp_path),
+    )
+    first = resolve_run_dir(config)
+    assert Path(first).parent == tmp_path / "same_name"  # runs group under the name
+    assert Path(first).name != "same_name"  # ...in a timestamped subdir
+
+    # An explicit output_root still wins verbatim (tests and run_kaggle rely on it).
+    assert resolve_run_dir(config, output_root=str(tmp_path / "fixed")) == str(tmp_path / "fixed")

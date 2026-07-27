@@ -101,7 +101,7 @@ def test_summarize_run_reads_disk(tmp_path: Path) -> None:
         )
     )
     out = summarize_run(
-        str(tmp_path), "smoke", ["ls20", "vc33"], {"ls20": [19, 16, 34], "vc33": None}
+        str(tmp_path / "smoke"), ["ls20", "vc33"], {"ls20": [19, 16, 34], "vc33": None}
     )
     assert "ls20" in out and "RHAE proxy" in out
     assert "1 games scored" in out  # ls20 scored, vc33 has no results
@@ -109,5 +109,5 @@ def test_summarize_run_reads_disk(tmp_path: Path) -> None:
 
 def test_summarize_run_handles_missing_results(tmp_path: Path) -> None:
     # No results on disk at all -> every game shows a dash, no crash.
-    out = summarize_run(str(tmp_path), "nope", ["ls20"], {"ls20": [19, 16]})
+    out = summarize_run(str(tmp_path / "nope"), ["ls20"], {"ls20": [19, 16]})
     assert "0 games scored" in out

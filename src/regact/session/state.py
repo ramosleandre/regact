@@ -30,8 +30,7 @@ class ExperimentState:
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
     exit_reason: str | None = None  # set at teardown; None while the run is still going
-    # cheat attempts: forbidden-arg keyword hits (unsandboxed) or OS-denied results (sandboxed).
-    cheat_attempts: int = 0
+    flagged_tool_calls: int = 0
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
     schema_version: int = 1

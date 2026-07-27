@@ -279,11 +279,11 @@ def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
     flags = flag_tool_call(call.name, call.input, ctx.policy)
     if not flags:
         return
-    ctx.experiment.cheat_attempts += len(flags)
+    ctx.experiment.flagged_tool_calls += len(flags)
     ctx.logger.log(
         LogComponent.AGENT,
         "WARNING",
-        "cheat_attempt",
+        "flagged_tool_call",
         tool=call.name,
         flags=flags,
     )
@@ -298,8 +298,8 @@ def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
     """
     if not result.is_error or not flag_os_denial(result.output):
         return
-    ctx.experiment.cheat_attempts += 1
-    ctx.logger.log(LogComponent.AGENT, "WARNING", "cheat_attempt", reason="egress_denied")
+    ctx.experiment.flagged_tool_calls += 1
+    ctx.logger.log(LogComponent.AGENT, "WARNING", "flagged_tool_call", reason="egress_denied")
 
 
 async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:

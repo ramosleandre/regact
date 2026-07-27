@@ -234,16 +234,15 @@ async def run_task(
                 TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
                 RunLogger(logs_dir, task=task_name) as logger,
             ):
-                single_controller = (
-                    config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE
-                    and "controller" in config.features
-                )
-                if single_controller:
+                if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
                     logger.log(
                         LogComponent.ORCHESTRATOR,
                         "WARNING",
-                        "single_life_controller",
-                        message="single-instance + controller: eval reuses the shared env",
+                        "single_instance_shared_env",
+                        message=(
+                            "single-instance: exploration and evaluation share the same env; "
+                            "scores reflect the session, not an isolated policy"
+                        ),
                     )
                 reason = await run_session(
                     agent,

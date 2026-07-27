@@ -99,10 +99,10 @@ async function renderOverview(name) {
     kpi("Time", dur(m.duration_s)),
     kpi("Success", pct(m.success_rate)),
     kpi("Thinking", fmt(m.thinking_chars) + " ch"),
-    kpi("Cheat attempts", m.cheat_attempts ?? 0));
+    kpi("Flagged calls", m.flagged_tool_calls ?? 0));
   wrap.append(kpis, configBlock(d.config), barChart("Tool calls", m.tool_histogram));
   if (m.submission_trajectory.length) wrap.append(trajectory(m.submission_trajectory));
-  if (m.cheats && m.cheats.length) wrap.append(cheatsPanel(m.cheats));
+  if (m.flagged_calls && m.flagged_calls.length) wrap.append(flaggedPanel(m.flagged_calls));
   shell(name, "", wrap);
 }
 
@@ -153,12 +153,12 @@ function trajectory(traj) {
     t.append(rowEl("td", [s.submission, ...keys.map((k) => fmtMetric(s.metrics?.[k])), s.error || ""]));
   wrap.append(t); return wrap;
 }
-function cheatsPanel(cheats) {
+function flaggedPanel(flagged) {
   const wrap = h("div");
-  wrap.append(h("h2", null, `Cheat attempts (${cheats.length})`));
+  wrap.append(h("h2", null, `Flagged tool calls (${flagged.length})`));
   const t = h("table");
   t.append(rowEl("th", ["turn", "tool", "command / args", "why flagged"]));
-  for (const c of cheats)
+  for (const c of flagged)
     t.append(rowEl("td", [c.turn, c.tool, c.args, (c.flags || []).join("; ")]));
   wrap.append(t);
   return wrap;
@@ -168,7 +168,7 @@ function rowEl(cell, vals) {
 }
 
 // ---------------------------------------------------------------- conversation tab
-const _TAG_LABEL = { submit: "submit", submit_win: "submit ✓ level", cheat: "cheat" };
+const _TAG_LABEL = { submit: "submit", submit_win: "submit ✓ level", cheat: "flagged" };
 
 async function renderConversation(name) {
   const d = await gameDetail(name);
@@ -204,7 +204,7 @@ async function renderConversation(name) {
           nSubmit++;
         } else if (tag === "cheat") {
           block.id = "nav-cheat-" + nCheat;
-          navItems.push({ id: block.id, tag, label: `cheat ${nCheat + 1}` });
+          navItems.push({ id: block.id, tag, label: `flagged ${nCheat + 1}` });
           nCheat++;
         }
         body.append(block);

@@ -61,7 +61,7 @@ run-kaggle:  ## run ── Competition run (flags via ARGS=..., e.g. ARGS="--gam
 	$(RUN) -m $(PKG).run_kaggle $(ARGS)
 
 .PHONY: viz
-viz:  ## run ── Launch the experiment visualizer: make viz EXP=experiments/<run> [PORT=8030]
+viz:  ## run ── Launch the visualizer: make viz EXP=experiments/<name>/latest [PORT=8030]
 	$(RUN) -m $(PKG).viz.app --experiment $(EXP) --port $(or $(PORT),8030)
 
 .PHONY: probe

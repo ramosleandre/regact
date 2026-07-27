@@ -50,11 +50,13 @@ make run ARGS="agent=claude problem=minigrid"
 Then open the visualizer on the run (conversation, metrics, submissions, videos):
 
 ```bash
-make viz EXP=experiments/<run>
+make viz EXP=experiments/<name>/latest
 ```
 
-Outputs land under `experiments/<name>/<game>/`: `logs/transcript.jsonl`,
-`logs/experiment_state.json`, and `workdir/submissions/<n|final>/results.json` (+ a video).
+Each run gets its own timestamped directory, so re-running a name never overwrites the
+previous run: `experiments/<name>/<timestamp>/<game>/` holds `logs/transcript.jsonl`,
+`logs/experiment_state.json`, and `workdir/submissions/<n|final>/results.json` (+ a
+video). `experiments/<name>/latest` always points at the most recent run.
 
 ## Configure (Hydra)
 
