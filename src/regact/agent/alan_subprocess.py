@@ -143,6 +143,14 @@ class AlanSubprocessAgent(CodeAgent):
             executes_tools=False,  # framework tools run behind the control channel
         )
 
+    def launch_probe_argv(self) -> list[str]:
+        """The child's real prerequisite: importing ``alancode`` inside the sandbox.
+
+        There is no CLI binary here — the runner is this interpreter — so what must be
+        verified is that the backend library is reachable from the confined child.
+        """
+        return [sys.executable, "-c", "import alancode"]
+
     def host_read_paths(self) -> list[str]:
         # alancode is imported from the interpreter prefix (already allowed) and keeps its
         # session under <workdir>/.alan, so no extra host dir is needed.

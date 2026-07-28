@@ -20,6 +20,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 
 from regact.security.contract import Invariant
@@ -85,12 +86,30 @@ def _check(inv: Invariant, name: str, intent: str, attacked: bool, detail: str) 
     return CheckResult(str(inv), name, intent, defended, detail)
 
 
+@contextlib.contextmanager
+def loopback_listener() -> Iterator[int]:
+    """Hold a listening socket on an ephemeral localhost port; yield the port.
+
+    Stands in for the two localhost services a real run needs to reach — the env
+    server and a local model endpoint — so R4 can be checked without either being up.
+    A pending connection completes from the kernel backlog, so nothing has to accept.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        yield int(sock.getsockname()[1])
+    finally:
+        sock.close()
+
+
 def run_probe(
     *,
     workdir: str,
     secret_path: str,
     external: tuple[str, int] = ("example.com", 443),
     check_egress: bool = True,
+    loopback_port: int | None = None,
 ) -> list[CheckResult]:
     """Attempt the catalog from THIS process; return one result per check."""
     own = os.path.join(workdir, "solution.py")
@@ -114,6 +133,17 @@ def run_probe(
     # R3 (deny): writing outside the workdir (here, into the game dir) must fail.
     wrote = _can_write(os.path.join(game_dir, ".probe_write"))
     add(Invariant.R3_WRITE, "R3 write outside the workdir", "deny", wrote)
+    # R4 (allow): localhost must stay reachable — the agent talks to the env server and
+    # (on HPC) a local model over loopback. This is the invariant that a net-namespace
+    # sandbox silently breaks while every deny check still passes, so a run fails later
+    # with a bare ConnectError instead of a verdict here.
+    if loopback_port is not None:
+        add(
+            Invariant.R4_LOOPBACK,
+            "L1 reach a localhost service",
+            "allow",
+            _can_connect("127.0.0.1", loopback_port),
+        )
     # R5 (deny): external egress must fail (scored runs).
     if check_egress:
         add(Invariant.R5_EGRESS, "E1 external internet egress", "deny", _can_connect(*external))
@@ -147,6 +177,12 @@ def _main(argv: list[str] | None = None) -> int:
         "--sandbox", action="store_true", help="re-run this probe inside the detected OS sandbox"
     )
     parser.add_argument("--image", default=None, help="apptainer/singularity .sif image (HPC)")
+    parser.add_argument(
+        "--loopback-port",
+        type=int,
+        default=None,
+        help="check R4 by connecting to this localhost port (set by --sandbox)",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -164,7 +200,12 @@ def _main(argv: list[str] | None = None) -> int:
             workdir, secret, no_egress=args.no_egress, as_json=args.json, image=args.image
         )
 
-    results = run_probe(workdir=workdir, secret_path=secret, check_egress=not args.no_egress)
+    results = run_probe(
+        workdir=workdir,
+        secret_path=secret,
+        check_egress=not args.no_egress,
+        loopback_port=args.loopback_port,
+    )
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2))
     else:
@@ -198,10 +239,21 @@ def _rerun_sandboxed(
     if as_json:
         child.append("--json")
     # deny-default: the secret's dir is simply not in allow_read, so it is absent/denied.
-    argv = wrap_argv(backend, child, workdir=workdir, allow_read=[src], image=image)
-    # TMPDIR inside the (allowed) workdir, so the child has scratch without exposing /tmp.
-    env = {**os.environ, "PYTHONPATH": src, "TMPDIR": workdir}
-    return subprocess.run(argv, env=env, check=False).returncode
+    # deny_egress must track the R5 check: probing "egress is blocked" while building an
+    # unrestricted sandbox would report a breach the configuration never asked for.
+    with loopback_listener() as port:  # stands in for the env server / a local model
+        child += ["--loopback-port", str(port)]
+        argv = wrap_argv(
+            backend,
+            child,
+            workdir=workdir,
+            allow_read=[src],
+            deny_egress=not no_egress,
+            image=image,
+        )
+        # TMPDIR inside the (allowed) workdir: scratch for the child without exposing /tmp.
+        env = {**os.environ, "PYTHONPATH": src, "TMPDIR": workdir}
+        return subprocess.run(argv, env=env, check=False).returncode
 
 
 if __name__ == "__main__":

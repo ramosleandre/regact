@@ -86,6 +86,17 @@ class CodeAgent(ABC):
         """
         return []
 
+    def launch_probe_argv(self) -> list[str]:
+        """A cheap argv proving THIS backend can actually start (e.g. ``<cli> --version``).
+
+        Declarative like :meth:`host_read_paths`: the diagnostic wraps this argv in the
+        run's sandbox and reports whether it executes, which catches a backend whose
+        executable is absent from the allowlist — a failure the conformance probe cannot
+        see, since it only ever wraps the interpreter (always allowed). Empty for an
+        in-process backend, which launches nothing.
+        """
+        return []
+
     def host_write_prefixes(self) -> list[str]:
         """Path PREFIXES under which the backend creates scratch files with RANDOM leaf
         names (so a fixed subpath rule cannot name them; the sandbox allows read+write on

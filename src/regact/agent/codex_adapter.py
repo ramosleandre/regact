@@ -50,6 +50,10 @@ class CodexAgent(_CliAgent):
             writes_native_transcript=True,  # session store in the isolated home
         )
 
+    def launch_probe_argv(self) -> list[str]:
+        """Cheap liveness check: the codex CLI must be executable inside the sandbox."""
+        return ["codex", "--version"]
+
     def host_read_paths(self) -> list[str]:
         # The isolated home holds codex's config, auth, and session store (read-write).
         return [self._codex_home]

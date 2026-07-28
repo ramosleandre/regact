@@ -66,6 +66,10 @@ class ClaudeAgent(_CliAgent):
             writes_native_transcript=True,  # .claude session dir
         )
 
+    def launch_probe_argv(self) -> list[str]:
+        """Cheap liveness check: the Claude CLI must be executable inside the sandbox."""
+        return ["claude", "--version"]
+
     def host_read_paths(self) -> list[str]:
         home = os.path.expanduser("~")
         paths = [

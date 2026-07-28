@@ -41,11 +41,11 @@ typecheck:  ## gate ── mypy
 	$(PYTHON) -m mypy src
 
 .PHONY: test
-test:  ## gate ── Unit tests (no LLM, no game)
-	$(PYTHON) -m pytest -m "not integration and not slow" -q
+test:  ## gate ── Tests needing no real LLM or game (the exact selector CI runs)
+	$(PYTHON) -m pytest -m "not live and not slow" -q
 
 .PHONY: test-all
-test-all:  ## gate ── All tests (incl. integration + slow)
+test-all:  ## gate ── Every test, including the live ones (needs alancode / a game)
 	$(PYTHON) -m pytest -q
 
 .PHONY: check
@@ -64,9 +64,19 @@ run-kaggle:  ## run ── Competition run (flags via ARGS=..., e.g. ARGS="--gam
 viz:  ## run ── Launch the visualizer: make viz EXP=experiments/<name>/latest [PORT=8030]
 	$(RUN) -m $(PKG).viz.app --experiment $(EXP) --port $(or $(PORT),8030)
 
+# ── diagnostics (every one also runs as `python -m regact.<name>`, since an HPC
+#    job has no make; add --json to capture a verdict in the job log) ───────────
 .PHONY: probe
-probe:  ## run ── Verify the OS sandbox on this host (the conformance probe)
+probe:  ## diagnose ── Does the sandbox honor the R1-R6 contract here?
 	$(RUN) -m $(PKG).security.probe --sandbox
+
+.PHONY: agentcheck
+agentcheck:  ## diagnose ── Do the agent backends actually launch here? (ARGS="--verbose")
+	$(RUN) -m $(PKG).agentcheck --all $(ARGS)
+
+.PHONY: prompt
+prompt:  ## diagnose ── Print the prompt a run would send (ARGS="--problem minigrid")
+	$(RUN) -m $(PKG).prompt_preview $(ARGS)
 
 # ── housekeeping ──────────────────────────────────────────────────────────────
 .PHONY: clean
