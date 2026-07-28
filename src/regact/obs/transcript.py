@@ -10,9 +10,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from typing import IO
+from typing import IO, Any
 
-from regact.agent.events import AgentError, AgentEvent
+from regact.agent.events import (
+    AgentError,
+    AgentEvent,
+    SystemPrompt,
+    TextDelta,
+    ThinkingDelta,
+    ToolCall,
+    ToolResult,
+    TurnComplete,
+    UserMessage,
+)
+from regact.obs.errors import ErrorCategory
 
 
 class TranscriptWriter:
@@ -42,3 +53,39 @@ def event_to_json(event: AgentEvent) -> dict[str, object]:
     if isinstance(event, AgentError):
         payload["category"] = event.category.value
     return {"type": type(event).__name__, **payload}
+
+
+_EVENT_TYPES: dict[str, type] = {
+    cls.__name__: cls
+    for cls in (
+        TextDelta,
+        ThinkingDelta,
+        ToolCall,
+        ToolResult,
+        TurnComplete,
+        AgentError,
+        SystemPrompt,
+        UserMessage,
+    )
+}
+
+
+def event_from_json(obj: dict[str, Any]) -> AgentEvent | None:
+    """Rebuild an event from :func:`event_to_json` output; ``None`` if it is not one.
+
+    Unknown tags and malformed payloads return ``None`` rather than raising, so a reader
+    consuming a foreign or newer stream skips what it does not understand.
+    """
+    cls = _EVENT_TYPES.get(str(obj.get("type", "")))
+    if cls is None:
+        return None
+    fields = {k: v for k, v in obj.items() if k != "type"}
+    if cls is AgentError and "category" in fields:
+        try:
+            fields["category"] = ErrorCategory(fields["category"])
+        except ValueError:
+            return None
+    try:
+        return cls(**fields)  # type: ignore[no-any-return]
+    except TypeError:  # missing/extra keys for this event type
+        return None

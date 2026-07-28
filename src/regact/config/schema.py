@@ -21,6 +21,7 @@ _REDACTED = "***redacted***"
 
 class AgentName(StrEnum):
     ALAN = "alan"
+    ALAN_SUBPROCESS = "alan_subprocess"
     CLAUDE = "claude"
     CODEX = "codex"
     SCRIPTED = "scripted"  # deterministic backend for tests

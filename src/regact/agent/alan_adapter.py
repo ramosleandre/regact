@@ -63,6 +63,43 @@ def _to_alan_tools(tools: list[Tool]) -> list[Any]:
     return [_Wrapped(t) for t in tools]
 
 
+def build_alan_agent(
+    *,
+    cwd: str,
+    model: str | None,
+    base_url: str | None,
+    api_key: str | None,
+    system_prompt: str | None,
+    extra_tools: list[Any],
+    args: dict[str, Any],
+) -> Any:
+    """Construct an ``alancode.AlanCodeAgent`` from regact's parameters.
+
+    Shared by the in-process adapter and the subprocess runner so the backend is
+    configured identically either way. Deferred import: alancode is optional.
+    """
+    from alancode import AlanCodeAgent
+
+    extra: dict[str, Any] = {}
+    if args.get("context_window") is not None:
+        extra["context_window"] = int(args["context_window"])  # env interp can yield a str
+    return AlanCodeAgent(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        cwd=cwd,
+        programmatic=True,
+        custom_system_prompt=system_prompt,
+        extra_tools=extra_tools,
+        permission_mode=args.get("permission_mode"),
+        max_iterations_per_turn=args.get("max_iterations_per_turn"),
+        max_output_tokens=args.get("max_output_tokens"),
+        memory=args.get("memory"),
+        tool_call_format=args.get("tool_call_format"),
+        **extra,
+    )
+
+
 class AlanAgent(CodeAgent):
     """``CodeAgent`` backed by an in-process ``AlanCodeAgent``."""
 
@@ -83,26 +120,15 @@ class AlanAgent(CodeAgent):
         env: dict[str, str] | None = None,
         runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
-        from alancode import AlanCodeAgent
-
         self._tools = list(tools) if tools is not None else []
-        extra: dict[str, Any] = {}
-        if self._args.get("context_window") is not None:
-            extra["context_window"] = int(self._args["context_window"])  # env interp can be str
-        self._agent = AlanCodeAgent(
+        self._agent = build_alan_agent(
+            cwd=cwd,
             model=model,
             base_url=base_url,
             api_key=api_key,
-            cwd=cwd,
-            programmatic=True,
-            custom_system_prompt=system_prompt,
-            extra_tools=_to_alan_tools(self._tools),
-            permission_mode=self._args.get("permission_mode"),
-            max_iterations_per_turn=self._args.get("max_iterations_per_turn"),
-            max_output_tokens=self._args.get("max_output_tokens"),
-            memory=self._args.get("memory"),
-            tool_call_format=self._args.get("tool_call_format"),
-            **extra,
+            system_prompt=system_prompt,
+            extra_tools=_to_alan_tools(self._tools),  # in-process: alancode runs them itself
+            args=self._args,
         )
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
@@ -224,3 +250,13 @@ class AlanAgent(CodeAgent):
                 message=str(getattr(native, "message", native)),
             )
         return None
+
+
+def map_alan_events(native: Any) -> list[AgentEvent]:
+    """Translate one ``alancode`` stream item into zero or more normalized events.
+
+    The public entry point for that mapping: the in-process adapter uses it through
+    :meth:`AlanAgent._map_all`, and the subprocess runner (which owns its own alancode
+    instance) calls it directly, so both produce the identical event stream.
+    """
+    return AlanAgent._map_all(native)

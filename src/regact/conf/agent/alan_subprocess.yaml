@@ -1,0 +1,19 @@
+# Alan Code driven in a CHILD process, so the OS sandbox actually applies to it.
+#
+# Same backend and same knobs as `agent=alan`; the difference is where it runs. The
+# in-process backend shares the orchestrator's authority (the sandbox is an argv wrap,
+# and there is no argv to wrap), so prefer this one whenever isolation is part of the
+# claim — local or HPC runs where the game data sits on the same machine. Framework
+# tools reach it over the workdir control CLI, not as native Python objects.
+#
+#   agent=alan_subprocess agent.model=openai/<MODEL_NAME> agent.base_url=http://127.0.0.1:9876/v1
+name: alan_subprocess
+model: null            # openai/<MODEL_NAME> (the served model); null = none
+base_url: null         # http://127.0.0.1:9876/v1 (the SimpleLM/SGLang endpoint)
+api_key: null          # any dummy for a local server (litellm requires one); null = use $OPENAI_API_KEY
+args:
+  permission_mode: yolo        # headless: no permission prompts
+  max_output_tokens: 4096      # cap per completion — keeps small-context models (~32k) from overflowing
+  memory: "off"                # no cross-run memory store
+  context_window: null         # tell Alan its window (int); null = infer. Set for a local
+                               # server (litellm can't fetch it offline; keep < max-model-len).
