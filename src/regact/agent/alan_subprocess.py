@@ -152,9 +152,25 @@ class AlanSubprocessAgent(CodeAgent):
         return [sys.executable, "-c", "import alancode"]
 
     def host_read_paths(self) -> list[str]:
-        # alancode is imported from the interpreter prefix (already allowed) and keeps its
-        # session under <workdir>/.alan, so no extra host dir is needed.
-        return []
+        """Where ``alancode`` actually lives, so the confined child can import it.
+
+        An editable install (``pip install -e ../alancode``) leaves the package OUTSIDE
+        the interpreter prefix — the venv holds only a link — so binding the venv is not
+        enough and the child dies with ``ModuleNotFoundError``. Resolved with
+        ``find_spec`` (no import), and empty when alancode is absent.
+        """
+        import importlib.util
+
+        try:
+            spec = importlib.util.find_spec("alancode")
+        except (ImportError, ValueError):
+            return []
+        if spec is None:
+            return []
+        if spec.submodule_search_locations:
+            # The package dir's parent, so `import alancode` resolves on sys.path.
+            return [os.path.realpath(os.path.dirname(p)) for p in spec.submodule_search_locations]
+        return [os.path.realpath(os.path.dirname(spec.origin))] if spec.origin else []
 
     def host_egress_hosts(self) -> list[str]:
         # The model is reached via the configured base_url (typically a local server),

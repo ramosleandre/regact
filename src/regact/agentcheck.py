@@ -69,10 +69,14 @@ def _resolve(argv: list[str]) -> tuple[str | None, str]:
     return os.path.realpath(found), os.path.realpath(found)
 
 
-def _run(argv: list[str], *, cwd: str, installed: bool) -> tuple[str, str, str]:
-    """Run argv; return (status, short detail, stderr tail)."""
-    if not installed:
-        return MISSING, f"{argv[0]!r} is not installed here", ""
+def _run(argv: list[str], *, cwd: str, missing: str | None) -> tuple[str, str, str]:
+    """Run argv; return (status, short detail, stderr tail).
+
+    ``missing`` names the backend's own executable when it is absent — reporting
+    ``argv[0]`` here would name the sandbox launcher instead of what is really missing.
+    """
+    if missing is not None:
+        return MISSING, f"{missing!r} is not installed here", ""
     try:
         proc = subprocess.run(
             argv, cwd=cwd, capture_output=True, text=True, timeout=_LAUNCH_TIMEOUT_S, check=False
@@ -100,7 +104,9 @@ def check_agent(
     if not argv:
         return []
 
-    installed = shutil.which(argv[0]) is not None or os.path.isabs(argv[0])
+    # Resolved once from the UNWRAPPED argv: the backend's own executable, not the
+    # sandbox launcher that will front it.
+    missing = None if (shutil.which(argv[0]) or os.path.isabs(argv[0])) else argv[0]
     results: list[LaunchResult] = []
     for label, sandboxed, deny_egress in _MODES:
         if modes is not None and label not in modes:
@@ -115,7 +121,7 @@ def check_agent(
                 deny_egress=deny_egress,
                 allow_write_prefixes=agent.host_write_prefixes(),
             )
-        status, detail, stderr = _run(launched, cwd=workdir, installed=installed)
+        status, detail, stderr = _run(launched, cwd=workdir, missing=missing)
         results.append(LaunchResult(str(name.value), label, status, detail, list(launched), stderr))
     return results
 
