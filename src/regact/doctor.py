@@ -91,13 +91,25 @@ def _sandbox_rows() -> list[Row]:
         rows.append(
             Row("sandbox", "no backend", WARN, "runs unconfined (security.sandbox=none only)")
         )
-    else:  # say which one `auto` would actually pick
-        try:
-            from regact.security.runtime import detect
+    try:
+        from regact.security.runtime import SandboxRuntime, detect, userns_ok
+    except ImportError:
+        return rows
 
-            rows.append(Row("sandbox", "auto resolves to", OK, detect().value))
-        except ImportError:
-            pass
+    chosen = detect()
+    if chosen is not SandboxRuntime.NONE:
+        rows.append(Row("sandbox", "auto resolves to", OK, chosen.value))
+        return rows
+
+    # An installed-but-unused backend is the confusing case: say why, or the report reads
+    # "bwrap ok" next to "sandbox none" with no explanation and runs go unconfined.
+    reason = "no usable backend on this host"
+    if shutil.which("bwrap") and not userns_ok():
+        reason = (
+            "bwrap is installed but unprivileged user namespaces are blocked "
+            "(Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)"
+        )
+    rows.append(Row("sandbox", "auto resolves to", WARN, f"none — {reason}"))
     return rows
 
 

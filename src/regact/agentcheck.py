@@ -39,13 +39,21 @@ _MODES: tuple[tuple[str, bool, bool], ...] = (
 )
 
 
+OK, FAIL, MISSING = "ok", "fail", "missing"
+
+
 @dataclass(frozen=True)
 class LaunchResult:
-    """One (agent, mode) attempt."""
+    """One (agent, mode) attempt.
+
+    ``MISSING`` is deliberately not ``FAIL``: a backend that is simply not installed on
+    this host says nothing about the sandbox, and must not turn the diagnostic red on a
+    machine that only runs the other agents.
+    """
 
     agent: str
     mode: str
-    ok: bool
+    status: str
     detail: str
     argv: list[str]
     stderr: str = ""
@@ -61,22 +69,26 @@ def _resolve(argv: list[str]) -> tuple[str | None, str]:
     return os.path.realpath(found), os.path.realpath(found)
 
 
-def _run(argv: list[str], *, cwd: str) -> tuple[bool, str, str]:
-    """Run argv; return (succeeded, short detail, stderr tail)."""
+def _run(argv: list[str], *, cwd: str, installed: bool) -> tuple[str, str, str]:
+    """Run argv; return (status, short detail, stderr tail)."""
+    if not installed:
+        return MISSING, f"{argv[0]!r} is not installed here", ""
     try:
         proc = subprocess.run(
             argv, cwd=cwd, capture_output=True, text=True, timeout=_LAUNCH_TIMEOUT_S, check=False
         )
     except FileNotFoundError as exc:
-        return False, f"not found: {exc.filename}", ""
+        # Present on the host but unreachable once wrapped — the sandbox allow-list is
+        # the usual cause, so this IS a failure worth reporting.
+        return FAIL, f"not found once wrapped: {exc.filename}", ""
     except subprocess.TimeoutExpired:
-        return False, f"timed out after {_LAUNCH_TIMEOUT_S:.0f}s", ""
+        return FAIL, f"timed out after {_LAUNCH_TIMEOUT_S:.0f}s", ""
     except OSError as exc:
-        return False, type(exc).__name__, ""
+        return FAIL, type(exc).__name__, ""
     if proc.returncode == 0:
         first = (proc.stdout or "").strip().splitlines()
-        return True, first[0][:60] if first else "exit 0", ""
-    return False, f"exit {proc.returncode}", (proc.stderr or "").strip()[-400:]
+        return OK, first[0][:60] if first else "exit 0", ""
+    return FAIL, f"exit {proc.returncode}", (proc.stderr or "").strip()[-400:]
 
 
 def check_agent(
@@ -88,6 +100,7 @@ def check_agent(
     if not argv:
         return []
 
+    installed = shutil.which(argv[0]) is not None or os.path.isabs(argv[0])
     results: list[LaunchResult] = []
     for label, sandboxed, deny_egress in _MODES:
         if modes is not None and label not in modes:
@@ -102,23 +115,29 @@ def check_agent(
                 deny_egress=deny_egress,
                 allow_write_prefixes=agent.host_write_prefixes(),
             )
-        ok, detail, stderr = _run(launched, cwd=workdir)
-        results.append(LaunchResult(str(name.value), label, ok, detail, list(launched), stderr))
+        status, detail, stderr = _run(launched, cwd=workdir, installed=installed)
+        results.append(LaunchResult(str(name.value), label, status, detail, list(launched), stderr))
     return results
+
+
+_VERDICT = {OK: "OK  ", FAIL: "FAIL", MISSING: "n/a "}
 
 
 def format_report(results: list[LaunchResult], *, verbose: bool) -> str:
     """The table a human reads; ``verbose`` adds the wrapped argv and stderr."""
     lines = [f"{'AGENT':<18} {'MODE':<20} VERDICT", "-" * 78]
     for r in results:
-        lines.append(f"{r.agent:<18} {r.mode:<20} {'OK  ' if r.ok else 'FAIL'}  ({r.detail})")
+        lines.append(f"{r.agent:<18} {r.mode:<20} {_VERDICT[r.status]}  ({r.detail})")
         if verbose:
             lines.append(f"    argv: {' '.join(r.argv)}")
             if r.stderr:
                 lines.append(f"    stderr: {r.stderr}")
-    failed = [r for r in results if not r.ok]
+    failed = [r for r in results if r.status == FAIL]
+    absent = sorted({r.agent for r in results if r.status == MISSING})
     lines.append("-" * 78)
     lines.append("GLOBAL: " + ("ALL LAUNCHED" if not failed else f"{len(failed)} FAILURE(S)"))
+    if absent:
+        lines.append(f"not installed here (not a failure): {', '.join(absent)}")
     return "\n".join(lines)
 
 
@@ -162,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         print(format_report(results, verbose=args.verbose))
         if skipped:
             print(f"skipped (in-process, nothing to launch): {', '.join(skipped)}")
-    return 0 if all(r.ok for r in results) else 1
+    return 1 if any(r.status == FAIL for r in results) else 0
 
 
 if __name__ == "__main__":

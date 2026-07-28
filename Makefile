@@ -23,8 +23,8 @@ install:  ## setup ── Editable install with dev extras (py3.12)
 	$(PYTHON) -m pip install -e ".[dev]"
 
 .PHONY: doctor
-doctor:  ## setup ── Check this machine can run regact (sandbox, agent CLIs, LLM endpoint)
-	$(RUN) -m $(PKG).doctor
+doctor:  ## setup ── Is this machine ready? (ARGS="--endpoint http://127.0.0.1:8000/v1")
+	$(RUN) -m $(PKG).doctor $(ARGS)
 
 # ── quality gate ──────────────────────────────────────────────────────────────
 .PHONY: lint
@@ -71,8 +71,8 @@ probe:  ## diagnose ── Does the sandbox honor the R1-R6 contract here?
 	$(RUN) -m $(PKG).security.probe --sandbox
 
 .PHONY: agentcheck
-agentcheck:  ## diagnose ── Do the agent backends actually launch here? (ARGS="--verbose")
-	$(RUN) -m $(PKG).agentcheck --all $(ARGS)
+agentcheck:  ## diagnose ── Do the agent backends launch here? (ARGS="--verbose" / "--agent codex")
+	$(RUN) -m $(PKG).agentcheck $(ARGS)
 
 .PHONY: prompt
 prompt:  ## diagnose ── Print the prompt a run would send (ARGS="--problem minigrid")

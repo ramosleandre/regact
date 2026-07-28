@@ -56,13 +56,19 @@ def detect() -> SandboxRuntime:
             shutil.which("apptainer") or shutil.which("singularity")
         ):
             return SandboxRuntime.APPTAINER
-        if shutil.which("bwrap") and _userns_ok():
+        if shutil.which("bwrap") and userns_ok():
             return SandboxRuntime.BWRAP
     return SandboxRuntime.NONE
 
 
-def _userns_ok() -> bool:
-    """True iff unprivileged user namespaces work here (bwrap needs them)."""
+def userns_ok() -> bool:
+    """True iff unprivileged user namespaces work here (bwrap needs them).
+
+    Public because a present ``bwrap`` is not a usable one: distributions such as
+    Ubuntu 23.10+ ship AppArmor's ``kernel.apparmor_restrict_unprivileged_userns=1``,
+    which makes ``detect()`` fall back to ``none``. Diagnostics report that reason
+    instead of leaving "bwrap installed" and "sandbox: none" side by side.
+    """
     try:
         result = subprocess.run(
             ["unshare", "-Urm", "true"], capture_output=True, timeout=5, check=False
