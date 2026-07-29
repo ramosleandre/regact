@@ -21,11 +21,11 @@ from regact.config.schema import (
     RunConfig,
     SecurityConfig,
 )
-from regact.security.runtime import SandboxRuntime
 from regact.env.renderer import RawRenderer
 from regact.envclient.obs import Obs
 from regact.orchestration.task import run_task
 from regact.problems.base import BaseProblem
+from regact.security.runtime import SandboxRuntime
 from regact.testing.fakes import FakeNativeEnv
 
 pytestmark = pytest.mark.integration
