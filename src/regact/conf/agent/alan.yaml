@@ -2,6 +2,8 @@
 # SimpleLM / SGLang server on HPC, where the CLI agents' cloud APIs are unreachable).
 # Set model + base_url at launch, e.g.:
 #   agent=alan agent.model=openai/<MODEL_NAME> agent.base_url=http://127.0.0.1:9876/v1
+# Remote-scripted mode (drive the model's responses by hand over HTTP):
+#   agent=alan agent.model=remote +agent.args.backend=scripted
 name: alan
 model: null            # openai/<MODEL_NAME> (the served model); null = none
 base_url: null         # http://127.0.0.1:9876/v1 (the SimpleLM/SGLang endpoint)
@@ -12,3 +14,5 @@ args:
   memory: "off"                # no cross-run memory store
   context_window: null         # tell Alan its window (int); null = infer. Set for a local
                                # server (litellm can't fetch it offline; keep < max-model-len).
+  # backend: scripted          # provider selection: auto (default) | anthropic-native | scripted
+                               # (scripted + model=remote = HTTP-driven remote provider)

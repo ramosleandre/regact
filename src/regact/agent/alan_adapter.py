@@ -9,6 +9,7 @@ the adapter (and declaring its capabilities) never requires ``alancode``.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -25,6 +26,22 @@ from regact.agent.events import (
 )
 from regact.obs.errors import ErrorCategory
 from regact.tools.base import Tool
+
+
+def _usage_dict(usage: Any) -> dict[str, Any] | None:
+    """Coerce a native usage record into a plain JSON-able dict (``None`` if opaque)."""
+    if usage is None or isinstance(usage, dict):
+        return usage
+    if dataclasses.is_dataclass(usage) and not isinstance(usage, type):
+        return dataclasses.asdict(usage)
+    return None
+
+
+def _result_text(content: Any) -> str:
+    """Flatten a tool-result payload (plain string or list of text blocks) into a string."""
+    if isinstance(content, list):
+        return "".join(str(getattr(block, "text", block)) for block in content)
+    return str(content)
 
 
 def _to_alan_tools(tools: list[Tool]) -> list[Any]:
@@ -84,6 +101,7 @@ def build_alan_agent(
     if args.get("context_window") is not None:
         extra["context_window"] = int(args["context_window"])  # env interp can yield a str
     return AlanCodeAgent(
+        backend=args.get("backend"),  # e.g. "scripted" (+ model=remote → HTTP-driven provider)
         model=model,
         base_url=base_url,
         api_key=api_key,
@@ -173,12 +191,21 @@ class AlanAgent(CodeAgent):
     def _map_all(cls, native: Any) -> list[AgentEvent]:
         """Translate one ``alancode`` stream item into zero or more normalized events.
 
-        ``query_events_async`` yields whole ``AssistantMessage`` objects (a ``.content``
-        list of TextBlock/ThinkingBlock/ToolUseBlock), NOT individual blocks — so we must
-        UNPACK each message into its events. A message flagged as an API error becomes an
-        ``AgentError``. Falls back to :meth:`_map` for any single-block/legacy item so
-        older alancode builds still work. Dispatch is by class name to avoid importing
-        alancode's types here.
+        ``query_events_async`` yields whole messages, NOT individual blocks:
+
+        - streaming display deltas: ``AssistantMessage`` with ``hide_in_api=True``,
+          re-carried verbatim by the assembled message — dropped here so text and
+          thinking appear exactly once;
+        - assembled ``AssistantMessage`` (a ``.content`` list of TextBlock/ThinkingBlock/
+          ToolUseBlock) — unpacked into its events; when it carries no tool call the
+          query loop ends there, so a ``TurnComplete`` is derived from it;
+        - ``UserMessage`` — tool results come back as a ``.content`` list holding
+          ``ToolResultBlock`` items, unpacked into ``ToolResult`` events; plain-string
+          user messages are model-facing context and map to nothing.
+
+        A message flagged as an API error becomes an ``AgentError``. Falls back to
+        :meth:`_map` for any single-block/legacy item so older alancode builds still
+        work. Dispatch is by class name to avoid importing alancode's types here.
         """
         kind = type(native).__name__
         if kind == "AssistantMessage":
@@ -192,17 +219,23 @@ class AlanAgent(CodeAgent):
                     )
                 )
                 return events
+            if getattr(native, "hide_in_api", False):
+                return []
+            texts: list[str] = []
+            has_tool_call = False
             for block in getattr(native, "content", []) or []:
                 bkind = type(block).__name__
                 if bkind == "TextBlock":
                     text = getattr(block, "text", "")
                     if text:
+                        texts.append(text)
                         events.append(TextDelta(text=text))
                 elif bkind in ("ThinkingBlock", "RedactedThinkingBlock"):
                     events.append(
                         ThinkingDelta(text=getattr(block, "thinking", getattr(block, "text", "")))
                     )
                 elif bkind == "ToolUseBlock":
+                    has_tool_call = True
                     events.append(
                         ToolCall(
                             id=getattr(block, "id", ""),
@@ -210,7 +243,27 @@ class AlanAgent(CodeAgent):
                             input=getattr(block, "input", {}) or {},
                         )
                     )
+            if not has_tool_call:
+                events.append(
+                    TurnComplete(
+                        final_text="".join(texts),
+                        usage=_usage_dict(getattr(native, "usage", None)),
+                    )
+                )
             return events
+        if kind == "UserMessage":
+            content = getattr(native, "content", None)
+            if not isinstance(content, list):
+                return []
+            return [
+                ToolResult(
+                    id=getattr(block, "tool_use_id", ""),
+                    output=_result_text(getattr(block, "content", "")),
+                    is_error=bool(getattr(block, "is_error", False)),
+                )
+                for block in content
+                if type(block).__name__ == "ToolResultBlock"
+            ]
         one = cls._map(native)
         return [one] if one is not None else []
 
@@ -236,13 +289,13 @@ class AlanAgent(CodeAgent):
         if kind == "ToolResultBlock":
             return ToolResult(
                 id=getattr(native, "tool_use_id", getattr(native, "id", "")),
-                output=str(getattr(native, "content", "")),
+                output=_result_text(getattr(native, "content", "")),
                 is_error=bool(getattr(native, "is_error", False)),
             )
         if kind in ("ResultMessage", "TurnComplete"):
             return TurnComplete(
                 final_text=getattr(native, "result", getattr(native, "final_text", "")) or "",
-                usage=getattr(native, "usage", None),
+                usage=_usage_dict(getattr(native, "usage", None)),
             )
         if kind in ("ErrorMessage", "APIError"):
             return AgentError(
