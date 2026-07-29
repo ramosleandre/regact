@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from typing import Any
 
+from regact.agent.base import executable_paths
 from regact.agent.capabilities import Capabilities
 from regact.agent.cli_agent import _CliAgent
 from regact.agent.events import (
@@ -45,6 +47,11 @@ def claude_deny_settings(workdir: str, policy: SecurityPolicy | None = None) -> 
 class ClaudeAgent(_CliAgent):
     """``CodeAgent`` backed by the headless Claude Code CLI."""
 
+    def __init__(self, args: dict[str, object] | None = None) -> None:
+        super().__init__(args)
+        raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
+        self._claude_home = os.path.realpath(os.path.expanduser(raw_home))
+
     def _configure_workdir(self) -> None:
         # Native confinement: a .claude/settings.json deny-list keeps Claude's file
         # tools inside the workdir (it cannot read the game data outside it).
@@ -52,9 +59,24 @@ class ClaudeAgent(_CliAgent):
         os.makedirs(settings_dir, exist_ok=True)
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
             json.dump(claude_deny_settings(self._cwd), handle, indent=2)
+        self._configure_home()
         budget = self._args.get("max_thinking_tokens")
         if budget:
             self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)
+
+    def _configure_home(self) -> None:
+        """Seed the isolated config dir and point claude at it via ``CLAUDE_CONFIG_DIR``.
+
+        Only the credential file is copied in (macOS keeps subscription auth in the
+        Keychain, reached independently of the config dir), so a session starts with
+        auth and nothing else: no other session's transcript, no prompt history, no
+        user-level settings.
+        """
+        os.makedirs(self._claude_home, exist_ok=True)
+        creds = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
+        if os.path.exists(creds):
+            shutil.copyfile(creds, os.path.join(self._claude_home, ".credentials.json"))
+        self._env_overrides["CLAUDE_CONFIG_DIR"] = self._claude_home
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -73,15 +95,18 @@ class ClaudeAgent(_CliAgent):
     def host_read_paths(self) -> list[str]:
         home = os.path.expanduser("~")
         paths = [
-            os.path.join(home, ".claude"),
-            os.path.join(home, ".claude.json"),
-            os.path.join(home, ".npm"),
+            *executable_paths("claude"),  # the CLI's bin dir + its real install tree
+            os.path.join(home, ".npm"),  # package cache (npm installs); no session data
         ]
         if sys.platform == "darwin":
             claude_tmp = f"/tmp/claude-{os.getuid()}"
             os.makedirs(claude_tmp, exist_ok=True)  # must exist => a (subpath) rule, not (literal)
             paths += [os.path.join(home, "Library/Keychains"), "/Library/Keychains", claude_tmp]
         return paths
+
+    def host_rw_paths(self) -> list[str]:
+        os.makedirs(self._claude_home, exist_ok=True)  # must exist for a bind/subpath rule
+        return [self._claude_home]
 
     def host_egress_hosts(self) -> list[str]:
         return ["api.anthropic.com"]  # block statsig.anthropic.com / sentry telemetry

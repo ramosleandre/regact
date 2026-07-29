@@ -9,6 +9,8 @@ this module never pulls a backend SDK.
 
 from __future__ import annotations
 
+import os
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 
@@ -16,6 +18,21 @@ from regact.agent.capabilities import Capabilities
 from regact.agent.events import AgentEvent
 from regact.config.schema import AgentConfig, AgentName
 from regact.tools.base import Tool
+
+
+def executable_paths(binary: str) -> list[str]:
+    """The dirs a sandbox must expose so ``binary`` can be exec'd inside it.
+
+    Two dirs: where PATH finds it (often a symlink) and where the real file lives —
+    installers keep versioned trees elsewhere (e.g. ``~/.local/share/<cli>/versions``),
+    and binding only the symlink leaves ``execvp`` with a dangling target. Empty when
+    the binary is absent, so declaring it on a host without the CLI binds nothing.
+    """
+    found = shutil.which(binary)
+    if found is None:
+        return []
+    real = os.path.realpath(found)
+    return sorted({os.path.dirname(found), os.path.dirname(real)})
 
 
 class CodeAgent(ABC):
@@ -66,13 +83,25 @@ class CodeAgent(ABC):
         ...
 
     def host_read_paths(self) -> list[str]:
-        """Host config/auth dirs THIS backend needs readable inside the sandbox.
+        """Host paths THIS backend needs readable inside the sandbox (install dirs, caches).
 
-        Each backend declares its own (Claude: ``~/.claude``; codex: ``~/.codex``), so a
-        deny-by-default sandbox allowlist contains only the *loaded* agent's paths, never
-        another backend's. Agnostic by construction: returns plain paths, so the security
-        layer never imports a backend type. In-process backends (scripted/Alan) aren't
-        wrapped, so the default is none.
+        Each backend declares its own, so a deny-by-default sandbox allowlist contains
+        only the *loaded* agent's paths, never another backend's. Never a user-level
+        config/session store: those hold ambient data (other sessions' transcripts) a
+        scored agent must not see — give the CLI an isolated home via
+        :meth:`host_rw_paths` instead. Agnostic by construction: returns plain paths, so
+        the security layer never imports a backend type. In-process backends
+        (scripted/Alan) aren't wrapped, so the default is none.
+        """
+        return []
+
+    def host_rw_paths(self) -> list[str]:
+        """Host paths THIS backend must read AND write inside the sandbox.
+
+        Separate from :meth:`host_read_paths` because read-only backends bind those
+        immutably — a CLI's isolated config home (where it writes its own sessions)
+        must stay writable. Implementations create the path before returning it, so a
+        bind/subpath rule can name it. Default: none.
         """
         return []
 

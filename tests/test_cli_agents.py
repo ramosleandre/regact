@@ -31,14 +31,18 @@ def test_capabilities_mark_client_cli() -> None:
     assert CodexAgent().capabilities().control_actions == "client_cli"
 
 
-def test_host_read_paths_are_per_agent() -> None:
-    """Each backend declares only its OWN host dirs — never another backend's."""
-    claude = ClaudeAgent().host_read_paths()
-    codex = CodexAgent().host_read_paths()
-    assert any(p.endswith("/.claude") for p in claude)
-    assert any(p.endswith("/codex-home") for p in codex)  # codex's isolated CODEX_HOME
-    assert not any("codex" in p for p in claude)  # no cross-contamination
-    assert not any("/.claude" in p for p in codex)
+def test_host_paths_are_per_agent_and_ambient_config_stays_out() -> None:
+    """Each backend declares only its OWN dirs, and never the user-level config roots
+    (~/.claude, ~/.codex) — those hold other sessions' transcripts and history."""
+    home = os.path.expanduser("~")
+    claude_ro, claude_rw = ClaudeAgent().host_read_paths(), ClaudeAgent().host_rw_paths()
+    codex_rw = CodexAgent().host_rw_paths()
+    assert os.path.join(home, ".claude") not in claude_ro  # other sessions' transcripts
+    assert os.path.join(home, ".claude.json") not in claude_ro  # prompt history
+    assert any(p.endswith("/claude-home") for p in claude_rw)  # the isolated config dir
+    assert any(p.endswith("/codex-home") for p in codex_rw)  # codex's isolated CODEX_HOME
+    assert not any("codex" in p for p in claude_rw)  # no cross-contamination
+    assert not any("claude" in p for p in codex_rw)
 
 
 def test_codex_uses_an_isolated_home(tmp_path) -> None:
@@ -47,7 +51,9 @@ def test_codex_uses_an_isolated_home(tmp_path) -> None:
     home = tmp_path / "codex-home"
     agent = CodexAgent({"codex_home": str(home)})
     real = os.path.realpath(str(home))
-    assert agent.host_read_paths() == [real]
+    assert agent.host_rw_paths() == [real]  # the generated home, writable (session store)
+    # Only the CLI's install dirs are readable — never the ambient config root.
+    assert os.path.realpath(os.path.expanduser("~/.codex")) not in agent.host_read_paths()
 
     agent._configure_workdir()  # what start() invokes to seed the home
     assert agent._env_overrides["CODEX_HOME"] == real
@@ -180,3 +186,50 @@ def test_codex_resume_puts_exec_flags_before_the_subcommand() -> None:
     assert argv.index("--cd") < argv.index("resume")
     assert argv.index("--json") < argv.index("resume")
     assert argv[argv.index("resume") + 1] == "th-1"
+
+
+def test_executable_paths_cover_the_symlink_dir_and_the_real_install_dir(
+    tmp_path, monkeypatch
+) -> None:
+    """Installers put a symlink on PATH and the real binary in a versioned tree; the
+    sandbox must see BOTH dirs or execvp dies on the dangling link."""
+    from regact.agent.base import executable_paths
+
+    install = tmp_path / "share" / "tool" / "versions"
+    install.mkdir(parents=True)
+    real = install / "tool-1.0"
+    real.write_text("#!/bin/sh\n")
+    real.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "tool").symlink_to(real)
+
+    monkeypatch.setenv("PATH", str(bin_dir))
+    paths = executable_paths("tool")
+    assert os.path.realpath(str(bin_dir)) in paths
+    assert os.path.realpath(str(install)) in paths
+
+    assert executable_paths("definitely-absent-tool-xyz") == []
+
+
+def test_claude_uses_an_isolated_config_dir(tmp_path, monkeypatch) -> None:
+    """claude runs against a generated CLAUDE_CONFIG_DIR, not ~/.claude: other
+    sessions' transcripts and the prompt history stay invisible; only auth is seeded."""
+    user_home = tmp_path / "userhome"
+    (user_home / ".claude").mkdir(parents=True)
+    (user_home / ".claude" / ".credentials.json").write_text("{}")
+    (user_home / ".claude" / "history.jsonl").write_text("secret past prompt\n")
+    monkeypatch.setenv("HOME", str(user_home))
+
+    home = tmp_path / "claude-home"
+    agent = ClaudeAgent({"claude_home": str(home)})
+    agent._cwd = str(tmp_path / "wd")
+    os.makedirs(agent._cwd, exist_ok=True)
+    agent._configure_workdir()
+
+    real = os.path.realpath(str(home))
+    assert agent._env_overrides["CLAUDE_CONFIG_DIR"] == real
+    assert (home / ".credentials.json").read_text() == "{}"  # auth seeded...
+    assert not (home / "history.jsonl").exists()  # ...and nothing else
+    assert agent.host_rw_paths() == [real]
+    assert str(user_home / ".claude") not in agent.host_read_paths()

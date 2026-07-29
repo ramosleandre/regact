@@ -120,6 +120,7 @@ def check_agent(
                 allow_read=agent.host_read_paths(),
                 deny_egress=deny_egress,
                 allow_write_prefixes=agent.host_write_prefixes(),
+                allow_rw=agent.host_rw_paths(),
             )
         status, detail, stderr = _run(launched, cwd=workdir, missing=missing)
         results.append(LaunchResult(str(name.value), label, status, detail, list(launched), stderr))

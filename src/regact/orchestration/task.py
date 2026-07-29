@@ -256,7 +256,7 @@ async def run_task(
                 deny_egress=config.security.deny_egress,
                 deny_read=deny_read,
                 allow_write_prefixes=agent.host_write_prefixes(),
-                allow_rw=_mirror_sockets(mirror, agent_ports),
+                allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
                 image=config.security.runtime_opts.get("image"),
             ),
             mirror,

@@ -16,6 +16,7 @@ import os
 import shutil
 from typing import Any
 
+from regact.agent.base import executable_paths
 from regact.agent.capabilities import Capabilities
 from regact.agent.cli_agent import _CliAgent
 from regact.agent.events import (
@@ -55,7 +56,10 @@ class CodexAgent(_CliAgent):
         return ["codex", "--version"]
 
     def host_read_paths(self) -> list[str]:
-        # The isolated home holds codex's config, auth, and session store (read-write).
+        return [*executable_paths("codex")]  # the CLI's bin dir + its real install tree
+
+    def host_rw_paths(self) -> list[str]:
+        os.makedirs(self._codex_home, exist_ok=True)  # must exist for a bind/subpath rule
         return [self._codex_home]
 
     def host_egress_hosts(self) -> list[str]:
