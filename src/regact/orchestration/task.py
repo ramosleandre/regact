@@ -148,6 +148,11 @@ async def run_task(
     ``agent`` is injectable (tests pass a scripted agent); by default it is built
     from ``config.agent``.
     """
+    if config.security.require_sandbox and resolve(config.security.sandbox) is SandboxRuntime.NONE:
+        raise RuntimeError(
+            "security.require_sandbox=true but the sandbox resolves to 'none' on this host; "
+            "enable a backend (bwrap/seatbelt/apptainer) or unset require_sandbox"
+        )
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
@@ -164,7 +169,11 @@ async def run_task(
         )
 
         experiment = ExperimentState(
-            problem_name=problem.name, task_name=task_name, n_eval_episodes=1, n_videos=0
+            problem_name=problem.name,
+            task_name=task_name,
+            n_eval_episodes=config.limits.n_episodes,
+            n_videos=config.limits.n_episodes if config.record_video else 0,
+            problem_kwargs=dict(config.problem.kwargs),
         )
         src_dir = _regact_src_dir()
         deny_read = _secret_module_paths(problem.secret_modules())
@@ -313,7 +322,7 @@ async def run_task(
                     cwd=workdir,
                     system_prompt=system_prompt,
                     hooks=hooks,
-                    move_count=lambda: server.live_action_count(task_name),
+                    move_count=lambda: server.total_action_count(task_name),
                     stop=stop,
                 )
         finally:  # always release the agent subprocess + the network plumbing, even on a crash

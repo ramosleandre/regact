@@ -66,6 +66,9 @@ class _CliAgent(CodeAgent):
         self._runtime_wrap = runtime_wrap
         self._configure_workdir()
 
+    def session_id(self) -> str | None:
+        return self._session_id
+
     def _configure_workdir(self) -> None:
         """Write any backend-native confinement config into the workdir. Default: none."""
 

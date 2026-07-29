@@ -82,6 +82,15 @@ class CodeAgent(ABC):
         """Static description of what this backend supports."""
         ...
 
+    def session_id(self) -> str | None:
+        """The backend's native session/thread id, once known (``None`` until then).
+
+        Locates the backend's own transcript store (e.g. ``.claude``/``.alan`` sessions)
+        from the canonical experiment state, so audits can correlate the two. Backends
+        without a discoverable id keep the default.
+        """
+        return None
+
     def host_read_paths(self) -> list[str]:
         """Host paths THIS backend needs readable inside the sandbox (install dirs, caches).
 

@@ -81,6 +81,7 @@ class LimitsConfig:
 class SecurityConfig:
     sandbox: SandboxRuntime = SandboxRuntime.AUTO  # which OS sandbox wraps the agent subprocess
     deny_egress: bool = False  # Block external internet except the loaded agent's declared host
+    require_sandbox: bool = False  # fail the run if no sandbox backend is usable (auto -> none)
     runtime_opts: dict[str, Any] = field(default_factory=dict)  # backend extras, e.g. image=.sif
 
 

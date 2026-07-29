@@ -165,6 +165,9 @@ class AlanAgent(CodeAgent):
             await self._agent.close()
             self._agent = None
 
+    def session_id(self) -> str | None:
+        return getattr(self._agent, "_session_id", None)
+
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="replace",

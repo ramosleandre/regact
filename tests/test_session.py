@@ -32,3 +32,31 @@ def test_single_instance_session_same_handle() -> None:
     b = session.make()
     assert a is b
     assert session.live is a
+
+
+def test_total_action_count_accumulates_across_instances() -> None:
+    # Multi-instance: each make() swaps in a fresh env whose own counter restarts
+    # at 0; the session-level total must keep the retired instances' steps.
+    session = _session(MultiInstancePolicy())
+    env = session.make()
+    env.reset()
+    env.step(1)
+    env.step(1)
+    env = session.make()
+    env.reset()
+    env.step(1)
+    assert env.action_count == 1
+    assert session.total_action_count == 3
+    session.close()
+    assert session.total_action_count == 3
+
+
+def test_total_action_count_single_instance_no_double_count() -> None:
+    # Single-instance: make() returns the same cached handle; re-acquiring it must
+    # not fold its live counter into the retired total.
+    session = _session(SingleInstancePolicy())
+    env = session.make()
+    env.reset()
+    env.step(1)
+    session.make()
+    assert session.total_action_count == 1

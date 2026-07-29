@@ -39,6 +39,7 @@ class EnvSession:
         self._action_adapter = action_adapter
         self._step_budget = step_budget
         self._live: WrappedEnv | None = None
+        self._retired_actions = 0
 
     def _build(self) -> WrappedEnv:
         return WrappedEnv(
@@ -52,7 +53,10 @@ class EnvSession:
 
     def make(self) -> WrappedEnv:
         """Acquire the env via the policy (fresh for multi, cached for single)."""
+        prev = self._live
         self._live = self._lifecycle.acquire(self._build, key=self.key)
+        if prev is not None and prev is not self._live:
+            self._retired_actions += prev.action_count
         return self._live
 
     def reset(self, *, seed: int | None = None) -> Obs:
@@ -75,7 +79,18 @@ class EnvSession:
         """The shared handle (``None`` before the first make)."""
         return self._live
 
+    @property
+    def total_action_count(self) -> int:
+        """Env steps taken across ALL this session's instances (retired + live).
+
+        The live handle's counter restarts at 0 on every multi-instance acquisition,
+        so it alone understates the session's exploration cost.
+        """
+        live = self._live.action_count if self._live is not None else 0
+        return self._retired_actions + live
+
     def close(self) -> None:
         if self._live is not None:
+            self._retired_actions += self._live.action_count
             self._live.close()
             self._live = None

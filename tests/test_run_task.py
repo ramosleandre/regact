@@ -19,7 +19,9 @@ from regact.config.schema import (
     LimitsConfig,
     ProblemConfig,
     RunConfig,
+    SecurityConfig,
 )
+from regact.security.runtime import SandboxRuntime
 from regact.env.renderer import RawRenderer
 from regact.envclient.obs import Obs
 from regact.orchestration.task import run_task
@@ -78,13 +80,16 @@ class _WritingAgent(ScriptedAgent):
         await super().start(cwd=cwd, **kwargs)
         Path(cwd, "solution.py").write_text(_FORWARD)
 
+    def session_id(self) -> str | None:
+        return "native-123"
+
 
 def _config() -> RunConfig:
     return RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
-        problem=ProblemConfig(name="fake"),
+        problem=ProblemConfig(name="fake", kwargs={"env_id": "fake-v0"}),
         features=["controller"],
-        limits=LimitsConfig(keep_alive=10, max_moves=10),
+        limits=LimitsConfig(keep_alive=10, max_moves=10, n_episodes=2),
     )
 
 
@@ -119,6 +124,21 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
     assert submitted["aggregate"]["success_rate"] == 1.0
     final = json.loads((workdir / "submissions" / "final" / "results.json").read_text())
     assert final["aggregate"]["success_rate"] == 1.0
+    # The persisted state reflects the run's config and telemetry, not placeholders.
+    state = json.loads((logs / "experiment_state.json").read_text())
+    assert state["n_eval_episodes"] == 2
+    assert state["n_videos"] == 2  # record_video defaults to True
+    assert state["problem_kwargs"] == {"env_id": "fake-v0"}
+    assert state["agent_session_id"] == "native-123"
+    assert state["env_moves"] > 0  # eval episodes stepped the env
+
+
+async def test_run_task_require_sandbox_fails_unconfined(tmp_path: Path) -> None:
+    config = _config()
+    config.security = SecurityConfig(sandbox=SandboxRuntime.NONE, require_sandbox=True)
+    with pytest.raises(RuntimeError, match="require_sandbox"):
+        await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
+    assert not (tmp_path / "logs").exists()  # refused before writing any artifact
 
 
 async def test_run_task_builds_agent_from_config_when_none(tmp_path: Path) -> None:

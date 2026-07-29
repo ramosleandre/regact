@@ -78,6 +78,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         security=SecurityConfig(
             sandbox=SandboxRuntime(sec.get("sandbox", SandboxRuntime.AUTO)),
             deny_egress=bool(sec.get("deny_egress", False)),
+            require_sandbox=bool(sec.get("require_sandbox", False)),
             runtime_opts=dict(sec.get("runtime_opts") or {}),
         ),
         record_video=bool(data.get("record_video", True)),

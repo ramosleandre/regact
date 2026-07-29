@@ -68,6 +68,19 @@ def test_mapping_preserves_toplevel_run_flags() -> None:
     assert off.shadow_replay is False
 
 
+def test_mapping_parses_require_sandbox() -> None:
+    on = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "arc_agi"},
+            "security": {"require_sandbox": True},
+        }
+    )
+    assert on.security.require_sandbox is True
+    off = run_config_from_mapping({"agent": {"name": "scripted"}, "problem": {"name": "arc_agi"}})
+    assert off.security.require_sandbox is False
+
+
 def test_redacted_config_dict_masks_api_key() -> None:
     """config.json must never carry a real api_key (it lands in the experiment dir)."""
     config = run_config_from_mapping(

@@ -161,6 +161,8 @@ def _save_state(ctx: _LoopContext) -> None:
     ctx.experiment.duration_s = round(time.monotonic() - ctx.start, 1)
     if ctx.move_count is not None:
         ctx.experiment.env_moves = ctx.move_count()
+    if ctx.experiment.agent_session_id is None:
+        ctx.experiment.agent_session_id = ctx.agent.session_id()
     ctx.experiment.save(ctx.state_path)
 
 
