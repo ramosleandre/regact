@@ -187,3 +187,69 @@ def test_task_style_wiring_hides_game_but_keeps_workdir(tmp_path: Path) -> None:
         capture_output=True,
     )
     assert ok.returncode == 0  # the workdir (under experiments/) stays readable (R1)
+
+
+def test_wrap_argv_bwrap_binds_allow_rw_paths(tmp_path: Path) -> None:
+    sock = tmp_path / "p8000.sock"
+    sock.touch()
+    argv = wrap_argv(SandboxRuntime.BWRAP, ["true"], workdir=str(tmp_path), allow_rw=[str(sock)])
+    real = os.path.realpath(str(sock))
+    assert f"--bind {real} {real}" in " ".join(argv)
+
+
+def test_wrap_argv_seatbelt_allows_unix_socket_connect_under_deny_egress(tmp_path: Path) -> None:
+    sock = tmp_path / "p8000.sock"
+    sock.touch()
+    profile = wrap_argv(
+        SandboxRuntime.SEATBELT,
+        ["true"],
+        workdir=str(tmp_path),
+        deny_egress=True,
+        allow_rw=[str(sock)],
+    )[2]
+    assert "remote unix-socket" in profile
+    assert os.path.realpath(str(sock)) in profile
+
+
+def test_probe_report_separates_security_and_liveness_verdicts() -> None:
+    """A conforming deny is DEFENDED, a conforming allow WORKS; failures split into
+    VULNERABLE (breach) vs BLOCKED (over-restrictive sandbox)."""
+    from regact.security.probe import CheckResult, format_report
+
+    report = format_report(
+        [
+            CheckResult("R2", "attack held off", "deny", True, "x"),
+            CheckResult("R4", "sanctioned path up", "allow", True, "x"),
+            CheckResult("R5", "attack got through", "deny", False, "x"),
+            CheckResult("R4", "sanctioned path down", "allow", False, "x"),
+        ]
+    )
+    assert "DEFENDED" in report and "WORKS" in report
+    assert "VULNERABLE" in report and "BLOCKED" in report
+    assert "1 BREACH(ES), 1 BLOCKED PATH(S)" in report
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("sandbox-exec") is None,
+    reason="seatbelt end-to-end runs on macOS only",
+)
+def test_seatbelt_bridged_socket_stays_connectable_under_deny_egress(tmp_path: Path) -> None:
+    """R4/L2 end to end: with egress denied, a socket file in ``allow_rw`` must still
+    accept a connection from inside the sandbox."""
+    from regact.security.probe import bridged_socket_listener
+
+    connect = "import socket, sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])"
+    with bridged_socket_listener() as sock_path:
+        result = subprocess.run(
+            wrap_argv(
+                SandboxRuntime.SEATBELT,
+                [sys.executable, "-c", connect, sock_path],
+                workdir=str(tmp_path),
+                deny_egress=True,
+                allow_rw=[sock_path],
+            ),
+            cwd=str(tmp_path),  # like a real run: the child starts in its workdir
+            capture_output=True,
+            text=True,
+        )
+    assert result.returncode == 0, result.stderr

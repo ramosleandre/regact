@@ -10,7 +10,7 @@ dir is git-ignored), but every command below is also given raw so it works anywh
 ## The one universal check
 
 ```bash
-python -m regact.security.probe --sandbox --json   # confined: should be ALL DEFENDED on Linux/HPC
+python -m regact.security.probe --sandbox --json   # confined: should be CONTRACT HELD on Linux/HPC
 python -m regact.security.probe                     # baseline (no sandbox): expect breaches
 ```
 
@@ -32,7 +32,7 @@ crashes at the native level under deny-default Seatbelt (logs nothing; `dtruss` 
 so **claude on macOS runs `runtime=none`** (the trusted dev box); claude is confined on Linux/HPC.
 
 ```bash
-make debug D=sec_probe ARGS="--sandbox"                 # ALL DEFENDED (with --no-egress) on this box
+make debug D=sec_probe ARGS="--sandbox"                 # CONTRACT HELD (with --no-egress) on this box
 make debug D=sec_agent_smoke ARGS=codex                 # codex runs inside the sandbox -> 'ok'
 make debug D=sec_discover_paths ARGS=codex              # what codex touches (strace/log stream)
 make debug D=sec_discover_endpoints ARGS=codex          # endpoints from the binary / lsof
@@ -48,7 +48,7 @@ exits on "untrusted dir", not a sandbox denial).
 ## Linux workstation — the strong-isolation box
 
 Linux uses **bubblewrap** (`bwrap`): a deny-by-default mount namespace, so `--sandbox` should report
-**ALL DEFENDED**.
+**CONTRACT HELD**.
 
 ```bash
 # 1. prerequisites (this is exactly what detect() checks):
@@ -56,7 +56,7 @@ unshare -Urm true && echo USERNS_OK || echo USERNS_BLOCKED
 which bwrap || sudo apt-get install -y bubblewrap
 make debug D=sec_backend_check          # expect: detect() -> bwrap
 
-# 2. verify (expect ALL DEFENDED):
+# 2. verify (expect CONTRACT HELD):
 make debug D=sec_probe ARGS="--sandbox"
 
 # 3. discover what claude/codex need (strace):
@@ -91,7 +91,7 @@ make debug D=sec_backend_check
 PYTHONPATH=$WORK/regact/src python -m regact.security.probe --sandbox --json
 ```
 
-- If `detect() -> bwrap` → great, expect ALL DEFENDED (and no `.sif` needed).
+- If `detect() -> bwrap` → great, expect CONTRACT HELD (and no `.sif` needed).
 - If `detect() -> apptainer` (because `$SINGULARITY_ALLOWED_DIR` is set) → the probe needs an image:
   `python -m regact.security.probe --sandbox --image $SINGULARITY_ALLOWED_DIR/regact.sif`
   (build the `.sif` off-node; the login node can't build it). Without `--image` the probe prints a
@@ -145,7 +145,7 @@ Build the deny-default allowlist from these (confirm per-machine with the discov
 > ```bash
 > unshare -Urm true && echo USERNS_OK || echo USERNS_BLOCKED   # bwrap needs this
 > which bwrap || sudo apt-get install -y bubblewrap
-> PYTHONPATH=src python -m regact.security.probe --sandbox --json   # expect ALL DEFENDED
+> PYTHONPATH=src python -m regact.security.probe --sandbox --json   # expect CONTRACT HELD
 > ```
 > If `USERNS_BLOCKED`: apply the AppArmor fix above and re-test. Then, to learn the allowlist for the
 > agents on your box: `PYTHONPATH=src python debug/sec_discover_paths.py claude` (and `codex`) — send

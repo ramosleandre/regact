@@ -7,7 +7,10 @@ conformance table by hand on Jean-Zay / Adastra / Kaggle. Run it without a sandb
 
 Each check states an invariant and an ``intent``: ``deny`` checks run an *attack*
 that must FAIL; ``allow`` checks run a *legitimate use* that must SUCCEED. A check
-is ``defended`` when the outcome matches the intent.
+is ``defended`` when the outcome matches the intent, and the report keeps the two
+vocabularies apart: a conforming deny is ``DEFENDED`` (vs ``VULNERABLE``), a
+conforming allow is ``WORKS`` (vs ``BLOCKED`` — an over-restrictive sandbox, not a
+breach).
 """
 
 from __future__ import annotations
@@ -58,6 +61,16 @@ def _can_connect(host: str, port: int) -> tuple[bool, str]:
         return False, type(exc).__name__
 
 
+def _can_connect_unix(path: str) -> tuple[bool, str]:
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(3)
+            sock.connect(path)
+        return True, "connected"
+    except OSError as exc:
+        return False, type(exc).__name__
+
+
 def _can_write(path: str) -> tuple[bool, str]:
     try:
         with open(path, "w", encoding="utf-8") as handle:
@@ -103,6 +116,28 @@ def loopback_listener() -> Iterator[int]:
         sock.close()
 
 
+@contextlib.contextmanager
+def bridged_socket_listener() -> Iterator[str]:
+    """Hold a pathname unix listener in its own short dir; yield the socket path.
+
+    Stands in for a bridged host service (see :mod:`regact.security.netbridge`): a
+    socket file crosses a network namespace because it is a filesystem object, so
+    this is the sanctioned loopback path on a backend that severs host TCP.
+    """
+    import shutil
+
+    socket_dir = tempfile.mkdtemp(prefix="regact-net-")
+    path = os.path.join(socket_dir, "probe.sock")
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(path)
+        sock.listen(1)
+        yield path
+    finally:
+        sock.close()
+        shutil.rmtree(socket_dir, ignore_errors=True)
+
+
 def run_probe(
     *,
     workdir: str,
@@ -110,6 +145,8 @@ def run_probe(
     external: tuple[str, int] = ("example.com", 443),
     check_egress: bool = True,
     loopback_port: int | None = None,
+    loopback_want: str = "allow",
+    bridge_socket: str | None = None,
 ) -> list[CheckResult]:
     """Attempt the catalog from THIS process; return one result per check."""
     own = os.path.join(workdir, "solution.py")
@@ -133,16 +170,19 @@ def run_probe(
     # R3 (deny): writing outside the workdir (here, into the game dir) must fail.
     wrote = _can_write(os.path.join(game_dir, ".probe_write"))
     add(Invariant.R3_WRITE, "R3 write outside the workdir", "deny", wrote)
-    # R4 (allow): localhost must stay reachable — the agent talks to the env server and
-    # (on HPC) a local model over loopback. This is the invariant that a net-namespace
-    # sandbox silently breaks while every deny check still passes, so a run fails later
-    # with a bare ConnectError instead of a verdict here.
     if loopback_port is not None:
         add(
             Invariant.R4_LOOPBACK,
-            "L1 reach a localhost service",
-            "allow",
+            "L1 host loopback, direct TCP",
+            loopback_want,
             _can_connect("127.0.0.1", loopback_port),
+        )
+    if bridge_socket is not None:
+        add(
+            Invariant.R4_LOOPBACK,
+            "L2 host service via bridged socket",
+            "allow",
+            _can_connect_unix(bridge_socket),
         )
     # R5 (deny): external egress must fail (scored runs).
     if check_egress:
@@ -155,14 +195,31 @@ def run_probe(
 
 
 def format_report(results: list[CheckResult]) -> str:
+    """One line per check, with intent-specific verdicts.
+
+    ``deny`` checks are security: a pass is ``DEFENDED``, a failure a ``VULNERABLE``
+    breach. ``allow`` checks are liveness: a pass is ``WORKS``, a failure a
+    ``BLOCKED`` sanctioned path (an unusable sandbox, not a breach).
+    """
     lines = [f"{'INV':<4} {'CHECK':<44} {'WANT':<6} VERDICT", "-" * 80]
-    breaches = 0
+    breaches = blocked = 0
     for r in results:
-        verdict = "DEFENDED" if r.defended else "*** VULNERABLE ***"
-        breaches += 0 if r.defended else 1
+        if r.defended:
+            verdict = "DEFENDED" if r.intent == "deny" else "WORKS"
+        elif r.intent == "deny":
+            verdict = "*** VULNERABLE ***"
+            breaches += 1
+        else:
+            verdict = "*** BLOCKED ***"
+            blocked += 1
         lines.append(f"{r.invariant:<4} {r.name:<44} {r.intent:<6} {verdict:<18} ({r.detail})")
     lines.append("-" * 80)
-    lines.append("GLOBAL: " + ("ALL DEFENDED" if breaches == 0 else f"{breaches} BREACH(ES)"))
+    if not breaches and not blocked:
+        lines.append("GLOBAL: CONTRACT HELD (attacks defended, sanctioned paths work)")
+    else:
+        parts = [f"{breaches} BREACH(ES)"] if breaches else []
+        parts += [f"{blocked} BLOCKED PATH(S)"] if blocked else []
+        lines.append("GLOBAL: " + ", ".join(parts))
     return "\n".join(lines)
 
 
@@ -182,6 +239,17 @@ def _main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="check R4 by connecting to this localhost port (set by --sandbox)",
+    )
+    parser.add_argument(
+        "--loopback-want",
+        choices=("allow", "deny"),
+        default="allow",
+        help="whether direct host TCP must work or must fail (set by --sandbox per backend)",
+    )
+    parser.add_argument(
+        "--bridge-socket",
+        default=None,
+        help="check R4's bridged path by connecting to this socket file (set by --sandbox)",
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -205,6 +273,8 @@ def _main(argv: list[str] | None = None) -> int:
         secret_path=secret,
         check_egress=not args.no_egress,
         loopback_port=args.loopback_port,
+        loopback_want=args.loopback_want,
+        bridge_socket=args.bridge_socket,
     )
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2))
@@ -238,17 +308,22 @@ def _rerun_sandboxed(
         child.append("--no-egress")
     if as_json:
         child.append("--json")
-    # deny-default: the secret's dir is simply not in allow_read, so it is absent/denied.
-    # deny_egress must track the R5 check: probing "egress is blocked" while building an
-    # unrestricted sandbox would report a breach the configuration never asked for.
-    with loopback_listener() as port:  # stands in for the env server / a local model
+    deny_egress = not no_egress
+    severs_loopback = backend is SandboxRuntime.BWRAP and deny_egress
+    with (
+        loopback_listener() as port,  # stands in for the env server / a local model
+        bridged_socket_listener() as bridge,  # stands in for the same service, bridged
+    ):
         child += ["--loopback-port", str(port)]
+        child += ["--loopback-want", "deny" if severs_loopback else "allow"]
+        child += ["--bridge-socket", bridge]
         argv = wrap_argv(
             backend,
             child,
             workdir=workdir,
             allow_read=[src],
-            deny_egress=not no_egress,
+            deny_egress=deny_egress,
+            allow_rw=[bridge],
             image=image,
         )
         # TMPDIR inside the (allowed) workdir: scratch for the child without exposing /tmp.

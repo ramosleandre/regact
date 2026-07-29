@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
+from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent, build_agent
 from regact.config.schema import AgentName, Lifecycle, RunConfig, redacted_config_dict
@@ -30,7 +32,8 @@ from regact.orchestration.signals import StopSignal
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
 from regact.security.egress_proxy import EgressProxy
-from regact.security.runtime import make_wrapper
+from regact.security.netbridge import LoopbackMirror
+from regact.security.runtime import SandboxRuntime, Wrapper, make_wrapper, resolve
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
 from regact.workspace.bootstrap import Workspace
@@ -63,6 +66,31 @@ def _secret_module_paths(modules: tuple[str, ...]) -> list[str]:
         elif spec.origin and spec.origin not in ("built-in", "frozen"):
             paths.append(os.path.dirname(spec.origin))
     return [os.path.realpath(p) for p in paths]
+
+
+def _loopback_port(url: str | None) -> int | None:
+    """The TCP port of ``url`` when it targets the local host, else ``None``."""
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+        return None
+    return parsed.port or (443 if parsed.scheme == "https" else 80)
+
+
+def _mirror_sockets(mirror: LoopbackMirror | None, ports: Sequence[int]) -> list[str]:
+    """The socket files a wrap must expose for ``ports`` (empty without a mirror)."""
+    if mirror is None:
+        return []
+    return [mirror.socket_path(port) for port in ports]
+
+
+def _bridged(wrapper: Wrapper, mirror: LoopbackMirror | None, ports: Sequence[int]) -> Wrapper:
+    """Compose ``wrapper`` with the in-sandbox bridge launcher for ``ports``."""
+    if mirror is None or not ports:
+        return wrapper
+    prefix = mirror.argv_prefix(ports)
+    return lambda argv: wrapper([*prefix, *argv])
 
 
 def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
@@ -140,17 +168,31 @@ async def run_task(
         )
         src_dir = _regact_src_dir()
         deny_read = _secret_module_paths(problem.secret_modules())
+
+        mirror: LoopbackMirror | None = None
+        env_port = _loopback_port(conn.base_url)
+        if not in_process and resolve(config.security.sandbox) is SandboxRuntime.BWRAP:
+            mirror = LoopbackMirror()
+
+        eval_ports = [port for port in (env_port,) if port]
+        if mirror is not None:
+            for port in eval_ports:
+                await mirror.mirror(port)
         eval_wrap = (
             None
             if in_process
-            else make_wrapper(
-                config.security.sandbox,
-                workdir=workdir,
-                allow_read=[src_dir],
-                # TODO: verify — maybe use config.security.deny_egress here instead of True.
-                deny_egress=True,
-                deny_read=deny_read,
-                image=config.security.runtime_opts.get("image"),
+            else _bridged(
+                make_wrapper(
+                    config.security.sandbox,
+                    workdir=workdir,
+                    allow_read=[src_dir],
+                    deny_egress=True,
+                    deny_read=deny_read,
+                    allow_rw=_mirror_sockets(mirror, eval_ports),
+                    image=config.security.runtime_opts.get("image"),
+                ),
+                mirror,
+                eval_ports,
             )
         )
         deps = RunDeps(
@@ -182,16 +224,6 @@ async def run_task(
         else:
             loop_tools = tools
 
-        runtime_wrap = make_wrapper(
-            config.security.sandbox,
-            workdir=workdir,
-            allow_read=[src_dir, *agent.host_read_paths()],
-            deny_egress=config.security.deny_egress,
-            deny_read=deny_read,
-            allow_write_prefixes=agent.host_write_prefixes(),
-            image=config.security.runtime_opts.get("image"),
-        )
-
         agent_tmp = os.path.join(workdir, "tmp")
         os.makedirs(agent_tmp, exist_ok=True)
         agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
@@ -205,6 +237,31 @@ async def run_task(
                 "HTTP_PROXY": proxy_url,
                 "NO_PROXY": "127.0.0.1,localhost",
             }
+
+        agent_ports: list[int] = []
+        if mirror is not None and config.security.deny_egress:
+            candidates = (
+                env_port,
+                egress.port if egress is not None else None,
+                _loopback_port(config.agent.base_url),
+            )
+            agent_ports = list(dict.fromkeys(port for port in candidates if port))
+            for port in agent_ports:
+                await mirror.mirror(port)
+        runtime_wrap = _bridged(
+            make_wrapper(
+                config.security.sandbox,
+                workdir=workdir,
+                allow_read=[src_dir, *agent.host_read_paths()],
+                deny_egress=config.security.deny_egress,
+                deny_read=deny_read,
+                allow_write_prefixes=agent.host_write_prefixes(),
+                allow_rw=_mirror_sockets(mirror, agent_ports),
+                image=config.security.runtime_opts.get("image"),
+            ),
+            mirror,
+            agent_ports,
+        )
 
         builder = PromptBuilder()
         system_prompt = builder.build_system_prompt(
@@ -259,8 +316,10 @@ async def run_task(
                     move_count=lambda: server.live_action_count(task_name),
                     stop=stop,
                 )
-        finally:  # always release the agent subprocess + the egress proxy, even on a crash
+        finally:  # always release the agent subprocess + the network plumbing, even on a crash
             await agent.close()
             if egress is not None:
                 await egress.close()
+            if mirror is not None:
+                await mirror.close()
         return reason

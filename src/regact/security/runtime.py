@@ -106,6 +106,7 @@ def make_wrapper(
     deny_egress: bool = False,
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
+    allow_rw: Sequence[str] = (),
     image: str | None = None,
 ) -> Wrapper:
     """Return a pure ``argv -> argv`` wrapper that runs argv inside the sandbox.
@@ -115,6 +116,8 @@ def make_wrapper(
     every copy of the game, sibling experiments — is absent. We never enumerate the game's
     locations; we allow what the agent needs and deny the rest. ``deny_read`` carves specific
     subtrees (the game engine/data packages) back out of the allowed interpreter prefix.
+    ``allow_rw`` grants full access to extra paths — including connecting to unix sockets
+    there, which is how bridged host services stay reachable when egress is denied.
     """
     resolved = resolve(runtime)
     _log_resolved(runtime, resolved)
@@ -128,6 +131,7 @@ def make_wrapper(
             deny_egress=deny_egress,
             deny_read=deny_read,
             allow_write_prefixes=allow_write_prefixes,
+            allow_rw=allow_rw,
             image=image,
         )
 
@@ -143,6 +147,7 @@ def wrap_argv(
     deny_egress: bool = False,
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
+    allow_rw: Sequence[str] = (),
     image: str | None = None,
 ) -> Argv:
     """Prepend the per-platform launcher so ``argv`` runs inside the sandbox (deny-by-default)."""
@@ -150,11 +155,13 @@ def wrap_argv(
     if resolved is SandboxRuntime.NONE:
         return list(argv)
     if resolved is SandboxRuntime.SEATBELT:
-        return _seatbelt(argv, workdir, allow_read, deny_egress, deny_read, allow_write_prefixes)
+        return _seatbelt(
+            argv, workdir, allow_read, deny_egress, deny_read, allow_write_prefixes, allow_rw
+        )
     if resolved is SandboxRuntime.BWRAP:
-        return _bwrap(argv, workdir, allow_read, deny_egress, deny_read)
+        return _bwrap(argv, workdir, allow_read, deny_egress, deny_read, allow_rw)
     if resolved is SandboxRuntime.APPTAINER:
-        return _apptainer(argv, workdir, allow_read, image)
+        return _apptainer(argv, workdir, allow_read, image, allow_rw)
     if resolved is SandboxRuntime.LANDLOCK:
         raise NotImplementedError("landlock backend needs a helper binary; not yet built")
     return list(argv)
@@ -177,6 +184,7 @@ def _seatbelt(
     deny_egress: bool,
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
+    allow_rw: Sequence[str] = (),
 ) -> Argv:
     """macOS: deny-by-default; allow only the system layer, interpreter, and ``allow_read``.
 
@@ -210,6 +218,7 @@ def _seatbelt(
     read_only = [*_python_prefixes(), *(d for d in system_ro if os.path.exists(d))]
     read_write = [os.path.realpath(workdir), "/dev", os.path.join(home, "Library/Caches")]
     read_write += [os.path.realpath(p) for p in allow_read]
+    read_write += [os.path.realpath(p) for p in allow_rw]
     rules = [
         "(version 1)",
         "(deny default)",
@@ -230,6 +239,10 @@ def _seatbelt(
         rules.append(f"(deny file-read* {targets})")
     if deny_egress:  # keep loopback (env server + local LLM), block external
         rules.append('(allow network* (local ip "localhost:*") (remote ip "localhost:*"))')
+        # The loopback-ip filter above excludes unix sockets, so sockets in an
+        # ``allow_rw`` path need their own connect rule to stay reachable.
+        for path in (os.path.realpath(p) for p in allow_rw):
+            rules.append(f"(allow network-outbound (remote unix-socket {_sbpl_target(path)}))")
     else:
         rules.append("(allow network*)")
     return ["sandbox-exec", "-p", "".join(rules), *argv]
@@ -241,6 +254,7 @@ def _bwrap(
     allow_read: Sequence[str],
     deny_egress: bool,
     deny_read: Sequence[str] = (),
+    allow_rw: Sequence[str] = (),
 ) -> Argv:
     """Linux: a mount namespace that contains ONLY the allowlist (deny-default).
 
@@ -269,20 +283,27 @@ def _bwrap(
     for path in (os.path.realpath(p) for p in allow_read):
         cmd += ["--ro-bind-try", path, path]
     cmd += ["--bind", wd, wd, "--chdir", wd]
+    for path in (os.path.realpath(p) for p in allow_rw):
+        cmd += ["--bind", path, path]
     for path in (os.path.realpath(p) for p in deny_read):
         if os.path.isdir(path):
             cmd += ["--tmpfs", path]
     if deny_egress:
-        # NOTE: --unshare-net also severs loopback; only safe when the env server +
-        # LLM are reached over a unix socket or are inside the namespace. Fine-grained
-        # "deny external, keep loopback" needs a seccomp filter (a later backend).
+        # A fresh network namespace: only a private loopback exists, so every host
+        # route (including the host's own 127.0.0.1) is gone by construction.
+        # Sanctioned services come back through socket files in ``allow_rw``
+        # (see :mod:`regact.security.netbridge`).
         cmd += ["--unshare-net"]
     cmd += ["--", *argv]
     return cmd
 
 
 def _apptainer(
-    argv: Sequence[str], workdir: str, allow_read: Sequence[str], image: str | None
+    argv: Sequence[str],
+    workdir: str,
+    allow_read: Sequence[str],
+    image: str | None,
+    allow_rw: Sequence[str] = (),
 ) -> Argv:
     """HPC: a Singularity/Apptainer SIF with ONLY the allowlist bound.
 
@@ -294,7 +315,8 @@ def _apptainer(
     wd = os.path.realpath(workdir)
     binary = "apptainer" if shutil.which("apptainer") else "singularity"
     cmd = [binary, "exec", "--containall", "--no-home", "--bind", f"{wd}:{wd}", "--pwd", wd]
-    for path in (*_python_prefixes(), *(os.path.realpath(p) for p in allow_read)):
+    paths = (*_python_prefixes(), *(os.path.realpath(p) for p in (*allow_read, *allow_rw)))
+    for path in paths:
         if os.path.exists(path):  # apptainer --bind errors on a missing source
             cmd += ["--bind", f"{path}:{path}"]
     cmd += [image, *argv]
