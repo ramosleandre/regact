@@ -211,6 +211,26 @@ def test_wrap_argv_seatbelt_allows_unix_socket_connect_under_deny_egress(tmp_pat
     assert os.path.realpath(str(sock)) in profile
 
 
+def test_home_enumeration_tolerates_only_the_mount_skeleton(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dir names on the path to an allowed prefix are metadata; anything else is a breach."""
+    from regact.security.probe import _can_enumerate_home
+
+    home = tmp_path / "home"
+    venv = home / "work" / "repo" / ".venv"
+    venv.mkdir(parents=True)
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(sys, "base_prefix", str(venv))
+
+    attacked, detail = _can_enumerate_home(str(home))
+    assert not attacked and "skeleton only" in detail  # only the path to the venv shows
+
+    (home / "private.txt").write_text("x")
+    attacked, detail = _can_enumerate_home(str(home))
+    assert attacked and "beyond" in detail  # a real entry outside the skeleton IS a breach
+
+
 def test_probe_report_separates_security_and_liveness_verdicts() -> None:
     """A conforming deny is DEFENDED, a conforming allow WORKS; failures split into
     VULNERABLE (breach) vs BLOCKED (over-restrictive sandbox)."""

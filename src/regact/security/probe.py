@@ -71,6 +71,42 @@ def _can_connect_unix(path: str) -> tuple[bool, str]:
         return False, type(exc).__name__
 
 
+def _sandbox_path_skeleton() -> list[str]:
+    """The path prefixes a sandbox legitimately materializes (interpreter + framework).
+
+    A deny-default backend that bind-mounts these must create their parent dirs, so
+    the NAMES of those parents exist inside the sandbox. That is metadata — the same
+    stance the seatbelt profile takes with ``file-read-metadata``: that a path exists
+    is harmless; the contract protects content.
+    """
+    import regact
+
+    return [
+        os.path.realpath(sys.prefix),
+        os.path.realpath(sys.base_prefix),
+        os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))),
+    ]
+
+
+def _can_enumerate_home(home: str) -> tuple[bool, str]:
+    """Attack: enumerate the home dir for anything beyond the mount skeleton."""
+    try:
+        entries = os.listdir(home)
+    except OSError as exc:
+        return False, type(exc).__name__
+    real_home = os.path.realpath(home)
+    skeleton = [p for p in _sandbox_path_skeleton() if p.startswith(real_home + os.sep)]
+
+    def on_skeleton(entry: str) -> bool:
+        child = os.path.join(real_home, entry)
+        return any(p == child or p.startswith(child + os.sep) for p in skeleton)
+
+    beyond = [entry for entry in entries if not on_skeleton(entry)]
+    if beyond:
+        return True, f"{len(beyond)} entries beyond the mount skeleton"
+    return False, f"mount skeleton only ({len(entries)} entries)"
+
+
 def _can_write(path: str) -> tuple[bool, str]:
     try:
         with open(path, "w", encoding="utf-8") as handle:
@@ -166,7 +202,7 @@ def run_probe(
     # R2 (deny): read / enumerate the game, or escape to an unrelated location.
     add(Invariant.R2_SECRET, "A1 open(game secret)", "deny", _can_read(secret_path))
     add(Invariant.R2_SECRET, "A8 list the game directory", "deny", _can_list(game_dir))
-    add(Invariant.R2_SECRET, "A8 reach the user home dir", "deny", _can_list(home))
+    add(Invariant.R2_SECRET, "A8 enumerate the user home dir", "deny", _can_enumerate_home(home))
     # R3 (deny): writing outside the workdir (here, into the game dir) must fail.
     wrote = _can_write(os.path.join(game_dir, ".probe_write"))
     add(Invariant.R3_WRITE, "R3 write outside the workdir", "deny", wrote)
