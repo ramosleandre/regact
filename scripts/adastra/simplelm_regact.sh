@@ -13,7 +13,8 @@
 #   SANDBOX               default `none`. Set `apptainer` (+ SIF below) for the OS sandbox.
 #   SIF                   apptainer image (.sif) — REQUIRED when SANDBOX=apptainer
 #   WALLTIME_S            default `3000`  (per-game wall-clock cap, seconds)
-#   OUTPUT_ROOT           default `experiments/adastra`
+#   OUTPUT_ROOT           default `experiments` -> regact writes experiments/<EXP_NAME>/<game>/,
+#                         next to ClusterControl's experiments/<EXP_NAME>/logs/ (one dir per run)
 set -uo pipefail
 
 PORT=${PORT:-9876}
@@ -25,7 +26,7 @@ TASK_NAMES=${TASK_NAMES:-ls20}
 LIFECYCLE=${LIFECYCLE:-multi_instance}
 SANDBOX=${SANDBOX:-none}
 WALLTIME_S=${WALLTIME_S:-3000}
-OUTPUT_ROOT=${OUTPUT_ROOT:-experiments/adastra}
+OUTPUT_ROOT=${OUTPUT_ROOT:-experiments}  # -> experiments/<EXP_NAME>/<game>/ (beside ClusterControl logs)
 
 echo "[regact] serve ${MODEL_NAME} (tool-parser=${TP}) — log ${SLOG}"
 simplelm serve --model-path "${MODEL_PATH}" --model-name "${MODEL_NAME}" \
