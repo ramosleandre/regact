@@ -63,8 +63,6 @@ def _deps(tmp_path: Path) -> RunDeps:
         lifecycle=Lifecycle.MULTI_INSTANCE,
         solution_path=str(tmp_path / "solution.py"),
         submissions_dir=str(tmp_path / "submissions"),
-        n_episodes=2,
-        max_moves=100,
     )
 
 
@@ -90,14 +88,14 @@ def test_controller_prompt_fragment_explains_contract() -> None:
 
 
 def test_controller_tools_wired_with_run_deps(tmp_path: Path) -> None:
-    tools = ControllerFeature().tools(_deps(tmp_path))
+    tools = ControllerFeature(n_episodes=2, max_moves=100).tools(_deps(tmp_path))
     assert isinstance(tools[0], SubmitSolution)
     assert isinstance(tools[1], ExitTask)
     assert {t.name for t in tools} == {"SubmitSolution", "ExitTask"}
 
 
 def test_controller_hook_is_teardown_finalize(tmp_path: Path) -> None:
-    hooks = ControllerFeature().hooks(_deps(tmp_path))
+    hooks = ControllerFeature(n_episodes=2, max_moves=100).hooks(_deps(tmp_path))
     assert len(hooks) == 1 and isinstance(hooks[0], FinalizeControllerHook)
     assert hooks[0].phase is HookPhase.TEARDOWN
 
@@ -105,7 +103,7 @@ def test_controller_hook_is_teardown_finalize(tmp_path: Path) -> None:
 async def test_finalize_hook_rescores_existing_solution(tmp_path: Path) -> None:
     (tmp_path / "solution.py").write_text(_FORWARD)
     deps = _deps(tmp_path)
-    result = await ControllerFeature().hooks(deps)[0].run()
+    result = await ControllerFeature(n_episodes=2, max_moves=100).hooks(deps)[0].run()
     assert result is not None
     # It scored the final solution and wrote the official "final" result.
     final = json.loads((tmp_path / "submissions" / "final" / "results.json").read_text())
@@ -115,21 +113,22 @@ async def test_finalize_hook_rescores_existing_solution(tmp_path: Path) -> None:
 
 async def test_finalize_hook_skips_when_no_solution(tmp_path: Path) -> None:
     deps = _deps(tmp_path)  # no solution.py on disk
-    result = await ControllerFeature().hooks(deps)[0].run()
+    result = await ControllerFeature(n_episodes=2, max_moves=100).hooks(deps)[0].run()
     assert result is None
     assert not (tmp_path / "submissions" / "final").exists()
 
 
 def test_build_features_resolves_controller() -> None:
-    features = build_features(["controller"])
+    features = build_features({"controller": {"n_episodes": 3}})
     assert len(features) == 1 and isinstance(features[0], ControllerFeature)
+    assert features[0]._n_episodes == 3  # params reach the feature's constructor
 
 
 def test_bootstrap_with_controller_feature_writes_solution(tmp_path: Path) -> None:
     """The agnostic base + ControllerFeature together produce a full workdir."""
     ws = Workspace(str(tmp_path / "wd"))
     ws.bootstrap(
-        build_features(["controller"]),
+        build_features({"controller": {}}),
         problem_name="grid",
         task_name="lvl1",
         env_base_url="http://127.0.0.1:9000",

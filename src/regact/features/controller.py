@@ -121,8 +121,10 @@ class FinalizeControllerHook(Hook):
 
     phase = HookPhase.TEARDOWN
 
-    def __init__(self, deps: RunDeps) -> None:
+    def __init__(self, deps: RunDeps, *, n_episodes: int, max_moves: int) -> None:
         self._deps = deps
+        self._n_episodes = n_episodes
+        self._max_moves = max_moves
 
     async def run(self) -> EvalResult | None:
         deps = self._deps
@@ -133,8 +135,8 @@ class FinalizeControllerHook(Hook):
             solution_path=deps.solution_path,
             output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
             lifecycle=deps.lifecycle,
-            n_episodes=deps.n_episodes,
-            max_moves=deps.max_moves,
+            n_episodes=self._n_episodes,
+            max_moves=self._max_moves,
             record_video=deps.record_video,
         )
         deps.experiment.last_submission_results = result.to_json()
@@ -142,9 +144,18 @@ class FinalizeControllerHook(Hook):
 
 
 class ControllerFeature(Feature):
-    """The base controller-writing capability."""
+    """The base controller-writing capability.
+
+    Owns its evaluation knobs (they configure THIS feature's scoring, not the run):
+    ``n_episodes`` eval episodes per submission, ``max_moves`` env steps per rollout.
+    """
 
     name = "controller"
+    evaluates_on_env = True  # SubmitSolution/finalize score by rolling episodes on the env
+
+    def __init__(self, *, n_episodes: int = 1, max_moves: int = 2500) -> None:
+        self._n_episodes = int(n_episodes)
+        self._max_moves = int(max_moves)
 
     def templates(self, ctx: FeatureContext) -> list[TemplateFile]:
         return [
@@ -157,6 +168,9 @@ class ControllerFeature(Feature):
         return _PROMPT_MD.read_text(encoding="utf-8")
 
     def tools(self, deps: RunDeps) -> list[Tool]:
+        # This feature owns the eval, so it also owns the eval fields of the state.
+        deps.experiment.n_eval_episodes = self._n_episodes
+        deps.experiment.n_videos = self._n_episodes if deps.record_video else 0
         submit = SubmitSolution(
             deps.experiment,
             _make_executor(deps),
@@ -164,15 +178,17 @@ class ControllerFeature(Feature):
             submissions_dir=deps.submissions_dir,
             task_name=deps.experiment.task_name,
             lifecycle=deps.lifecycle,
-            n_episodes=deps.n_episodes,
-            max_moves=deps.max_moves,
+            n_episodes=self._n_episodes,
+            max_moves=self._max_moves,
             record_video=deps.record_video,
         )
         return [submit, ExitTask(deps.experiment)]
 
     def hooks(self, deps: RunDeps) -> list[Hook]:
         # ShadowReplayHook (anti-cheat) joins this list in Block 10.
-        return [FinalizeControllerHook(deps)]
+        return [
+            FinalizeControllerHook(deps, n_episodes=self._n_episodes, max_moves=self._max_moves)
+        ]
 
 
 register_feature(ControllerFeature.name, ControllerFeature)

@@ -23,7 +23,6 @@ from regact.config.schema import (
     RunConfig,
     SecurityConfig,
 )
-from regact.security.runtime import SandboxRuntime
 
 
 def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
@@ -40,13 +39,32 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
-    for name in ("keep_alive", "max_moves", "n_episodes"):
-        if name in fields and fields[name] is not None:
-            fields[name] = int(fields[name])
+    if fields.get("keep_alive") is not None:
+        fields["keep_alive"] = int(fields["keep_alive"])
     for name in ("walltime_s", "env_step_budget"):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
+
+
+def _sandbox_bool(value: Any) -> bool:
+    """``security.sandbox`` is a bool; reject the legacy backend-name strings loudly
+    (``bool("none")`` is True, so silent coercion would invert the intent)."""
+    if isinstance(value, bool) or value is None:
+        return bool(value)
+    raise ValueError(
+        f"security.sandbox must be true/false (got {value!r}); to force a backend use "
+        "security.runtime_opts.backend=<seatbelt|bwrap|apptainer>"
+    )
+
+
+def _features_from(raw: Any) -> dict[str, dict[str, Any]]:
+    """Normalize ``features`` to ``{name: params}``; a plain name list means no params."""
+    if raw is None:
+        return {"controller": {}}
+    if isinstance(raw, Mapping):
+        return {str(name): dict(params or {}) for name, params in raw.items()}
+    return {str(name): {} for name in raw}
 
 
 def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
@@ -71,14 +89,12 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             kwargs=dict(problem.get("kwargs") or {}),
         ),
         task_names=list(data.get("task_names") or []),
-        features=list(data.get("features") or ["controller"]),
+        features=_features_from(data.get("features")),
         execution=Execution(data.get("execution", Execution.SEQUENTIAL)),
         parallel_workers=int(data.get("parallel_workers", 1)),
         limits=_limits_from(data.get("limits") or {}),
         security=SecurityConfig(
-            sandbox=SandboxRuntime(sec.get("sandbox", SandboxRuntime.AUTO)),
-            deny_egress=bool(sec.get("deny_egress", False)),
-            require_sandbox=bool(sec.get("require_sandbox", False)),
+            sandbox=_sandbox_bool(sec.get("sandbox", False)),
             runtime_opts=dict(sec.get("runtime_opts") or {}),
         ),
         record_video=bool(data.get("record_video", True)),

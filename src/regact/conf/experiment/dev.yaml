@@ -12,8 +12,11 @@ defaults:
 
 # Experiment-specific fields only:
 task_names: [ls20]        # one game, so the run is quick
+problem:
+  lifecycle: multi_instance  # remake per episode: keeps the smoke run allowed with the
+                             # controller eval (single_instance + eval is refused)
 security:
-  sandbox: none           # dev convenience; no confinement
+  sandbox: false          # dev convenience; no confinement
 limits:
   keep_alive: 3
 experiment_name: dev

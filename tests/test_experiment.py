@@ -51,7 +51,7 @@ async def test_run_experiment_runs_all_tasks(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake_exp"),
-        limits=LimitsConfig(keep_alive=1, max_moves=10),
+        limits=LimitsConfig(keep_alive=1),
     )
     reasons = await run_experiment(config, output_root=str(tmp_path))
 

@@ -112,7 +112,8 @@ backend but has no run group yet.)
 **Run-level:**
 - `features`: `[controller]` (the only registered feature so far).
 - `execution`: `sequential` | `parallel`; `parallel_workers`: int (>1 with parallel).
-- `limits.{keep_alive, max_moves, n_episodes, walltime_s, env_step_budget}`.
+- `limits.{keep_alive, walltime_s, env_step_budget}`; eval knobs live on the feature:
+  `features.controller.{n_episodes, max_moves}`.
 - `experiment_name`, `output_root` (outputs under `<output_root>/<experiment_name>/`).
 
 See it composed without running: `python -m regact.run_exp agent=claude problem=arc_agi --cfg job`.

@@ -11,7 +11,7 @@ graph; ``controller`` is always present as the base.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -63,8 +63,6 @@ class RunDeps:
     lifecycle: Lifecycle
     solution_path: str
     submissions_dir: str
-    n_episodes: int = 1
-    max_moves: int = 400
     compute_episode_metrics: Callable[..., dict[str, Any]] | None = None
     aggregate_episode_metrics: Callable[..., dict[str, Any]] | None = None
     sandbox_wrap: Callable[[list[str]], list[str]] | None = None
@@ -100,10 +98,12 @@ class Feature(ABC):
 
     Static side (``templates``, ``prompt_fragment``) takes a
     :class:`FeatureContext`; runtime side (``tools``, ``hooks``) takes
-    :class:`RunDeps` supplied by the orchestrator. The feature stays stateless.
+    :class:`RunDeps` supplied by the orchestrator. A feature holds only its own
+    configuration (constructor kwargs from ``config.features``), never run state.
     """
 
     name: str
+    evaluates_on_env: bool = False
 
     @abstractmethod
     def templates(self, ctx: FeatureContext) -> list[TemplateFile]:
@@ -128,19 +128,23 @@ class Feature(ABC):
 
 # Concrete features register here (Block 6 adds ``controller``); the config names
 # features by string, so it never imports a feature class and there is no cycle.
-_REGISTRY: dict[str, Callable[[], Feature]] = {}
+_REGISTRY: dict[str, Callable[..., Feature]] = {}
 
 
-def register_feature(name: str, factory: Callable[[], Feature]) -> None:
-    """Bind a feature name to a zero-arg factory."""
+def register_feature(name: str, factory: Callable[..., Feature]) -> None:
+    """Bind a feature name to a factory taking that feature's config as kwargs."""
     _REGISTRY[name] = factory
 
 
-def build_features(names: list[str]) -> list[Feature]:
-    """Resolve feature names to instances via the registry."""
+def build_features(features: Mapping[str, Mapping[str, Any] | None]) -> list[Feature]:
+    """Resolve ``{name: params}`` to instances via the registry.
+
+    Each feature owns its own knobs (``features.controller.n_episodes=3`` on the
+    CLI), so run-level config never carries feature-specific fields.
+    """
     _load_builtins()
     try:
-        return [_REGISTRY[name]() for name in names]
+        return [_REGISTRY[name](**dict(params or {})) for name, params in features.items()]
     except KeyError as exc:
         raise ValueError(
             f"unknown feature {exc.args[0]!r}; registered: {sorted(_REGISTRY)}"

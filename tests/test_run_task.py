@@ -16,6 +16,7 @@ from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import (
     AgentConfig,
     AgentName,
+    Lifecycle,
     LimitsConfig,
     ProblemConfig,
     RunConfig,
@@ -88,8 +89,8 @@ def _config() -> RunConfig:
     return RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake", kwargs={"env_id": "fake-v0"}),
-        features=["controller"],
-        limits=LimitsConfig(keep_alive=10, max_moves=10, n_episodes=2),
+        features={"controller": {"n_episodes": 2, "max_moves": 10}},
+        limits=LimitsConfig(keep_alive=10),
     )
 
 
@@ -138,10 +139,23 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
     assert any(e["event"] == "hook_executed" for e in events)
 
 
-async def test_run_task_require_sandbox_fails_unconfined(tmp_path: Path) -> None:
+async def test_run_task_sandbox_true_fails_when_no_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from regact.orchestration import task as task_module
+
+    monkeypatch.setattr(task_module, "resolve", lambda _: SandboxRuntime.NONE)
     config = _config()
-    config.security = SecurityConfig(sandbox=SandboxRuntime.NONE, require_sandbox=True)
-    with pytest.raises(RuntimeError, match="require_sandbox"):
+    config.security = SecurityConfig(sandbox=True)
+    with pytest.raises(RuntimeError, match=r"security\.sandbox"):
+        await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
+    assert not (tmp_path / "logs").exists()  # refused before writing any artifact
+
+
+async def test_run_task_refuses_single_instance_with_evaluating_feature(tmp_path: Path) -> None:
+    config = _config()
+    config.problem.lifecycle = Lifecycle.SINGLE_INSTANCE
+    with pytest.raises(RuntimeError, match="single-instance"):
         await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
     assert not (tmp_path / "logs").exists()  # refused before writing any artifact
 
@@ -149,6 +163,6 @@ async def test_run_task_require_sandbox_fails_unconfined(tmp_path: Path) -> None
 async def test_run_task_builds_agent_from_config_when_none(tmp_path: Path) -> None:
     """With no injected agent, build_agent(scripted) runs (default turns -> exits on limit)."""
     config = _config()
-    config.limits = LimitsConfig(keep_alive=1, max_moves=10)
+    config.limits = LimitsConfig(keep_alive=1)
     reason = await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
     assert reason == "loop_limit"  # the default scripted agent never submits/exits

@@ -79,7 +79,7 @@ def show(
         builder.build_system_prompt(
             problem,
             task_name,
-            build_features(features),
+            build_features({name: {} for name in features}),
             lifecycle=lifecycle,
             info_mode=info_mode,
             control_actions="client_cli",

@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from regact.config.loader import run_config_from_mapping
 from regact.config.schema import AgentName, Execution, InfoMode, Lifecycle, redacted_config_dict
 from regact.run_kaggle import build_run_config_from_profile
@@ -44,7 +46,7 @@ def test_mapping_defaults() -> None:
     config = run_config_from_mapping(
         {"agent": {"name": "scripted"}, "problem": {"name": "minigrid"}}
     )
-    assert config.features == ["controller"]
+    assert config.features == {"controller": {}}
     assert config.execution is Execution.SEQUENTIAL
     assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE
 
@@ -68,17 +70,46 @@ def test_mapping_preserves_toplevel_run_flags() -> None:
     assert off.shadow_replay is False
 
 
-def test_mapping_parses_require_sandbox() -> None:
+def test_mapping_parses_security_sandbox_bool() -> None:
     on = run_config_from_mapping(
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "arc_agi"},
-            "security": {"require_sandbox": True},
+            "security": {"sandbox": True},
         }
     )
-    assert on.security.require_sandbox is True
+    assert on.security.sandbox is True
     off = run_config_from_mapping({"agent": {"name": "scripted"}, "problem": {"name": "arc_agi"}})
-    assert off.security.require_sandbox is False
+    assert off.security.sandbox is False
+    # Legacy backend-name strings must fail loudly, not coerce (bool("none") is True).
+    with pytest.raises(ValueError, match="security\\.sandbox"):
+        run_config_from_mapping(
+            {
+                "agent": {"name": "scripted"},
+                "problem": {"name": "arc_agi"},
+                "security": {"sandbox": "none"},
+            }
+        )
+
+
+def test_mapping_normalizes_features() -> None:
+    # A mapping keeps per-feature params; a plain name list means no params.
+    cfg = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "arc_agi"},
+            "features": {"controller": {"n_episodes": 3}},
+        }
+    )
+    assert cfg.features == {"controller": {"n_episodes": 3}}
+    legacy = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "arc_agi"},
+            "features": ["controller"],
+        }
+    )
+    assert legacy.features == {"controller": {}}
 
 
 def test_redacted_config_dict_masks_api_key() -> None:
@@ -105,7 +136,7 @@ def test_competition_profile_loads() -> None:
     assert config.agent.base_url == "http://127.0.0.1:8000/v1"  # default vLLM endpoint
     # default offline; ARC_OPERATION_MODE flips it to online for the gateway
     assert config.problem.kwargs["operation_mode"] == "offline"
-    assert config.security.sandbox.value == "none"  # ARC gateway already isolates the kernel
+    assert config.security.sandbox is False  # the ARC gateway already isolates the kernel
 
 
 def test_competition_profile_env_knobs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -139,7 +170,8 @@ def test_run_exp_hydra_composes_a_config() -> None:
     assert config.agent.name is AgentName.CLAUDE
     assert config.agent.args["permission_mode"] == "bypassPermissions"  # from the claude group
     assert config.agent.args["effort"] == "high"  # CLI override
-    assert config.features == ["controller"]
+    # The features group carries each feature's own knobs.
+    assert config.features == {"controller": {"n_episodes": 1, "max_moves": 2500}}
 
 
 def test_experiment_profile_respects_cli_agent_override() -> None:

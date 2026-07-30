@@ -77,17 +77,15 @@ class _Stack:
                 lifecycle=Lifecycle.MULTI_INSTANCE,
                 solution_path=str(self.workdir / "solution.py"),
                 submissions_dir=str(self.workdir / "submissions"),
-                n_episodes=1,
-                max_moves=10,
             )
-            feature = ControllerFeature()
+            feature = ControllerFeature(n_episodes=1, max_moves=10)
             tools = feature.tools(deps)
             self.hooks = feature.hooks(deps)
         self.tools = tools
         self.transcript = TranscriptWriter(str(self.logs / "transcript.jsonl"))
         self.logger = RunLogger(str(self.logs), task="g")
         self.state_path = str(self.logs / "experiment_state.json")
-        self.limits = LimitsConfig(keep_alive=10, max_moves=10)
+        self.limits = LimitsConfig(keep_alive=10)
 
     async def run(self, agent: ScriptedAgent, *, stop: StopSignal | None = None) -> str:
         try:
@@ -176,7 +174,7 @@ async def test_pipeline_stops_on_backend_error(tmp_path: Path) -> None:
 
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(keep_alive=2, max_moves=10)
+    stack.limits = LimitsConfig(keep_alive=2)
     agent = ScriptedAgent([])  # never calls ExitTask: each turn defaults to TurnComplete
     reason = await stack.run(agent)
 

@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from regact.security.runtime import SandboxRuntime
-
 # Config fields whose values are secrets and must never be written to run artifacts.
 _SECRET_FIELDS = frozenset({"api_key"})
 _REDACTED = "***redacted***"
@@ -71,18 +69,14 @@ class ProblemConfig:
 @dataclass
 class LimitsConfig:
     keep_alive: int = 150  # max idle agent turns before the loop gives up
-    max_moves: int = 2500  # max env.step per controller rollout (eval)
-    n_episodes: int = 1  # eval episodes per submission (MULTI_INSTANCE: more = better stats)
     walltime_s: int | None = None  # wall-clock budget for the whole task (per game)
     env_step_budget: int | None = None  # hard cap on env steps per env (anti-runaway; None = off)
 
 
 @dataclass
 class SecurityConfig:
-    sandbox: SandboxRuntime = SandboxRuntime.AUTO  # which OS sandbox wraps the agent subprocess
-    deny_egress: bool = False  # Block external internet except the loaded agent's declared host
-    require_sandbox: bool = False  # fail the run if no sandbox backend is usable (auto -> none)
-    runtime_opts: dict[str, Any] = field(default_factory=dict)  # backend extras, e.g. image=.sif
+    sandbox: bool = False
+    runtime_opts: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -92,7 +86,7 @@ class RunConfig:
     agent: AgentConfig
     problem: ProblemConfig
     task_names: list[str] = field(default_factory=list)  # empty = all games of the problem
-    features: list[str] = field(default_factory=lambda: ["controller"])
+    features: dict[str, dict[str, Any]] = field(default_factory=lambda: {"controller": {}})
     execution: Execution = Execution.SEQUENTIAL
     parallel_workers: int = 1
     limits: LimitsConfig = field(default_factory=LimitsConfig)

@@ -18,7 +18,13 @@ from collections.abc import Sequence
 from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent, build_agent
-from regact.config.schema import AgentName, Lifecycle, RunConfig, redacted_config_dict
+from regact.config.schema import (
+    AgentName,
+    Lifecycle,
+    RunConfig,
+    SecurityConfig,
+    redacted_config_dict,
+)
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
@@ -93,6 +99,15 @@ def _bridged(wrapper: Wrapper, mirror: LoopbackMirror | None, ports: Sequence[in
     return lambda argv: wrapper([*prefix, *argv])
 
 
+def _requested_runtime(security: SecurityConfig) -> SandboxRuntime:
+    """The runtime to hand the security layer: auto-detect when confined, unless
+    ``runtime_opts.backend`` forces one; ``NONE`` when unconfined."""
+    if not security.sandbox:
+        return SandboxRuntime.NONE
+    backend = security.runtime_opts.get("backend")
+    return SandboxRuntime(backend) if backend else SandboxRuntime.AUTO
+
+
 def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
     if lifecycle is Lifecycle.SINGLE_INSTANCE:
         return SingleInstancePolicy()
@@ -148,10 +163,19 @@ async def run_task(
     ``agent`` is injectable (tests pass a scripted agent); by default it is built
     from ``config.agent``.
     """
-    if config.security.require_sandbox and resolve(config.security.sandbox) is SandboxRuntime.NONE:
+    requested_runtime = _requested_runtime(config.security)
+    if config.security.sandbox and resolve(requested_runtime) is SandboxRuntime.NONE:
         raise RuntimeError(
-            "security.require_sandbox=true but the sandbox resolves to 'none' on this host; "
-            "enable a backend (bwrap/seatbelt/apptainer) or unset require_sandbox"
+            "security.sandbox=true but no sandbox backend is usable on this host; "
+            "enable one (bwrap/seatbelt/apptainer) or set security.sandbox=false"
+        )
+    features = build_features(config.features)
+    if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and any(
+        feature.evaluates_on_env for feature in features
+    ):
+        raise RuntimeError(
+            "single-instance problem with an evaluating feature: exploration and evaluation "
+            "share the same env, so scores would reflect the session, not an isolated policy"
         )
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
@@ -167,7 +191,6 @@ async def run_task(
             TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
             RunLogger(logs_dir, task=task_name) as logger,
         ):
-            features = build_features(config.features)
             _bootstrap_workdir(
                 config, problem, task_name, workdir=workdir, conn=conn, features=features
             )
@@ -175,8 +198,6 @@ async def run_task(
             experiment = ExperimentState(
                 problem_name=problem.name,
                 task_name=task_name,
-                n_eval_episodes=config.limits.n_episodes,
-                n_videos=config.limits.n_episodes if config.record_video else 0,
                 problem_kwargs=dict(config.problem.kwargs),
             )
             src_dir = _regact_src_dir()
@@ -184,7 +205,7 @@ async def run_task(
 
             mirror: LoopbackMirror | None = None
             env_port = _loopback_port(conn.base_url)
-            if not in_process and resolve(config.security.sandbox) is SandboxRuntime.BWRAP:
+            if not in_process and resolve(requested_runtime) is SandboxRuntime.BWRAP:
                 mirror = LoopbackMirror()
 
             eval_ports = [port for port in (env_port,) if port]
@@ -196,7 +217,7 @@ async def run_task(
                 if in_process
                 else _bridged(
                     make_wrapper(
-                        config.security.sandbox,
+                        requested_runtime,
                         workdir=workdir,
                         allow_read=[src_dir],
                         deny_egress=True,
@@ -214,8 +235,6 @@ async def run_task(
                 lifecycle=config.problem.lifecycle,
                 solution_path=os.path.join(workdir, "solution.py"),
                 submissions_dir=os.path.join(workdir, "submissions"),
-                n_episodes=config.limits.n_episodes,
-                max_moves=config.limits.max_moves,
                 compute_episode_metrics=problem.compute_episode_metrics,
                 aggregate_episode_metrics=problem.aggregate_episode_metrics,
                 sandbox_wrap=eval_wrap,
@@ -244,7 +263,7 @@ async def run_task(
             agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
             egress: EgressProxy | None = None
             egress_hosts = agent.host_egress_hosts()
-            if config.security.deny_egress and egress_hosts:
+            if config.security.sandbox and egress_hosts:
                 egress = EgressProxy(egress_hosts)
                 proxy_url = f"http://127.0.0.1:{await egress.start()}"
                 agent_env |= {
@@ -254,7 +273,7 @@ async def run_task(
                 }
 
             agent_ports: list[int] = []
-            if mirror is not None and config.security.deny_egress:
+            if mirror is not None:
                 candidates = (
                     env_port,
                     egress.port if egress is not None else None,
@@ -265,10 +284,10 @@ async def run_task(
                     await mirror.mirror(port)
             runtime_wrap = _bridged(
                 make_wrapper(
-                    config.security.sandbox,
+                    requested_runtime,
                     workdir=workdir,
                     allow_read=[src_dir, *agent.host_read_paths()],
-                    deny_egress=config.security.deny_egress,
+                    deny_egress=config.security.sandbox,
                     deny_read=deny_read,
                     allow_write_prefixes=agent.host_write_prefixes(),
                     allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],

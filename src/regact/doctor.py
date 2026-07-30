@@ -89,7 +89,7 @@ def _sandbox_rows() -> list[Row]:
     ]
     if not rows:
         rows.append(
-            Row("sandbox", "no backend", WARN, "runs unconfined (security.sandbox=none only)")
+            Row("sandbox", "no backend", WARN, "runs unconfined (security.sandbox=false only)")
         )
     try:
         from regact.security.runtime import SandboxRuntime, detect, userns_ok

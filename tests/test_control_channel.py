@@ -75,10 +75,8 @@ async def test_control_channel_runs_submit_and_exit(tmp_path: Path) -> None:
             lifecycle=Lifecycle.MULTI_INSTANCE,
             solution_path=str(workdir / "solution.py"),
             submissions_dir=str(workdir / "submissions"),
-            n_episodes=1,
-            max_moves=10,
         )
-        tools = ControllerFeature().tools(deps)
+        tools = ControllerFeature(n_episodes=1, max_moves=10).tools(deps)
         server.bind_control("g", tools, cwd=str(workdir))
         url = f"{conn.base_url}/control/g/tool"
 
@@ -110,10 +108,9 @@ async def test_control_channel_submit_surfaces_controller_error(tmp_path: Path) 
             lifecycle=Lifecycle.MULTI_INSTANCE,
             solution_path=str(workdir / "solution.py"),
             submissions_dir=str(workdir / "submissions"),
-            n_episodes=1,
-            max_moves=10,
         )
-        server.bind_control("g", ControllerFeature().tools(deps), cwd=str(workdir))
+        tools = ControllerFeature(n_episodes=1, max_moves=10).tools(deps)
+        server.bind_control("g", tools, cwd=str(workdir))
         url = f"{conn.base_url}/control/g/tool"
         resp = httpx.post(url, json={"name": "SubmitSolution", "input": {}}, timeout=30.0)
         assert resp.status_code == 200

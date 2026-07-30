@@ -21,8 +21,8 @@ class ExperimentState:
 
     problem_name: str
     task_name: str
-    n_eval_episodes: int
-    n_videos: int
+    n_eval_episodes: int = 0
+    n_videos: int = 0
     problem_kwargs: dict[str, Any] = field(default_factory=dict)
     submission_count: int = 0
     exit_requested: bool = False
