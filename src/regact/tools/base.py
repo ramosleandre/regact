@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+from regact.obs.errors import LogComponent
+
+if TYPE_CHECKING:
+    from regact.obs.logger import RunLogger
 
 PermissionLevel = Literal["read", "write", "exec"]
 
@@ -60,3 +65,45 @@ class Tool(ABC):
     def validate_input(self, args: dict[str, Any], context: ToolContext) -> str | None:
         """Return an error string for invalid input, else ``None``."""
         return None
+
+
+class LoggingTool(Tool):
+    """A tool wrapped so every execution lands in the operational log.
+
+    Framework actions reach :meth:`Tool.call` through several dispatch paths — the
+    loop, the HTTP control channel, a backend running wrapped native tools. Logging
+    on the tool itself covers them all identically, instead of once per path.
+    """
+
+    def __init__(self, tool: Tool, logger: RunLogger) -> None:
+        self._tool = tool
+        self._logger = logger
+
+    @property
+    def name(self) -> str:
+        return self._tool.name
+
+    @property
+    def description(self) -> str:
+        return self._tool.description
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return self._tool.input_schema
+
+    def permission_level(self, args: dict[str, Any]) -> PermissionLevel:
+        return self._tool.permission_level(args)
+
+    def validate_input(self, args: dict[str, Any], context: ToolContext) -> str | None:
+        return self._tool.validate_input(args, context)
+
+    async def call(self, args: dict[str, Any], context: ToolContext) -> ToolOutput:
+        output = await self._tool.call(args, context)
+        self._logger.log(
+            LogComponent.ORCHESTRATOR,
+            "ERROR" if output.is_error else "INFO",
+            "tool_executed",
+            tool=self._tool.name,
+            is_error=output.is_error,
+        )
+        return output

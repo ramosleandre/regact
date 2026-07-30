@@ -6,6 +6,11 @@
 #   - Hydra:   python -m regact.run_exp experiment=competition
 #   - Kaggle:  python -m regact.run_kaggle          (this is run_kaggle's default profile)
 #
+# This profile keeps INLINE agent/problem dicts (no `defaults:` override list) because
+# run_kaggle loads it directly with OmegaConf, which ignores Hydra defaults. Consequence
+# on the Hydra path: do NOT combine `experiment=competition` with `agent=<other>` — the
+# dicts merge into a hybrid config. Override individual fields (agent.model=...) instead.
+#
 # Values interpolate from the environment so the notebook can switch model/endpoint with
 # ONE knob and never edit this file:
 #   LLM_MODEL_NAME   the served model name        (default: qwen3-14b)

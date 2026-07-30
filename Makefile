@@ -19,8 +19,15 @@ help:  ## general ── Show this help, grouped by category
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 .PHONY: install
-install:  ## setup ── Editable install with dev extras (py3.12)
-	$(PYTHON) -m pip install -e ".[dev]"
+install:  ## setup ── Editable install with dev extras, pinned to the validated set (py3.12)
+	$(PYTHON) -m pip install -e ".[dev]" -c constraints.txt
+
+.PHONY: lock
+lock:  ## setup ── Regenerate constraints.txt from the current venv
+	@{ echo "# Validated dependency set for the research/CI environment (pip constraints file)."; \
+	   echo "# Install with: pip install -e '.[dev]' -c constraints.txt   — regenerate: make lock"; \
+	   $(PYTHON) -m pip freeze --exclude-editable | grep -v "file://"; } > constraints.txt
+	@echo "constraints.txt regenerated"
 
 .PHONY: doctor
 doctor:  ## setup ── Is this machine ready? (ARGS="--endpoint http://127.0.0.1:8000/v1")

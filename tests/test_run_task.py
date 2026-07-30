@@ -131,6 +131,11 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
     assert state["problem_kwargs"] == {"env_id": "fake-v0"}
     assert state["agent_session_id"] == "native-123"
     assert state["env_moves"] > 0  # eval episodes stepped the env
+    # Framework actions and finalization land in the operational log.
+    events = [json.loads(line) for line in (logs / "events.jsonl").read_text().splitlines()]
+    executed = [e["detail"]["tool"] for e in events if e["event"] == "tool_executed"]
+    assert "SubmitSolution" in executed and "ExitTask" in executed
+    assert any(e["event"] == "hook_executed" for e in events)
 
 
 async def test_run_task_require_sandbox_fails_unconfined(tmp_path: Path) -> None:

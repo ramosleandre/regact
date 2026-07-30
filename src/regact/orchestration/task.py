@@ -35,7 +35,7 @@ from regact.security.egress_proxy import EgressProxy
 from regact.security.netbridge import LoopbackMirror
 from regact.security.runtime import SandboxRuntime, Wrapper, make_wrapper, resolve
 from regact.session.state import ExperimentState
-from regact.tools.base import Tool
+from regact.tools.base import LoggingTool, Tool
 from regact.workspace.bootstrap import Workspace
 
 
@@ -163,143 +163,145 @@ async def run_task(
     in_process = config.agent.name is AgentName.SCRIPTED
 
     async with serve_env(server, task_name, in_process=in_process) as conn:
-        features = build_features(config.features)
-        _bootstrap_workdir(
-            config, problem, task_name, workdir=workdir, conn=conn, features=features
-        )
+        with (
+            TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
+            RunLogger(logs_dir, task=task_name) as logger,
+        ):
+            features = build_features(config.features)
+            _bootstrap_workdir(
+                config, problem, task_name, workdir=workdir, conn=conn, features=features
+            )
 
-        experiment = ExperimentState(
-            problem_name=problem.name,
-            task_name=task_name,
-            n_eval_episodes=config.limits.n_episodes,
-            n_videos=config.limits.n_episodes if config.record_video else 0,
-            problem_kwargs=dict(config.problem.kwargs),
-        )
-        src_dir = _regact_src_dir()
-        deny_read = _secret_module_paths(problem.secret_modules())
+            experiment = ExperimentState(
+                problem_name=problem.name,
+                task_name=task_name,
+                n_eval_episodes=config.limits.n_episodes,
+                n_videos=config.limits.n_episodes if config.record_video else 0,
+                problem_kwargs=dict(config.problem.kwargs),
+            )
+            src_dir = _regact_src_dir()
+            deny_read = _secret_module_paths(problem.secret_modules())
 
-        mirror: LoopbackMirror | None = None
-        env_port = _loopback_port(conn.base_url)
-        if not in_process and resolve(config.security.sandbox) is SandboxRuntime.BWRAP:
-            mirror = LoopbackMirror()
+            mirror: LoopbackMirror | None = None
+            env_port = _loopback_port(conn.base_url)
+            if not in_process and resolve(config.security.sandbox) is SandboxRuntime.BWRAP:
+                mirror = LoopbackMirror()
 
-        eval_ports = [port for port in (env_port,) if port]
-        if mirror is not None:
-            for port in eval_ports:
-                await mirror.mirror(port)
-        eval_wrap = (
-            None
-            if in_process
-            else _bridged(
+            eval_ports = [port for port in (env_port,) if port]
+            if mirror is not None:
+                for port in eval_ports:
+                    await mirror.mirror(port)
+            eval_wrap = (
+                None
+                if in_process
+                else _bridged(
+                    make_wrapper(
+                        config.security.sandbox,
+                        workdir=workdir,
+                        allow_read=[src_dir],
+                        deny_egress=True,
+                        deny_read=deny_read,
+                        allow_rw=_mirror_sockets(mirror, eval_ports),
+                        image=config.security.runtime_opts.get("image"),
+                    ),
+                    mirror,
+                    eval_ports,
+                )
+            )
+            deps = RunDeps(
+                experiment=experiment,
+                env_client=conn.client,
+                lifecycle=config.problem.lifecycle,
+                solution_path=os.path.join(workdir, "solution.py"),
+                submissions_dir=os.path.join(workdir, "submissions"),
+                n_episodes=config.limits.n_episodes,
+                max_moves=config.limits.max_moves,
+                compute_episode_metrics=problem.compute_episode_metrics,
+                aggregate_episode_metrics=problem.aggregate_episode_metrics,
+                sandbox_wrap=eval_wrap,
+                render_frame=problem.render_frame,
+                record_video=config.record_video,
+                seed=config.problem.seed,
+                shadow_replay=config.shadow_replay,
+            )
+            tools: list[Tool] = [
+                LoggingTool(tool, logger) for feature in features for tool in feature.tools(deps)
+            ]
+            hooks = [hook for feature in features for hook in feature.hooks(deps)]
+
+            agent = agent or build_agent(config.agent)
+            caps = agent.capabilities()
+            if caps.control_actions == "client_cli":
+                server.bind_control(task_name, tools, cwd=workdir)
+                loop_tools: list[Tool] = []
+            elif caps.executes_tools:
+                loop_tools = []
+            else:
+                loop_tools = tools
+
+            agent_tmp = os.path.join(workdir, "tmp")
+            os.makedirs(agent_tmp, exist_ok=True)
+            agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
+            egress: EgressProxy | None = None
+            egress_hosts = agent.host_egress_hosts()
+            if config.security.deny_egress and egress_hosts:
+                egress = EgressProxy(egress_hosts)
+                proxy_url = f"http://127.0.0.1:{await egress.start()}"
+                agent_env |= {
+                    "HTTPS_PROXY": proxy_url,
+                    "HTTP_PROXY": proxy_url,
+                    "NO_PROXY": "127.0.0.1,localhost",
+                }
+
+            agent_ports: list[int] = []
+            if mirror is not None and config.security.deny_egress:
+                candidates = (
+                    env_port,
+                    egress.port if egress is not None else None,
+                    _loopback_port(config.agent.base_url),
+                )
+                agent_ports = list(dict.fromkeys(port for port in candidates if port))
+                for port in agent_ports:
+                    await mirror.mirror(port)
+            runtime_wrap = _bridged(
                 make_wrapper(
                     config.security.sandbox,
                     workdir=workdir,
-                    allow_read=[src_dir],
-                    deny_egress=True,
+                    allow_read=[src_dir, *agent.host_read_paths()],
+                    deny_egress=config.security.deny_egress,
                     deny_read=deny_read,
-                    allow_rw=_mirror_sockets(mirror, eval_ports),
+                    allow_write_prefixes=agent.host_write_prefixes(),
+                    allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
                     image=config.security.runtime_opts.get("image"),
                 ),
                 mirror,
-                eval_ports,
+                agent_ports,
             )
-        )
-        deps = RunDeps(
-            experiment=experiment,
-            env_client=conn.client,
-            lifecycle=config.problem.lifecycle,
-            solution_path=os.path.join(workdir, "solution.py"),
-            submissions_dir=os.path.join(workdir, "submissions"),
-            n_episodes=config.limits.n_episodes,
-            max_moves=config.limits.max_moves,
-            compute_episode_metrics=problem.compute_episode_metrics,
-            aggregate_episode_metrics=problem.aggregate_episode_metrics,
-            sandbox_wrap=eval_wrap,
-            render_frame=problem.render_frame,
-            record_video=config.record_video,
-            seed=config.problem.seed,
-            shadow_replay=config.shadow_replay,
-        )
-        tools = [tool for feature in features for tool in feature.tools(deps)]
-        hooks = [hook for feature in features for hook in feature.hooks(deps)]
 
-        agent = agent or build_agent(config.agent)
-        caps = agent.capabilities()
-        if caps.control_actions == "client_cli":
-            server.bind_control(task_name, tools, cwd=workdir)
-            loop_tools: list[Tool] = []
-        elif caps.executes_tools:
-            loop_tools = []
-        else:
-            loop_tools = tools
-
-        agent_tmp = os.path.join(workdir, "tmp")
-        os.makedirs(agent_tmp, exist_ok=True)
-        agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
-        egress: EgressProxy | None = None
-        egress_hosts = agent.host_egress_hosts()
-        if config.security.deny_egress and egress_hosts:
-            egress = EgressProxy(egress_hosts)
-            proxy_url = f"http://127.0.0.1:{await egress.start()}"
-            agent_env |= {
-                "HTTPS_PROXY": proxy_url,
-                "HTTP_PROXY": proxy_url,
-                "NO_PROXY": "127.0.0.1,localhost",
-            }
-
-        agent_ports: list[int] = []
-        if mirror is not None and config.security.deny_egress:
-            candidates = (
-                env_port,
-                egress.port if egress is not None else None,
-                _loopback_port(config.agent.base_url),
+            builder = PromptBuilder()
+            system_prompt = builder.build_system_prompt(
+                problem,
+                task_name,
+                features,
+                lifecycle=config.problem.lifecycle,
+                info_mode=config.problem.info_mode,
+                control_actions=agent.capabilities().control_actions,
+                tool_names=[tool.name for tool in tools],
             )
-            agent_ports = list(dict.fromkeys(port for port in candidates if port))
-            for port in agent_ports:
-                await mirror.mirror(port)
-        runtime_wrap = _bridged(
-            make_wrapper(
-                config.security.sandbox,
-                workdir=workdir,
-                allow_read=[src_dir, *agent.host_read_paths()],
-                deny_egress=config.security.deny_egress,
-                deny_read=deny_read,
-                allow_write_prefixes=agent.host_write_prefixes(),
-                allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
-                image=config.security.runtime_opts.get("image"),
-            ),
-            mirror,
-            agent_ports,
-        )
+            try:
+                await agent.start(
+                    cwd=workdir,
+                    model=config.agent.model,
+                    base_url=config.agent.base_url,
+                    api_key=config.agent.api_key,
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    env=agent_env,
+                    runtime_wrap=runtime_wrap,
+                )
+                first_obs = server.first_obs(task_name)
+                first_message = builder.build_first_message(problem.render_obs_text(first_obs))
 
-        builder = PromptBuilder()
-        system_prompt = builder.build_system_prompt(
-            problem,
-            task_name,
-            features,
-            lifecycle=config.problem.lifecycle,
-            info_mode=config.problem.info_mode,
-            control_actions=agent.capabilities().control_actions,
-            tool_names=[tool.name for tool in tools],
-        )
-        try:
-            await agent.start(
-                cwd=workdir,
-                model=config.agent.model,
-                base_url=config.agent.base_url,
-                api_key=config.agent.api_key,
-                system_prompt=system_prompt,
-                tools=tools,
-                env=agent_env,
-                runtime_wrap=runtime_wrap,
-            )
-            first_obs = server.first_obs(task_name)
-            first_message = builder.build_first_message(problem.render_obs_text(first_obs))
-
-            with (
-                TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
-                RunLogger(logs_dir, task=task_name) as logger,
-            ):
                 if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
                     logger.log(
                         LogComponent.ORCHESTRATOR,
@@ -325,10 +327,10 @@ async def run_task(
                     move_count=lambda: server.total_action_count(task_name),
                     stop=stop,
                 )
-        finally:  # always release the agent subprocess + the network plumbing, even on a crash
-            await agent.close()
-            if egress is not None:
-                await egress.close()
-            if mirror is not None:
-                await mirror.close()
-        return reason
+            finally:  # always release the agent subprocess + network plumbing, even on a crash
+                await agent.close()
+                if egress is not None:
+                    await egress.close()
+                if mirror is not None:
+                    await mirror.close()
+            return reason

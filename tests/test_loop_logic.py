@@ -95,4 +95,18 @@ async def test_execute_framework_tool_normalizes_output() -> None:
     assert result.id == "c1"
     assert result.is_error is False
     assert "v" in result.output
-    assert logger.logged  # the execution was logged
+
+
+async def test_logging_tool_logs_every_call() -> None:
+    # Execution logging lives on the tool wrapper, shared by every dispatch path
+    # (loop, HTTP control channel, backend-executed native tools).
+    from regact.tools.base import LoggingTool, ToolContext
+
+    logger = _FakeLogger()
+    wrapped = LoggingTool(_OkTool(), logger)  # type: ignore[arg-type]
+    assert wrapped.name == _OkTool().name
+    output = await wrapped.call({}, ToolContext(cwd="/tmp"))
+    assert output.is_error is False
+    assert logger.logged
+    _, kwargs = logger.logged[0]
+    assert kwargs["tool"] == "Ok"

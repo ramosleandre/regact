@@ -1,8 +1,9 @@
 # Game: MiniGrid ({task})
 
 MiniGrid is a 2D grid world. The agent occupies one cell, faces one of four
-directions, and acts by discrete actions. Episodes are stochastic, so a good
-policy must generalize across resets — do not hard-code a fixed action sequence.
+directions, and acts by discrete actions. How much the layout and start state vary
+between resets depends on the specific environment — write a policy that reads the
+observation rather than replaying a memorized action sequence.
 
 ## Observation
 

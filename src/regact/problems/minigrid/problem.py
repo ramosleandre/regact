@@ -1,6 +1,7 @@
 """MiniGrid problem.
 
-Wraps gymnasium MiniGrid envs. Stochastic, so ``seed`` matters here (unlike ARC).
+Wraps gymnasium MiniGrid envs. Reset variation depends on the env id (fixed-layout
+``Empty-*`` vs procedurally generated ones), so ``seed`` matters here (unlike ARC).
 ``gymnasium``/``minigrid`` are imported lazily inside :meth:`make_env`, so this
 module imports cleanly without the ``minigrid`` extra installed. Prompt text lives
 in ``problems/prompts/minigrid.md``.

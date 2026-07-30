@@ -185,6 +185,14 @@ async def _run_teardown_hooks(hooks: list[Hook], reason: str, ctx: _LoopContext)
                 hook=type(hook).__name__,
                 error=f"{type(exc).__name__}: {exc}",
             )
+        else:
+            ctx.logger.log(
+                LogComponent.EVAL,
+                "INFO",
+                "hook_executed",
+                phase="teardown",
+                hook=type(hook).__name__,
+            )
 
 
 def _spawn_walltime_watchdog(
@@ -305,14 +313,10 @@ def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
 
 
 async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:
-    """Run one framework tool and normalize its result (controlled failures stay results)."""
+    """Run one framework tool and normalize its result (controlled failures stay results).
+
+    Execution logging lives on the tool itself (``LoggingTool``), shared with the
+    HTTP control channel and backend-executed dispatch paths.
+    """
     output = await tool.call(call.input, ToolContext(cwd=ctx.cwd))
-    ctx.logger.log(
-        LogComponent.ORCHESTRATOR,
-        "INFO",
-        "tool_executed",
-        phase="submit",
-        tool=call.name,
-        is_error=output.is_error,
-    )
     return ToolResult(id=call.id, output=str(output.data), is_error=output.is_error)

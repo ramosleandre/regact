@@ -4,6 +4,10 @@
 #   agent=alan agent.model=openai/<MODEL_NAME> agent.base_url=http://127.0.0.1:9876/v1
 # Remote-scripted mode (drive the model's responses by hand over HTTP):
 #   agent=alan agent.model=remote +agent.args.backend=scripted
+# Ending a remote session: a response containing ExitTask runs the tool, but Alan then
+# opens another pending request carrying the tool result (normal tool-use protocol) —
+# the run only tears down after a final TEXT-ONLY response with stop_reason=end_turn.
+# Sequence: send ExitTask -> wait for the pending request -> send a closing text.
 name: alan
 model: null            # openai/<MODEL_NAME> (the served model); null = none
 base_url: null         # http://127.0.0.1:9876/v1 (the SimpleLM/SGLang endpoint)
