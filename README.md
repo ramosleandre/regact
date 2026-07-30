@@ -41,7 +41,7 @@ One command. Compose the four axes as Hydra groups (`agent`, `problem`, `feature
 make run ARGS="experiment=dev"
 
 # 2) a real ARC-AGI-3 run with a coding CLI (anti-cheat on, records a video):
-make run ARGS="experiment=research agent=codex 'task_names=[ls20]'"
+make run ARGS="experiment=research agent=codex 'problem.tasks=[ls20]'"
 
 # 3) MiniGrid with Claude:
 make run ARGS="agent=claude problem=minigrid"
@@ -66,12 +66,13 @@ Everything is a Hydra group under [`src/regact/conf/`](src/regact/conf/) — one
 |---|---|---|
 | **agent** | `conf/agent/` (`claude`, `codex`, `alan`, `scripted`) | `agent=claude` |
 | **environment** (problem) | `conf/problem/` (`arc_agi`, `minigrid`) | `problem=arc_agi` |
-| **features** (a set) | `conf/features/` (`controller`, …) | `features=controller` |
+| **features** (a set) | `conf/features/` (`controller`, `cwm`) | `features=cwm` |
 | **experiment** (a whole profile) | `conf/experiment/` (`dev`, `research`, `competition`) | `experiment=research` |
 
-A run loads a **list of features** — `controller` is the always-on base, but you can
-stack more (`features: [controller, my_feature]`); the bootstrap, prompt, tools, and
-teardown assemble themselves from that set.
+A run loads a **map of features** — `controller` is the always-on base, but you can
+stack more (`features={controller: {}, cwm: {}}`); the bootstrap, prompt, tools, env
+wrapping, and teardown assemble themselves from that set. Each feature **owns its
+knobs** (`features.cwm.max_tested_transitions_per_verify=500`).
 
 Hyperparameters (single- vs multi-instance lifecycle, limits, sandbox, `shadow_replay`…)
 are plain fields you set inline (`problem.lifecycle=single_instance limits.walltime_s=3600`)
@@ -146,14 +147,19 @@ names a specific feature. The contract is [features/base.py](src/regact/features
 | a prompt fragment | `prompt_fragment(ctx)` | appended to the agent's first message |
 | tools | `tools(deps)` | tools the agent can call (run by the loop or over `/control`) |
 | teardown hooks | `hooks(deps)` | framework work fired at a phase (e.g. re-score at the end) |
+| an env wrapper (optional) | `env_wrapper(ctx)` | applied around the server-side env, in `features:` list order |
 
-`templates`/`prompt_fragment` take a static `FeatureContext`; `tools`/`hooks` take a
-runtime `RunDeps` (the run's `EnvClient`, state, paths…). The only built-in feature is
+`templates`/`prompt_fragment`/`env_wrapper` take a static `FeatureContext`; `tools`/`hooks`
+take a runtime `RunDeps` (the run's `EnvClient`, state, paths…). Built-in features:
 [features/controller.py](src/regact/features/controller.py) — read it as the worked
 example: it ships `base_controller.py` + a `solution.py` stub (templates), explains the
 `act(obs) -> action` contract (prompt, in `features/prompts/controller.md`), provides the
 `SubmitSolution` + `ExitTask` tools, and registers a teardown hook that re-scores the
-final `solution.py`. A new feature is one file next to it plus `register_feature(...)`.
+final `solution.py` — and [features/cwm.py](src/regact/features/cwm.py), the Code World
+Model: it records every env transition into `workdir/data/transitions.jsonl` (an env
+wrapper) and scaffolds `world_model/` with a self-contained `verify.py` the agent runs
+to measure its model's coherence (design: `context/cwm_v2.md`). A new feature is one
+file next to these plus `register_feature(...)`.
 
 ### The HTTP wall (why the agent never imports the game)
 

@@ -1,11 +1,14 @@
 """The feature/extension model.
 
 A ``Feature`` is a self-contained capability the agent uses or builds. It bundles
-four parts: workdir templates, a prompt fragment, tools, and hooks. A run selects
-a set of features; the bootstrap, prompt builder, tool surface, and teardown
-assemble themselves from that set. New features add a file here and register a
-name; the core is untouched. Features are independent — there is no dependency
-graph; ``controller`` is always present as the base.
+four parts: workdir templates, a prompt fragment, tools, and hooks — plus an
+optional server-side env wrapper. A run selects a set of features; the bootstrap,
+prompt builder, tool surface, env wrapping, and teardown assemble themselves from
+that set. New features add a file here and register a name; the core is
+untouched. Features are independent — there is no dependency graph;
+``controller`` is always present as the base. Each feature OWNS its knobs: the
+config maps ``{name: params}`` (``features.<name>.<knob>``) and the params are
+passed to the registered factory as kwargs.
 """
 
 from __future__ import annotations
@@ -43,6 +46,11 @@ class FeatureContext:
     problem_name: str
     task_name: str
     workdir: str
+    # The run's output dir (parent of ``workdir``, outside the agent sandbox): the
+    # trusted place a feature writes canonical artifacts, distinct from the
+    # agent-writable ``workdir``. Empty for the static prompt/template contexts,
+    # which never write there.
+    output_dir: str = ""
 
 
 @dataclass
@@ -125,6 +133,20 @@ class Feature(ABC):
         """Framework-run hooks fired by the loop at their phase (finalize, verify…)."""
         ...
 
+    def env_wrapper(self, ctx: FeatureContext) -> Callable[[Any], Any] | None:
+        """A wrapper factory (``env -> wrapped env``) applied around the server-side
+        env, or ``None`` (the default).
+
+        Wrappers of the loaded features are applied in ``features:`` list order
+        (first-listed innermost), inside ``EnvSession._build`` — so every instance
+        a multi-instance run creates is wrapped, and the wrapper sees the rendered
+        ``Obs`` exactly as the agent will. The factory (not the wrapper) is what a
+        feature returns: state that must survive instance swaps lives in what the
+        factory closes over. Wrappers must preserve the ``WrappedEnv`` surface
+        (see ``regact.env.wrapper.EnvWrapper``) and contain their own faults.
+        """
+        return None
+
 
 # Concrete features register here (Block 6 adds ``controller``); the config names
 # features by string, so it never imports a feature class and there is no cycle.
@@ -153,4 +175,4 @@ def build_features(features: Mapping[str, Mapping[str, Any] | None]) -> list[Fea
 
 def _load_builtins() -> None:
     """Import the built-in feature modules so they self-register on first use."""
-    from regact.features import controller  # noqa: F401
+    from regact.features import controller, cwm  # noqa: F401

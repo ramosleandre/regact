@@ -30,3 +30,4 @@ _local/
 .DS_Store
 
 outputs/*
+.alan/

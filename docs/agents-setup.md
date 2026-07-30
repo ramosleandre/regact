@@ -59,7 +59,7 @@ PYTHONPATH=src python -m regact.run_exp agent=claude problem=minigrid
 # ARC-AGI-3 (offline local games) with codex, one game, high reasoning
 # NOTE: quote bracketed lists so zsh doesn't glob them.
 PYTHONPATH=src python -m regact.run_exp agent=codex problem=arc_agi \
-    'task_names=[ls20]' agent.args.reasoning_effort=high
+    'problem.tasks=[ls20]' agent.args.reasoning_effort=high
 ```
 
 Competition (Kaggle profile YAML):
@@ -68,14 +68,14 @@ PYTHONPATH=src python -m regact.run_kaggle --config src/regact/config/profile/co
     --games ls20 ft09 --parallel 2
 ```
 
-Outputs land under `experiments/<experiment_name>/<game>/`:
+Outputs land under `experiments/<experiment_name>/<timestamp>/<game>/`:
 `logs/transcript.jsonl`, `logs/experiment_state.json`, `workdir/submissions/<n|final>/results.json`.
 
 ## Config reference (all available values)
 
 Pick groups with `agent=<name>` / `problem=<name>`; override any field with a
 dotted path (`agent.args.effort=high`). Quote bracketed lists in zsh
-(`'task_names=[ls20]'`). To add a key not in the base config, prefix `+`.
+(`'problem.tasks=[ls20]'`). To add a key not in the base config, prefix `+`.
 
 **`agent=`** — `scripted` (test, no LLM), `claude`, `codex`. (`alan` exists as a
 backend but has no run group yet.)
@@ -97,20 +97,23 @@ backend but has no run group yet.)
 - `agent.args.ask_for_approval` (only with `sandbox`): `never` (default) |
   `on-request` | `untrusted`.
 
-**`problem=`** — `minigrid`, `arc_agi`.
+**`problem=`** — `minigrid`, `minigrid_lite`, `minigrid_full`, `arc_agi`.
+- `problem.tasks`: tasks selected for this experiment. `[]` means every task
+  exposed by the problem. ARC exposes its discovered games; MiniGrid exposes all
+  72 catalogued environments. `minigrid` selects Empty-5x5 by default,
+  `minigrid_lite` selects the curated GameAgents 20, and `minigrid_full` selects all 72.
 - `problem.lifecycle`: `multi_instance` (fresh env per episode) | `single_instance`
   (one make per game, RESET = level reset; ARC).
 - `problem.obs_mode`: `raw` (ascii/structured/vlm later).
 - `problem.info_mode`: `informative` (full description) | `minimal` (discover by
   interaction).
-- `problem.kwargs` — minigrid: `env_id` (e.g. `MiniGrid-Empty-5x5-v0`,
-  `MiniGrid-DoorKey-5x5-v0`); arc_agi: `operation_mode: offline`,
-  `environments_dir: environnement`.
-- `task_names`: `[]` = all games; ARC games are the 25 under `environnement/`
-  (`ls20`, `ft09`, `vc33`, `ar25`, …); MiniGrid uses the configured `env_id`.
+- `problem.kwargs` — environment-construction options only. MiniGrid currently
+  supports `fully_obs`; ARC supports `operation_mode` and `environments_dir`.
+  An explicit `'problem.tasks=[MiniGrid-DoorKey-5x5-v0]'` selects a subset.
 
 **Run-level:**
-- `features`: `[controller]` (the only registered feature so far).
+- `features`: a `{name: knobs}` map, e.g. `features={controller: {}, cwm: {}}`
+  (`controller` is the base; `cwm` adds the code-world-model recording + verify).
 - `execution`: `sequential` | `parallel`; `parallel_workers`: int (>1 with parallel).
 - `limits.{keep_alive, walltime_s, env_step_budget}`; eval knobs live on the feature:
   `features.controller.{n_episodes, max_moves}`.
@@ -121,7 +124,7 @@ See it composed without running: `python -m regact.run_exp agent=claude problem=
 ## Debugging a run
 
 - **Agent not found**: the smoke script tells you if `claude`/`codex` is on PATH.
-- **Nothing happens / hangs**: run one game (`task_names=[ls20]`), watch
+- **Nothing happens / hangs**: run one game (`problem.tasks=[ls20]`), watch
   `logs/output.log` (human) and `logs/events.jsonl` (structured). The agent's own
   output is mirrored to stdout.
 - **Agent can't reach the env**: check `workdir/framework/make_env.py` has the

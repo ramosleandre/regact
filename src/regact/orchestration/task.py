@@ -28,7 +28,7 @@ from regact.config.schema import (
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
-from regact.features.base import Feature, RunDeps, build_features
+from regact.features.base import Feature, FeatureContext, RunDeps, build_features
 from regact.obs.errors import LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
@@ -114,8 +114,21 @@ def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
     return MultiInstancePolicy()
 
 
-def _build_server(config: RunConfig, problem: BaseProblem, task_name: str) -> EnvServer:
-    """Register the task's :class:`EnvSession` (renderer + lifecycle + milestones)."""
+def _build_server(
+    config: RunConfig,
+    problem: BaseProblem,
+    task_name: str,
+    *,
+    features: list[Feature],
+    workdir: str,
+    output_dir: str,
+) -> EnvServer:
+    """Register the task's :class:`EnvSession` (renderer + lifecycle + milestones +
+    the loaded features' env wrappers, in ``features:`` list order)."""
+    ctx = FeatureContext(
+        problem_name=problem.name, task_name=task_name, workdir=workdir, output_dir=output_dir
+    )
+    wrappers = [wrap for feature in features if (wrap := feature.env_wrapper(ctx)) is not None]
     session = EnvSession(
         make_native=lambda: problem.make_env(task_name),
         key=task_name,
@@ -123,6 +136,7 @@ def _build_server(config: RunConfig, problem: BaseProblem, task_name: str) -> En
         lifecycle=_lifecycle_policy(config.problem.lifecycle),
         milestone_detector=problem.milestone_detector(task_name),
         step_budget=config.limits.env_step_budget,
+        wrappers=wrappers,
     )
     server = EnvServer()
     server.register(task_name, session)
@@ -183,7 +197,9 @@ async def run_task(
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
         json.dump(redacted_config_dict(config), handle, indent=2, default=str)
 
-    server = _build_server(config, problem, task_name)
+    server = _build_server(
+        config, problem, task_name, features=features, workdir=workdir, output_dir=output_dir
+    )
     in_process = config.agent.name is AgentName.SCRIPTED
 
     async with serve_env(server, task_name, in_process=in_process) as conn:
