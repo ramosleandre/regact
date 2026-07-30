@@ -10,7 +10,6 @@ defaults:
   - _self_
   - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
 
-task_names: []          # empty = all games of the problem; e.g. 'task_names=[ls20]'
 execution: sequential
 parallel_workers: 1
 limits:

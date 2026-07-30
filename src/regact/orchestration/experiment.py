@@ -12,12 +12,31 @@ import os
 from datetime import datetime
 
 from regact.config.schema import RunConfig
+from regact.obs.errors import ErrorCategory, RegactError
 from regact.orchestration.scheduler import Scheduler
 from regact.orchestration.signals import install_stop_signal
 from regact.orchestration.task import run_task
 from regact.problems.base import build_problem
 
 _STAMP_FORMAT = "%Y-%m-%d_%H-%M-%S"  # sortable, and legal on every filesystem (no ':')
+
+
+def _resolve_task_names(config: RunConfig, available: list[str]) -> list[str]:
+    """Resolve and validate the experiment's problem-owned task selection."""
+    selected = config.problem.tasks or available
+    duplicates = sorted({task for task in selected if selected.count(task) > 1})
+    if duplicates:
+        raise RegactError(
+            ErrorCategory.EVAL_HARNESS,
+            f"problem.tasks contains duplicate tasks: {duplicates}",
+        )
+    unknown = sorted(set(selected) - set(available))
+    if unknown:
+        raise RegactError(
+            ErrorCategory.EVAL_HARNESS,
+            f"problem.tasks contains tasks not exposed by {config.problem.name!r}: {unknown}",
+        )
+    return list(selected)
 
 
 def resolve_run_dir(config: RunConfig, *, output_root: str | None = None) -> str:
@@ -48,7 +67,7 @@ def _link_latest(run_dir: str) -> None:
 async def run_experiment(config: RunConfig, *, output_root: str | None = None) -> dict[str, str]:
     """Run every task of the configured problem; return ``{task_name: exit_reason}``."""
     problem = build_problem(config.problem.name, config.problem.kwargs)
-    task_names = config.task_names or problem.get_task_names()
+    task_names = _resolve_task_names(config, problem.get_task_names())
     root = resolve_run_dir(config, output_root=output_root)
     os.makedirs(root, exist_ok=True)
     _link_latest(root)

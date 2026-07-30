@@ -1,0 +1,10 @@
+# A single MiniGrid task (Empty-5x5) — the fastest end-to-end smoke, using the
+# Gym environment ID that Regact uses as the task name.
+name: minigrid
+tasks:
+  - MiniGrid-Empty-5x5-v0
+lifecycle: multi_instance
+obs_mode: raw
+info_mode: informative
+kwargs:
+  fully_obs: true

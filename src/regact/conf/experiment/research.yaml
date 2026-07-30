@@ -4,7 +4,7 @@
 # the final controller.
 #
 #   python -m regact.run_exp experiment=research
-#   python -m regact.run_exp experiment=research agent=codex 'task_names=[ls20]'
+#   python -m regact.run_exp experiment=research agent=codex 'problem.tasks=[ls20]'
 #   python -m regact.run_exp experiment=research agent=claude agent.model=opus
 #
 # It SELECTS config groups (never re-writes their values), so a CLI `agent=codex` still

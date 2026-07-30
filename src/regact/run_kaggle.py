@@ -54,7 +54,7 @@ def run_kaggle(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     config = build_run_config_from_profile(args.config)
     if args.games is not None:
-        config.task_names = args.games
+        config.problem.tasks = args.games
     if args.parallel is not None:
         config.parallel_workers = args.parallel
         config.execution = Execution.PARALLEL if args.parallel > 1 else Execution.SEQUENTIAL

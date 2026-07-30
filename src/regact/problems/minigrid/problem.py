@@ -17,9 +17,9 @@ from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, register_problem
+from regact.problems.minigrid.tasks import ALL_MINIGRID_TASKS
 
 _PROMPT = Path(__file__).parents[1] / "prompts" / "minigrid.md"
-_DEFAULT_ENV_ID = "MiniGrid-Empty-5x5-v0"
 _TILE_SIZE = 24  # px per cell in the video render
 
 
@@ -66,19 +66,20 @@ class _ActionInfoShim:
 
 
 class MiniGridProblem(BaseProblem):
-    """A MiniGrid task family (one configured env id)."""
+    """The complete MiniGrid task family; experiment config selects a subset."""
 
     name = "minigrid"
 
-    def __init__(self, *, env_id: str = _DEFAULT_ENV_ID, fully_obs: bool = False) -> None:
-        self._env_id = env_id
+    def __init__(self, *, fully_obs: bool = False) -> None:
         self._fully_obs = fully_obs
 
     def make_env(self, task_name: str) -> Any:
         import gymnasium
         import minigrid  # noqa: F401  (importing registers the MiniGrid env ids)
 
-        env = gymnasium.make(self._env_id)
+        if task_name not in ALL_MINIGRID_TASKS:
+            raise ValueError(f"unknown MiniGrid task {task_name!r}")
+        env = gymnasium.make(task_name)
         if self._fully_obs:
             from minigrid.wrappers import FullyObsWrapper
 
@@ -86,7 +87,7 @@ class MiniGridProblem(BaseProblem):
         return _ActionInfoShim(env)
 
     def get_task_names(self) -> list[str]:
-        return [self._env_id]
+        return list(ALL_MINIGRID_TASKS)
 
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
         if mode is not ObsMode.RAW:
@@ -146,7 +147,7 @@ class MiniGridProblem(BaseProblem):
         return _PROMPT.read_text(encoding="utf-8").replace("{task}", task_name)
 
     def config_kwargs(self) -> dict[str, Any]:
-        return {"env_id": self._env_id, "fully_obs": self._fully_obs}
+        return {"fully_obs": self._fully_obs}
 
 
 register_problem("minigrid", lambda kwargs: MiniGridProblem(**kwargs))
