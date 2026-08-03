@@ -10,7 +10,8 @@
 #   SIMPLELM_TOOL_PARSER  default `universal` (per-family auto; `noop` = no tools)
 #   TASK_NAMES            default `ls20`  (comma-separated, e.g. "ls20,vc33")
 #   LIFECYCLE             default `multi_instance`  (or `single_instance`)
-#   SANDBOX               default `none`. Set `apptainer` (+ SIF below) for the OS sandbox.
+#   SANDBOX               default `false`. `true` = confine (auto backend) + deny egress;
+#                         `apptainer` = confine forcing the apptainer backend (+ SIF below).
 #   SIF                   apptainer image (.sif) — REQUIRED when SANDBOX=apptainer
 #   WALLTIME_S            default `3000`  (per-game wall-clock cap, seconds)
 #   OUTPUT_ROOT           default `experiments` -> regact writes experiments/<EXP_NAME>/<game>/,
@@ -24,7 +25,7 @@ SLOG="${LOG_DIR}/simplelm.${SLURM_JOB_ID:-local}.log"
 TP=${SIMPLELM_TOOL_PARSER:-universal}
 TASK_NAMES=${TASK_NAMES:-ls20}
 LIFECYCLE=${LIFECYCLE:-multi_instance}
-SANDBOX=${SANDBOX:-none}
+SANDBOX=${SANDBOX:-false}
 WALLTIME_S=${WALLTIME_S:-3000}
 OUTPUT_ROOT=${OUTPUT_ROOT:-experiments}  # -> experiments/<EXP_NAME>/<game>/ (beside ClusterControl logs)
 
@@ -47,9 +48,11 @@ done
 
 export AGENT_BASE_URL="${BASE}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
-SANDBOX_ARGS=("security.sandbox=${SANDBOX}")
 if [ "${SANDBOX}" = "apptainer" ]; then
-    SANDBOX_ARGS+=("+security.runtime_opts.image=${SIF:?SANDBOX=apptainer needs SIF=<image.sif>}")
+    SANDBOX_ARGS=("security.sandbox=true" "+security.runtime_opts.backend=apptainer"
+                  "+security.runtime_opts.image=${SIF:?SANDBOX=apptainer needs SIF=<image.sif>}")
+else
+    SANDBOX_ARGS=("security.sandbox=${SANDBOX}")  # true | false
 fi
 
 echo "[regact] run_exp problem=arc_agi tasks=[${TASK_NAMES}] agent=alan model=openai/${MODEL_NAME} sandbox=${SANDBOX}"
@@ -61,7 +64,6 @@ python -m regact.run_exp \
     problem=arc_agi \
     "problem.tasks=[${TASK_NAMES}]" \
     problem.lifecycle="${LIFECYCLE}" \
-    security.deny_egress=false \
     limits.walltime_s="${WALLTIME_S}" \
     output_root="${OUTPUT_ROOT}" \
     experiment_name="${EXP_NAME}" \
