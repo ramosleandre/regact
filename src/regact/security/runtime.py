@@ -186,13 +186,28 @@ def symlink_chain_dirs(path: str) -> list[str]:
     return dirs
 
 
+def interpreter_chain_prefixes(executable: str) -> list[str]:
+    """Chain-hop dirs of ``executable``, each ``<prefix>/bin`` lifted to ``<prefix>``.
+
+    The dynamic loader resolves RPATH (``$ORIGIN/../lib``) against the hop path it
+    executed through, so binding a hop's ``bin`` alone leaves the sibling ``lib``
+    tree missing inside the namespace.
+    """
+    return sorted(
+        {
+            os.path.dirname(d) if os.path.basename(d) == "bin" else d
+            for d in symlink_chain_dirs(executable)
+        }
+    )
+
+
 def _python_prefixes() -> list[str]:
     """The interpreter dirs the agent always needs to start Python at all."""
     return sorted(
         {
             os.path.realpath(sys.prefix),
             os.path.realpath(sys.base_prefix),
-            *symlink_chain_dirs(sys.executable),
+            *interpreter_chain_prefixes(sys.executable),
         }
     )
 

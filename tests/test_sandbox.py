@@ -19,6 +19,7 @@ from regact.security.probe import run_probe
 from regact.security.runtime import (
     SandboxRuntime,
     detect,
+    interpreter_chain_prefixes,
     make_wrapper,
     symlink_chain_dirs,
     wrap_argv,
@@ -38,6 +39,22 @@ def test_symlink_chain_dirs_covers_intermediate_hops(tmp_path: Path) -> None:
     (venv / "python").symlink_to(alias / "python")
     dirs = symlink_chain_dirs(str(venv / "python"))
     assert str(alias) in dirs and str(store) in dirs
+
+
+def test_interpreter_chain_prefixes_lift_bin_to_prefix(tmp_path: Path) -> None:
+    # The loader resolves $ORIGIN/../lib against the hop path, so <prefix>/bin
+    # hops must be bound as the whole <prefix> (bin + lib), not bin alone.
+    store = tmp_path / "store" / "bin"
+    alias = tmp_path / "alias" / "bin"
+    venv = tmp_path / "venv" / "bin"
+    for d in (store, alias, venv):
+        d.mkdir(parents=True)
+    (store / "python").write_text("")
+    (alias / "python").symlink_to(store / "python")
+    (venv / "python").symlink_to(alias / "python")
+    prefixes = interpreter_chain_prefixes(str(venv / "python"))
+    assert str(tmp_path / "alias") in prefixes and str(tmp_path / "store") in prefixes
+    assert str(alias) not in prefixes  # lifted, not the bare bin dir
 
 
 def test_symlink_chain_dirs_plain_file_is_empty(tmp_path: Path) -> None:
