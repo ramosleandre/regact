@@ -11,8 +11,8 @@ defaults:
   - override /problem: arc_agi     # conf/problem/arc_agi.yaml (single_instance, offline)
 
 # Experiment-specific fields only:
-task_names: [ls20]        # one game, so the run is quick
 problem:
+  tasks: [ls20]              # one game, so the run is quick
   lifecycle: multi_instance  # remake per episode: keeps the smoke run allowed with the
                              # controller eval (single_instance + eval is refused)
 security:

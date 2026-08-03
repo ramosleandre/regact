@@ -25,6 +25,7 @@ def test_mapping_builds_typed_config_with_enums() -> None:
             "agent": {"name": "claude", "model": "x"},
             "problem": {
                 "name": "arc_agi",
+                "tasks": ["ls20"],
                 "lifecycle": "single_instance",
                 "info_mode": "minimal",
                 "kwargs": {"operation_mode": "offline"},
@@ -36,6 +37,7 @@ def test_mapping_builds_typed_config_with_enums() -> None:
     )
     assert config.agent.name is AgentName.CLAUDE
     assert config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE
+    assert config.problem.tasks == ["ls20"]
     assert config.problem.info_mode is InfoMode.MINIMAL
     assert config.problem.kwargs == {"operation_mode": "offline"}
     assert config.execution is Execution.PARALLEL
@@ -49,6 +51,7 @@ def test_mapping_defaults() -> None:
     assert config.features == {"controller": {}}
     assert config.execution is Execution.SEQUENTIAL
     assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE
+    assert config.problem.tasks == []
 
 
 def test_mapping_preserves_toplevel_run_flags() -> None:
@@ -172,6 +175,27 @@ def test_run_exp_hydra_composes_a_config() -> None:
     assert config.agent.args["effort"] == "high"  # CLI override
     # The features group carries each feature's own knobs.
     assert config.features == {"controller": {"n_episodes": 1, "max_moves": 2500}}
+
+
+def test_minigrid_suite_groups_compose() -> None:
+    """The named MiniGrid configs expose the exact lite and full catalogues."""
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    import regact
+    from regact.problems.minigrid import ALL_MINIGRID_TASKS, LITE_MINIGRID_TASKS
+
+    conf_dir = str(Path(regact.__file__).parent / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        lite_raw = compose(config_name="config", overrides=["problem=minigrid_lite"])
+        full_raw = compose(config_name="config", overrides=["problem=minigrid_full"])
+
+    lite = run_config_from_mapping(OmegaConf.to_container(lite_raw, resolve=True))
+    full = run_config_from_mapping(OmegaConf.to_container(full_raw, resolve=True))
+    assert lite.problem.tasks == list(LITE_MINIGRID_TASKS)
+    assert full.problem.tasks == []
+    # Empty means the problem's complete catalogue.
+    assert len(ALL_MINIGRID_TASKS) == 72
 
 
 def test_experiment_profile_respects_cli_agent_override() -> None:

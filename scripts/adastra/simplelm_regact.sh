@@ -59,7 +59,7 @@ python -m regact.run_exp \
     agent.base_url="${AGENT_BASE_URL}" \
     agent.api_key="${OPENAI_API_KEY}" \
     problem=arc_agi \
-    "task_names=[${TASK_NAMES}]" \
+    "problem.tasks=[${TASK_NAMES}]" \
     problem.lifecycle="${LIFECYCLE}" \
     security.deny_egress=false \
     limits.walltime_s="${WALLTIME_S}" \

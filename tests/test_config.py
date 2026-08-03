@@ -19,6 +19,7 @@ def test_run_config_defaults() -> None:
     assert cfg.features == {"controller": {}}
     assert cfg.execution is Execution.SEQUENTIAL
     assert cfg.parallel_workers == 1
+    assert cfg.problem.tasks == []
     assert cfg.problem.lifecycle is Lifecycle.MULTI_INSTANCE
     assert cfg.problem.obs_mode is ObsMode.RAW
     assert cfg.limits.keep_alive > 0
@@ -34,4 +35,6 @@ def test_mutable_defaults_are_not_shared() -> None:
     a = RunConfig(agent=AgentConfig(name=AgentName.ALAN), problem=ProblemConfig(name="x"))
     b = RunConfig(agent=AgentConfig(name=AgentName.ALAN), problem=ProblemConfig(name="y"))
     a.features["world_model"] = {}
+    a.problem.tasks.append("g1")
     assert b.features == {"controller": {}}
+    assert b.problem.tasks == []

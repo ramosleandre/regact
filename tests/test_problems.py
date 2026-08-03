@@ -10,11 +10,16 @@ import pytest
 from regact.config.schema import InfoMode, ObsMode
 from regact.envclient.obs import Obs
 from regact.problems.base import BaseProblem, build_problem
-from regact.problems.minigrid import MiniGridProblem, MiniGridRenderer
+from regact.problems.minigrid import (
+    ALL_MINIGRID_TASKS,
+    LITE_MINIGRID_TASKS,
+    MiniGridProblem,
+    MiniGridRenderer,
+)
 
 
 def test_build_problem_resolves_minigrid() -> None:
-    problem = build_problem("minigrid", {"env_id": "MiniGrid-Empty-5x5-v0"})
+    problem = build_problem("minigrid", {"fully_obs": False})
     assert isinstance(problem, MiniGridProblem)
     assert problem.name == "minigrid"
 
@@ -25,13 +30,21 @@ def test_build_problem_unknown_raises() -> None:
 
 
 def test_minigrid_config_kwargs_roundtrip() -> None:
-    problem = MiniGridProblem(env_id="MiniGrid-DoorKey-5x5-v0", fully_obs=True)
+    problem = MiniGridProblem(fully_obs=True)
     kwargs = problem.config_kwargs()
-    assert kwargs == {"env_id": "MiniGrid-DoorKey-5x5-v0", "fully_obs": True}
+    assert kwargs == {"fully_obs": True}
     # The trusted side can rebuild from these kwargs.
     rebuilt = build_problem("minigrid", kwargs)
     assert isinstance(rebuilt, MiniGridProblem)
     assert rebuilt.config_kwargs() == kwargs
+
+
+def test_minigrid_catalogue_matches_gameagents_sizes() -> None:
+    assert len(ALL_MINIGRID_TASKS) == 72
+    assert len(LITE_MINIGRID_TASKS) == 20
+    assert len(set(ALL_MINIGRID_TASKS)) == len(ALL_MINIGRID_TASKS)
+    assert len(set(LITE_MINIGRID_TASKS)) == len(LITE_MINIGRID_TASKS)
+    assert set(LITE_MINIGRID_TASKS) < set(ALL_MINIGRID_TASKS)
 
 
 def test_minigrid_build_prompt_informative_describes_actions() -> None:
@@ -91,7 +104,7 @@ def test_minigrid_metrics_aggregate() -> None:
 def test_minigrid_make_env_drives_a_step() -> None:
     """Runtime-gated: only where the minigrid extra is installed."""
     pytest.importorskip("minigrid")
-    problem: BaseProblem = MiniGridProblem(env_id="MiniGrid-Empty-5x5-v0")
+    problem: BaseProblem = MiniGridProblem()
     native = problem.make_env("MiniGrid-Empty-5x5-v0")
     _obs, info = native.reset(seed=0)
     assert "available_actions" in info
@@ -101,12 +114,38 @@ def test_minigrid_make_env_drives_a_step() -> None:
     native.close()
 
 
+@pytest.mark.live
+def test_all_catalogued_minigrid_tasks_can_reset() -> None:
+    """Every catalogue entry must exist upstream and pass Regact's env shim."""
+    pytest.importorskip("minigrid")
+    problem = MiniGridProblem()
+    for task_name in ALL_MINIGRID_TASKS:
+        native = problem.make_env(task_name)
+        try:
+            _obs, info = native.reset(seed=0)
+            assert info["available_actions"], task_name
+        finally:
+            native.close()
+
+
+@pytest.mark.live
+def test_minigrid_make_env_uses_task_name_not_default_env() -> None:
+    """A suite run must construct the scheduler's task, not one hard-coded env."""
+    pytest.importorskip("minigrid")
+    problem = MiniGridProblem()
+    native = problem.make_env("MiniGrid-DoorKey-5x5-v0")
+    try:
+        assert native._env.spec.id == "MiniGrid-DoorKey-5x5-v0"
+    finally:
+        native.close()
+
+
 def test_minigrid_render_frame_makes_rgb() -> None:
     """Runtime-gated: render_frame re-renders the symbolic obs into an RGB video frame."""
     pytest.importorskip("minigrid")
     from regact.env.renderer import jsonify
 
-    problem = MiniGridProblem(env_id="MiniGrid-Empty-5x5-v0")
+    problem = MiniGridProblem()
     native = problem.make_env("MiniGrid-Empty-5x5-v0")
     native_obs, _ = native.reset(seed=0)
     native.close()

@@ -1,4 +1,5 @@
 name: arc_agi
+tasks: []               # empty = every game discovered in environments_dir
 # NOTE: single_instance + an evaluating feature (controller) is REFUSED by the
 # orchestrator — eval would share the env the agent explored, so scores would be
 # session-level. ARC runs need the eval semantics reworked (reseed/fresh-instance).

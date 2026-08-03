@@ -12,7 +12,8 @@ import pytest
 from regact.config.schema import AgentConfig, AgentName, LimitsConfig, ProblemConfig, RunConfig
 from regact.env.renderer import RawRenderer
 from regact.envclient.obs import Obs
-from regact.orchestration.experiment import run_experiment
+from regact.obs.errors import RegactError
+from regact.orchestration.experiment import _resolve_task_names, run_experiment
 from regact.problems.base import BaseProblem, register_problem
 from regact.testing.fakes import FakeNativeEnv
 
@@ -47,6 +48,19 @@ class _TwoGameProblem(BaseProblem):
 register_problem("fake_exp", lambda kwargs: _TwoGameProblem())
 
 
+def test_problem_tasks_are_validated_against_catalogue() -> None:
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED),
+        problem=ProblemConfig(name="fake_exp", tasks=["missing"]),
+    )
+    with pytest.raises(RegactError, match="not exposed"):
+        _resolve_task_names(config, ["g1", "g2"])
+
+    config.problem.tasks = ["g1", "g1"]
+    with pytest.raises(RegactError, match="duplicate"):
+        _resolve_task_names(config, ["g1", "g2"])
+
+
 async def test_run_experiment_runs_all_tasks(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
@@ -61,6 +75,19 @@ async def test_run_experiment_runs_all_tasks(tmp_path: Path) -> None:
     # Per-task output dirs were created.
     assert (tmp_path / "g1" / "logs" / "experiment_state.json").exists()
     assert (tmp_path / "g2" / "logs" / "experiment_state.json").exists()
+
+
+async def test_problem_tasks_selects_experiment_subset(tmp_path: Path) -> None:
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED),
+        problem=ProblemConfig(name="fake_exp", tasks=["g2"]),
+        limits=LimitsConfig(keep_alive=1),
+    )
+    reasons = await run_experiment(config, output_root=str(tmp_path))
+
+    assert reasons == {"g2": "loop_limit"}
+    assert not (tmp_path / "g1").exists()
+    assert (tmp_path / "g2").exists()
 
 
 def test_each_run_gets_its_own_timestamped_dir(tmp_path: Path) -> None:

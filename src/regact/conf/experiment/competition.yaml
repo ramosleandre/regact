@@ -35,6 +35,7 @@ agent:
     context_window: ${oc.env:AGENT_CONTEXT_WINDOW,32768}
 problem:
   name: arc_agi
+  tasks: []                    # empty = all games exposed by the selected operation mode
   lifecycle: single_instance     # one Arcade.make() per game; RESET = level reset
   obs_mode: raw
   info_mode: informative

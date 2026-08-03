@@ -1,0 +1,29 @@
+# The exact 20-task "lite" suite from ../GameAgents, expressed with the Gym
+# environment IDs that Regact uses as task names.
+name: minigrid
+tasks:
+  - MiniGrid-Empty-5x5-v0
+  - MiniGrid-Empty-16x16-v0
+  - MiniGrid-DoorKey-5x5-v0
+  - MiniGrid-DoorKey-8x8-v0
+  - MiniGrid-FourRooms-v0
+  - MiniGrid-SimpleCrossingS9N1-v0
+  - MiniGrid-UnlockPickup-v0
+  - MiniGrid-KeyCorridorS3R1-v0
+  - MiniGrid-MultiRoom-N2-S4-v0
+  - MiniGrid-Dynamic-Obstacles-5x5-v0
+  - MiniGrid-LavaCrossingS9N1-v0
+  - MiniGrid-MemoryS11-v0
+  - MiniGrid-ObstructedMaze-1Dl-v0
+  - MiniGrid-Dynamic-Obstacles-8x8-v0
+  - MiniGrid-KeyCorridorS5R3-v0
+  - MiniGrid-MultiRoom-N6-v0
+  - MiniGrid-BlockedUnlockPickup-v0
+  - MiniGrid-MemoryS17Random-v0
+  - MiniGrid-LockedRoom-v0
+  - MiniGrid-ObstructedMaze-Full-v0
+lifecycle: multi_instance
+obs_mode: raw
+info_mode: informative
+kwargs:
+  fully_obs: true

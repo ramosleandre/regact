@@ -8,8 +8,8 @@ session decoupled from ``problems/``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 from regact.env.lifecycle import EnvLifecyclePolicy
 from regact.env.renderer import ObsRenderer
@@ -30,6 +30,7 @@ class EnvSession:
         milestone_detector: Callable[[WrappedEnv], list[str]] | None = None,
         action_adapter: Callable[[Action], Any] | None = None,
         step_budget: int | None = None,
+        wrappers: Sequence[Callable[[Any], Any]] = (),
     ) -> None:
         self._make_native = make_native
         self.key = key
@@ -38,11 +39,12 @@ class EnvSession:
         self._milestone_detector = milestone_detector
         self._action_adapter = action_adapter
         self._step_budget = step_budget
+        self._wrappers = tuple(wrappers)
         self._live: WrappedEnv | None = None
         self._retired_actions = 0
 
     def _build(self) -> WrappedEnv:
-        return WrappedEnv(
+        env: Any = WrappedEnv(
             self._make_native(),
             task_name=self.key,
             renderer=self._renderer,
@@ -50,6 +52,10 @@ class EnvSession:
             action_adapter=self._action_adapter,
             step_budget=self._step_budget,
         )
+        # Feature wrappers, first-listed innermost; each delegates the WrappedEnv surface.
+        for wrap in self._wrappers:
+            env = wrap(env)
+        return cast(WrappedEnv, env)
 
     def make(self) -> WrappedEnv:
         """Acquire the env via the policy (fresh for multi, cached for single)."""

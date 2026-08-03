@@ -59,6 +59,7 @@ class AgentConfig:
 @dataclass
 class ProblemConfig:
     name: str  # the problem family, e.g. "arc_agi" (iterates its games)
+    tasks: list[str] = field(default_factory=list)  # empty = every task exposed by the problem
     lifecycle: Lifecycle = Lifecycle.MULTI_INSTANCE
     obs_mode: ObsMode = ObsMode.RAW
     info_mode: InfoMode = InfoMode.INFORMATIVE
@@ -85,7 +86,7 @@ class RunConfig:
 
     agent: AgentConfig
     problem: ProblemConfig
-    task_names: list[str] = field(default_factory=list)  # empty = all games of the problem
+    # Tasks live under ``problem.tasks``; features own their own knobs (``features.<name>``).
     features: dict[str, dict[str, Any]] = field(default_factory=lambda: {"controller": {}})
     execution: Execution = Execution.SEQUENTIAL
     parallel_workers: int = 1

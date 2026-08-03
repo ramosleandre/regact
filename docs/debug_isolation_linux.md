@@ -171,7 +171,7 @@ its model and the env. Placeholder — we fill this in together:
 
 ```bash
 # example (soft-proxy direction, model = codex/OpenAI):
-python -m regact.run_exp agent=codex problem=arc_agi 'task_names=[ls20]' \
+python -m regact.run_exp agent=codex problem=arc_agi 'problem.tasks=[ls20]' \
     security.sandbox=bwrap security.deny_egress=false limits.keep_alive=2
 # then inspect:  experiments/<run>/ls20/logs/transcript.jsonl  and  workdir/submissions/<n>/results.json
 ```

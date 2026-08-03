@@ -1,0 +1,9 @@
+# Every MiniGrid task carried over from ../GameAgents. An empty selection means
+# all tasks exposed by MiniGridProblem: currently 72 registered environments.
+name: minigrid
+tasks: []
+lifecycle: multi_instance
+obs_mode: raw
+info_mode: informative
+kwargs:
+  fully_obs: true
