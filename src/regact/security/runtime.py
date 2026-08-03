@@ -24,6 +24,8 @@ macOS.
 
 from __future__ import annotations
 
+import functools
+import glob
 import logging
 import os
 import shutil
@@ -201,6 +203,48 @@ def interpreter_chain_prefixes(executable: str) -> list[str]:
     )
 
 
+def _parse_ldd_lib_paths(output: str) -> set[str]:
+    """Resolved library paths from ``ldd`` output (``name => /path (addr)`` lines)."""
+    paths: set[str] = set()
+    for line in output.splitlines():
+        if " => " not in line:
+            continue
+        target = line.split(" => ", 1)[1].strip()
+        if not target.startswith("/"):
+            continue  # "not found" and vdso-style entries
+        paths.add(target.split(" (", 1)[0].strip())
+    return paths
+
+
+@functools.lru_cache(maxsize=1)
+def _interpreter_lib_dirs() -> tuple[str, ...]:
+    """Dirs of every shared library the interpreter and its stdlib extensions load.
+
+    A relocated interpreter (HPC module/Spack trees) resolves its RPATH to lib dirs
+    scattered across many install prefixes; each must exist inside the namespace or
+    startup dies on the first missing ``.so``. ``ldd`` yields the transitive closure
+    up front instead of one ENOENT round-trip per library. Host dirs already in the
+    system allowlist are skipped; empty where ``ldd`` is absent (macOS).
+    """
+    if shutil.which("ldd") is None:
+        return ()
+    targets = [os.path.realpath(sys.executable)]
+    targets += glob.glob(
+        os.path.join(os.path.realpath(sys.base_prefix), "lib", "python*", "lib-dynload", "*.so")
+    )
+    try:
+        proc = subprocess.run(["ldd", *targets], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    dirs: set[str] = set()
+    for path in _parse_ldd_lib_paths(proc.stdout):
+        for candidate in (path, os.path.realpath(path)):
+            parent = os.path.dirname(candidate)
+            if not parent.startswith(("/usr/", "/lib", "/bin", "/sbin", "/etc")):
+                dirs.add(parent)
+    return tuple(sorted(dirs))
+
+
 def _python_prefixes() -> list[str]:
     """The interpreter dirs the agent always needs to start Python at all."""
     return sorted(
@@ -208,6 +252,7 @@ def _python_prefixes() -> list[str]:
             os.path.realpath(sys.prefix),
             os.path.realpath(sys.base_prefix),
             *interpreter_chain_prefixes(sys.executable),
+            *_interpreter_lib_dirs(),
         }
     )
 

@@ -18,12 +18,30 @@ from regact.security.contract import CONTRACT, Invariant
 from regact.security.probe import run_probe
 from regact.security.runtime import (
     SandboxRuntime,
+    _parse_ldd_lib_paths,
     detect,
     interpreter_chain_prefixes,
     make_wrapper,
     symlink_chain_dirs,
     wrap_argv,
 )
+
+_LDD_SAMPLE = """\
+\tlinux-vdso.so.1 (0x00007fff0a1f2000)
+\tlibpython3.12.so.1.0 => /opt/software/py/lib/libpython3.12.so.1.0 (0x00007f1a2c000000)
+\tlibintl.so.8 => /opt/software/gettext/lib/libintl.so.8 (0x00007f1a2bfb0000)
+\tlibmissing.so => not found
+\tlibc.so.6 => /lib64/libc.so.6 (0x00007f1a2bc00000)
+\t/lib64/ld-linux-x86-64.so.2 (0x00007f1a2c2ae000)
+"""
+
+
+def test_parse_ldd_lib_paths() -> None:
+    paths = _parse_ldd_lib_paths(_LDD_SAMPLE)
+    assert "/opt/software/py/lib/libpython3.12.so.1.0" in paths
+    assert "/opt/software/gettext/lib/libintl.so.8" in paths
+    assert "/lib64/libc.so.6" in paths
+    assert not any("not found" in p or "vdso" in p for p in paths)
 
 
 def test_symlink_chain_dirs_covers_intermediate_hops(tmp_path: Path) -> None:

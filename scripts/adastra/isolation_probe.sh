@@ -55,6 +55,11 @@ if [ -n "${SIF:-}" ]; then
     try apptainer exec --containall --no-home "${SIF}" true
 fi
 
+section "interpreter dynamic closure (what the sandbox must expose)"
+REAL_PY=$(readlink -f "${VENV_PATH}/bin/python")
+echo "real python: ${REAL_PY}"
+try ldd "${REAL_PY}"
+
 section "regact diagnostics"
 module load python/3.12.1 2>/dev/null || true
 source "${VENV_PATH}/bin/activate" || { echo "FATAL: venv ${VENV_PATH} not activatable"; exit 1; }
