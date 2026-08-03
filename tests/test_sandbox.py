@@ -20,8 +20,30 @@ from regact.security.runtime import (
     SandboxRuntime,
     detect,
     make_wrapper,
+    symlink_chain_dirs,
     wrap_argv,
 )
+
+
+def test_symlink_chain_dirs_covers_intermediate_hops(tmp_path: Path) -> None:
+    # HPC pattern: venv/bin/python -> <module alias>/bin/python -> <store>/bin/python.
+    # Binding only the realpath leaves the alias hop missing inside the namespace.
+    store = tmp_path / "store" / "bin"
+    alias = tmp_path / "alias" / "bin"
+    venv = tmp_path / "venv" / "bin"
+    for d in (store, alias, venv):
+        d.mkdir(parents=True)
+    (store / "python").write_text("")
+    (alias / "python").symlink_to(store / "python")
+    (venv / "python").symlink_to(alias / "python")
+    dirs = symlink_chain_dirs(str(venv / "python"))
+    assert str(alias) in dirs and str(store) in dirs
+
+
+def test_symlink_chain_dirs_plain_file_is_empty(tmp_path: Path) -> None:
+    plain = tmp_path / "python"
+    plain.write_text("")
+    assert symlink_chain_dirs(str(plain)) == []
 
 
 def test_contract_covers_the_six_invariants() -> None:

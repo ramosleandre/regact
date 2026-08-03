@@ -23,16 +23,19 @@ from regact.tools.base import Tool
 def executable_paths(binary: str) -> list[str]:
     """The dirs a sandbox must expose so ``binary`` can be exec'd inside it.
 
-    Two dirs: where PATH finds it (often a symlink) and where the real file lives —
-    installers keep versioned trees elsewhere (e.g. ``~/.local/share/<cli>/versions``),
-    and binding only the symlink leaves ``execvp`` with a dangling target. Empty when
-    the binary is absent, so declaring it on a host without the CLI binds nothing.
+    Where PATH finds it (often a symlink), where the real file lives — installers
+    keep versioned trees elsewhere (e.g. ``~/.local/share/<cli>/versions``) — plus
+    every intermediate hop of the symlink chain, so ``execvp`` can traverse aliased
+    install paths. Empty when the binary is absent, so declaring it on a host
+    without the CLI binds nothing.
     """
+    from regact.security.runtime import symlink_chain_dirs
+
     found = shutil.which(binary)
     if found is None:
         return []
     real = os.path.realpath(found)
-    return sorted({os.path.dirname(found), os.path.dirname(real)})
+    return sorted({os.path.dirname(found), os.path.dirname(real), *symlink_chain_dirs(found)})
 
 
 class CodeAgent(ABC):

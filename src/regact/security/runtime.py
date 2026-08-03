@@ -167,9 +167,34 @@ def wrap_argv(
     return list(argv)
 
 
+def symlink_chain_dirs(path: str) -> list[str]:
+    """Parent dirs of every hop of ``path``'s symlink chain, unresolved.
+
+    Binding only the final realpath is not enough for execvp: a chain like
+    ``venv/bin/python -> <module alias>/bin/python -> <install tree>/bin/python``
+    dies inside the namespace when the intermediate alias dir was never bound
+    (typical on HPC, where module trees alias padded Spack paths).
+    """
+    dirs: list[str] = []
+    current = path
+    for _ in range(40):  # cycle guard
+        if not os.path.islink(current):
+            break
+        target = os.readlink(current)
+        current = os.path.normpath(os.path.join(os.path.dirname(current), target))
+        dirs.append(os.path.dirname(current))
+    return dirs
+
+
 def _python_prefixes() -> list[str]:
     """The interpreter dirs the agent always needs to start Python at all."""
-    return sorted({os.path.realpath(sys.prefix), os.path.realpath(sys.base_prefix)})
+    return sorted(
+        {
+            os.path.realpath(sys.prefix),
+            os.path.realpath(sys.base_prefix),
+            *symlink_chain_dirs(sys.executable),
+        }
+    )
 
 
 def _sbpl_target(path: str) -> str:
