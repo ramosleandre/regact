@@ -113,7 +113,7 @@ function configBlock(c) {
   const rows = [
     ["agent", `${a.name ?? "?"}${a.model ? " · " + a.model : ""}${args}`],
     ["problem", `${p.name ?? "?"} · ${p.lifecycle ?? "?"} · info=${p.info_mode ?? "?"} · obs=${p.obs_mode ?? "?"}`],
-    ["features", (c.features || []).join(", ")],
+    ["features", Object.keys(c.features || {}).join(", ")],
     ["problem.tasks", (p.tasks || c.task_names || []).join(", ") || "(all)"],
     ["limits", `keep_alive ${lim.keep_alive ?? "?"} · max_moves ${lim.max_moves ?? "?"}`],
     ["security", `sandbox ${sec.sandbox ?? "?"} · deny_egress ${sec.deny_egress}`],

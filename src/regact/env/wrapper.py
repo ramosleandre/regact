@@ -6,8 +6,10 @@ Features contribute wrapper factories (``Feature.env_wrapper``) that
 exactly what the agent receives — and must preserve the ``WrappedEnv`` surface
 the server and session read (``reset``/``step``/``close``, ``action_count``,
 ``last_obs``, …): this base delegates everything; subclasses override only what
-they observe. A wrapper contains its own faults — it must never turn a working
-``step`` into a broken one.
+they observe. Wrappers are trusted framework code: a fault in one propagates and
+stops the run (a broken feature must surface, not silently drop data). Only
+writes into agent-controlled territory (e.g. the CWM workdir mirror) are
+best-effort — the agent must not be able to crash the run from its side.
 """
 
 from __future__ import annotations
