@@ -52,10 +52,10 @@ done
 export AGENT_BASE_URL="${BASE}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
 if [ "${SANDBOX}" = "apptainer" ]; then
-    SANDBOX_ARGS=("security.sandbox=true" "+security.runtime_opts.backend=apptainer"
-                  "+security.runtime_opts.image=${SIF:?SANDBOX=apptainer needs SIF=<image.sif>}")
+    SANDBOX_ARGS=("sandbox=true" "+sandbox_opts.backend=apptainer"
+                  "+sandbox_opts.image=${SIF:?SANDBOX=apptainer needs SIF=<image.sif>}")
 else
-    SANDBOX_ARGS=("security.sandbox=${SANDBOX}")  # true | false
+    SANDBOX_ARGS=("sandbox=${SANDBOX}")  # true | false
 fi
 
 echo "[regact] run_exp problem=arc_agi tasks=[${TASK_NAMES}] agent=${AGENT} model=openai/${MODEL_NAME} sandbox=${SANDBOX}"
@@ -67,7 +67,7 @@ python -m regact.run_exp \
     problem=arc_agi \
     "problem.tasks=[${TASK_NAMES}]" \
     problem.lifecycle="${LIFECYCLE}" \
-    limits.walltime_s="${WALLTIME_S}" \
+    limits.max_seconds_per_task="${WALLTIME_S}" \
     output_root="${OUTPUT_ROOT}" \
     experiment_name="${EXP_NAME}" \
     "${SANDBOX_ARGS[@]}"

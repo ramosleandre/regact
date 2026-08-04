@@ -14,11 +14,12 @@ defaults:
   - override /problem: arc_agi     # conf/problem/arc_agi.yaml (single_instance, offline)
 
 # Experiment-specific fields only (not owned by any group):
-security:
-  sandbox: true           # confine the agent + block egress except its LLM host
-shadow_replay: true       # re-score by replaying the actions on a trusted env (~2x eval)
-record_video: true
+sandbox: true             # confine the agent + block egress except its LLM host
+features:
+  controller:
+    shadow_replay: true   # re-score by replaying the actions on a trusted env (~2x eval)
+    record_video: true
 limits:
-  keep_alive: 350
-  walltime_s: 3600        # 1h per game
+  max_turns: 350
+  max_seconds_per_task: 3600   # 1h per game
 experiment_name: research

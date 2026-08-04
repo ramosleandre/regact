@@ -11,7 +11,7 @@ from regact.orchestration.loop import _decide_stop, _execute_framework_tool, _Lo
 from regact.security.policy import default_policy
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
-_LIMITS = LimitsConfig(keep_alive=3, walltime_s=None)
+_LIMITS = LimitsConfig(max_turns=3, max_seconds_per_task=None)
 
 
 def test_decide_stop_continues_by_default() -> None:
@@ -45,7 +45,7 @@ def test_decide_stop_keep_alive_limit() -> None:
 
 
 def test_decide_stop_walltime_limit() -> None:
-    limits = LimitsConfig(keep_alive=100, walltime_s=5)
+    limits = LimitsConfig(max_turns=100, max_seconds_per_task=5)
     reason = _decide_stop(
         exit_requested=False, interrupted=False, turns=0, elapsed_s=6.0, limits=limits
     )

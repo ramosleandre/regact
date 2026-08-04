@@ -10,18 +10,15 @@ defaults:
   - _self_
   - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
 
-execution: sequential
-parallel_workers: 1
+parallel_workers: 1     # concurrent tasks; 1 = sequential
 limits:
-  keep_alive: 350
-  walltime_s: null      # wall-clock budget per game (seconds); null = no limit (override e.g. =3600)
-  env_step_budget: null # hard cap on env steps per env (anti-runaway). Single-instance: shared
-                        # with the eval, so set it generously (e.g. 20000). null = no cap.
-security:
-  sandbox: true         # true = confine the agent (backend auto-detected) + block egress except its
+  max_turns: 350                # agent turns per task before the loop gives up
+  max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit
+  max_actions_per_env: null     # env.step cap per env instance, from its make (anti-runaway);
+                                # null = no cap
+sandbox: true           # true = confine the agent (backend auto-detected) + block egress except its
                         # LLM hosts; the run FAILS rather than proceed unconfined. false = off.
-                        # Force a backend with +security.runtime_opts.backend=<seatbelt|bwrap|apptainer>.
-record_video: true      # record a video of the final controller eval (per game's render_frame)
-shadow_replay: true    # re-score by replaying actions on a trusted env (anti-cheat; ~2x eval cost)
+                        # Force a backend with +sandbox_opts.backend=<seatbelt|bwrap|apptainer>
+                        # (+sandbox_opts.image=<.sif> for apptainer).
 output_root: experiments
 experiment_name: dev

@@ -76,8 +76,6 @@ class RunDeps:
     sandbox_wrap: Callable[[list[str]], list[str]] | None = None
     render_frame: Callable[..., Any] | None = None  # one obs -> RGB frame, for the eval video
     seed: int | None = None  # base seed for eval episodes (episode i uses seed+i); None = unseeded
-    shadow_replay: bool = False  # re-score by replaying the controller's actions on a trusted env
-    record_video: bool = True  # record a video of the final eval (if render_frame is set)
 
 
 class HookPhase(StrEnum):

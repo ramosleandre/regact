@@ -14,14 +14,12 @@ from typing import Any
 from regact.config.schema import (
     AgentConfig,
     AgentName,
-    Execution,
     InfoMode,
     Lifecycle,
     LimitsConfig,
     ObsMode,
     ProblemConfig,
     RunConfig,
-    SecurityConfig,
 )
 
 
@@ -39,22 +37,22 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
-    if fields.get("keep_alive") is not None:
-        fields["keep_alive"] = int(fields["keep_alive"])
-    for name in ("walltime_s", "env_step_budget"):
+    if fields.get("max_turns") is not None:
+        fields["max_turns"] = int(fields["max_turns"])
+    for name in ("max_seconds_per_task", "max_actions_per_env"):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
 
 
 def _sandbox_bool(value: Any) -> bool:
-    """``security.sandbox`` is a bool; reject the legacy backend-name strings loudly
+    """``sandbox`` is a bool; reject the legacy backend-name strings loudly
     (``bool("none")`` is True, so silent coercion would invert the intent)."""
     if isinstance(value, bool) or value is None:
         return bool(value)
     raise ValueError(
-        f"security.sandbox must be true/false (got {value!r}); to force a backend use "
-        "security.runtime_opts.backend=<seatbelt|bwrap|apptainer>"
+        f"sandbox must be true/false (got {value!r}); to force a backend use "
+        "sandbox_opts.backend=<seatbelt|bwrap|apptainer>"
     )
 
 
@@ -71,7 +69,6 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
     """Map a plain ``{agent, problem, limits, ...}`` mapping to a ``RunConfig``."""
     agent = dict(data.get("agent") or {})
     problem = dict(data.get("problem") or {})
-    sec = dict(data.get("security") or {})
     return RunConfig(
         agent=AgentConfig(
             name=AgentName(agent["name"]),
@@ -90,15 +87,10 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             kwargs=dict(problem.get("kwargs") or {}),
         ),
         features=_features_from(data.get("features")),
-        execution=Execution(data.get("execution", Execution.SEQUENTIAL)),
         parallel_workers=int(data.get("parallel_workers", 1)),
         limits=_limits_from(data.get("limits") or {}),
-        security=SecurityConfig(
-            sandbox=_sandbox_bool(sec.get("sandbox", False)),
-            runtime_opts=dict(sec.get("runtime_opts") or {}),
-        ),
-        record_video=bool(data.get("record_video", True)),
-        shadow_replay=bool(data.get("shadow_replay", False)),
+        sandbox=_sandbox_bool(data.get("sandbox", False)),
+        sandbox_opts=dict(data.get("sandbox_opts") or {}),
         experiment_name=data.get("experiment_name"),
         output_root=str(data.get("output_root", "experiments")),
     )

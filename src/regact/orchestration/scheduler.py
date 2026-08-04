@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from regact.config.schema import Execution, Lifecycle, RunConfig
+from regact.config.schema import Lifecycle, RunConfig
 from regact.obs.errors import ErrorCategory, RegactError
 
 Unit = Callable[[str], Awaitable[object]]
@@ -25,8 +25,6 @@ class Scheduler:
         self._config = config
 
     def _workers(self) -> int:
-        if self._config.execution is Execution.SEQUENTIAL:
-            return 1
         return max(1, self._config.parallel_workers)
 
     def _validate(self, task_names: list[str]) -> None:

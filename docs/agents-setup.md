@@ -114,9 +114,10 @@ backend but has no run group yet.)
 **Run-level:**
 - `features`: a `{name: knobs}` map, e.g. `features={controller: {}, cwm: {}}`
   (`controller` is the base; `cwm` adds the code-world-model recording + verify).
-- `execution`: `sequential` | `parallel`; `parallel_workers`: int (>1 with parallel).
-- `limits.{keep_alive, walltime_s, env_step_budget}`; eval knobs live on the feature:
-  `features.controller.{n_episodes, max_moves}`.
+- `parallel_workers`: int (1 = sequential).
+- `limits.{max_turns, max_seconds_per_task, max_actions_per_env}`; eval knobs live on the feature:
+  `features.controller.{n_episodes, max_moves, record_video, shadow_replay}`.
+- `sandbox`: true/false (+ expert `sandbox_opts.{backend,image}`).
 - `experiment_name`, `output_root` (outputs under `<output_root>/<experiment_name>/`).
 
 See it composed without running: `python -m regact.run_exp agent=claude problem=arc_agi --cfg job`.

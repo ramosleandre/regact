@@ -115,7 +115,7 @@ async def run_session(
 
     message = first_message
     turns = 0
-    watchdog = _spawn_walltime_watchdog(agent, start, limits.walltime_s)
+    watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
     try:
         while True:
             reason = _decide_stop(
@@ -130,7 +130,8 @@ async def run_session(
 
             outcome = await _run_turn(message, ctx)
 
-            if limits.walltime_s is not None and time.monotonic() - start >= limits.walltime_s:
+            budget = limits.max_seconds_per_task
+            if budget is not None and time.monotonic() - start >= budget:
                 reason = "walltime_limit"  # the watchdog aborted a long turn; this is not an error
                 break
             if outcome.crashed:
@@ -196,14 +197,14 @@ async def _run_teardown_hooks(hooks: list[Hook], reason: str, ctx: _LoopContext)
 
 
 def _spawn_walltime_watchdog(
-    agent: CodeAgent, start: float, walltime_s: int | None
+    agent: CodeAgent, start: float, max_seconds_per_task: int | None
 ) -> asyncio.Task[None] | None:
-    """A task that aborts ``agent`` once ``walltime_s`` elapses (None = no budget)."""
-    if walltime_s is None:
+    """A task that aborts ``agent`` once the budget elapses (None = no budget)."""
+    if max_seconds_per_task is None:
         return None
 
     async def _watch() -> None:
-        remaining = walltime_s - (time.monotonic() - start)
+        remaining = max_seconds_per_task - (time.monotonic() - start)
         if remaining > 0:
             await asyncio.sleep(remaining)
         with contextlib.suppress(Exception):
@@ -225,9 +226,9 @@ def _decide_stop(
         return "interrupted"
     if exit_requested:
         return "agent_exit"
-    if turns >= limits.keep_alive:
+    if turns >= limits.max_turns:
         return "loop_limit"
-    if limits.walltime_s is not None and elapsed_s >= limits.walltime_s:
+    if limits.max_seconds_per_task is not None and elapsed_s >= limits.max_seconds_per_task:
         return "walltime_limit"
     return None
 

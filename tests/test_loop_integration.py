@@ -85,7 +85,7 @@ class _Stack:
         self.transcript = TranscriptWriter(str(self.logs / "transcript.jsonl"))
         self.logger = RunLogger(str(self.logs), task="g")
         self.state_path = str(self.logs / "experiment_state.json")
-        self.limits = LimitsConfig(keep_alive=10)
+        self.limits = LimitsConfig(max_turns=10)
 
     async def run(self, agent: ScriptedAgent, *, stop: StopSignal | None = None) -> str:
         try:
@@ -174,7 +174,7 @@ async def test_pipeline_stops_on_backend_error(tmp_path: Path) -> None:
 
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(keep_alive=2)
+    stack.limits = LimitsConfig(max_turns=2)
     agent = ScriptedAgent([])  # never calls ExitTask: each turn defaults to TurnComplete
     reason = await stack.run(agent)
 

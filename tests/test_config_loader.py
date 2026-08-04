@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from regact.config.loader import run_config_from_mapping
-from regact.config.schema import AgentName, Execution, InfoMode, Lifecycle, redacted_config_dict
+from regact.config.schema import AgentName, InfoMode, Lifecycle, redacted_config_dict
 from regact.run_kaggle import build_run_config_from_profile
 
 _PROFILE = (
@@ -31,7 +31,6 @@ def test_mapping_builds_typed_config_with_enums() -> None:
                 "kwargs": {"operation_mode": "offline"},
             },
             "features": ["controller"],
-            "execution": "parallel",
             "parallel_workers": 4,
         }
     )
@@ -40,7 +39,6 @@ def test_mapping_builds_typed_config_with_enums() -> None:
     assert config.problem.tasks == ["ls20"]
     assert config.problem.info_mode is InfoMode.MINIMAL
     assert config.problem.kwargs == {"operation_mode": "offline"}
-    assert config.execution is Execution.PARALLEL
     assert config.parallel_workers == 4
 
 
@@ -49,48 +47,42 @@ def test_mapping_defaults() -> None:
         {"agent": {"name": "scripted"}, "problem": {"name": "minigrid"}}
     )
     assert config.features == {"controller": {}}
-    assert config.execution is Execution.SEQUENTIAL
     assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE
     assert config.problem.tasks == []
 
 
-def test_mapping_preserves_toplevel_run_flags() -> None:
-    """record_video / shadow_replay must survive the mapping (regression: they were dropped,
-    so a `shadow_replay: true` config silently ran with the anti-cheat replay OFF)."""
+def test_mapping_preserves_controller_eval_knobs() -> None:
+    """The controller's eval knobs (record_video/shadow_replay) live on the feature and
+    must survive the mapping (regression: as run-level flags they were once dropped, so
+    `shadow_replay: true` silently ran with the anti-cheat replay OFF)."""
+    cfg = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "arc_agi"},
+            "features": {"controller": {"record_video": False, "shadow_replay": True}},
+        }
+    )
+    assert cfg.features["controller"] == {"record_video": False, "shadow_replay": True}
+
+
+def test_mapping_parses_sandbox_bool() -> None:
     on = run_config_from_mapping(
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "arc_agi"},
-            "record_video": False,
-            "shadow_replay": True,
+            "sandbox": True,
         }
     )
-    assert on.record_video is False
-    assert on.shadow_replay is True
-    # And the documented defaults when absent.
+    assert on.sandbox is True
     off = run_config_from_mapping({"agent": {"name": "scripted"}, "problem": {"name": "arc_agi"}})
-    assert off.record_video is True
-    assert off.shadow_replay is False
-
-
-def test_mapping_parses_security_sandbox_bool() -> None:
-    on = run_config_from_mapping(
-        {
-            "agent": {"name": "scripted"},
-            "problem": {"name": "arc_agi"},
-            "security": {"sandbox": True},
-        }
-    )
-    assert on.security.sandbox is True
-    off = run_config_from_mapping({"agent": {"name": "scripted"}, "problem": {"name": "arc_agi"}})
-    assert off.security.sandbox is False
+    assert off.sandbox is False
     # Legacy backend-name strings must fail loudly, not coerce (bool("none") is True).
-    with pytest.raises(ValueError, match="security\\.sandbox"):
+    with pytest.raises(ValueError, match="sandbox"):
         run_config_from_mapping(
             {
                 "agent": {"name": "scripted"},
                 "problem": {"name": "arc_agi"},
-                "security": {"sandbox": "none"},
+                "sandbox": "none",
             }
         )
 
@@ -139,7 +131,7 @@ def test_competition_profile_loads() -> None:
     assert config.agent.base_url == "http://127.0.0.1:8000/v1"  # default vLLM endpoint
     # default offline; ARC_OPERATION_MODE flips it to online for the gateway
     assert config.problem.kwargs["operation_mode"] == "offline"
-    assert config.security.sandbox is False  # the ARC gateway already isolates the kernel
+    assert config.sandbox is False  # the ARC gateway already isolates the kernel
 
 
 def test_competition_profile_env_knobs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -174,7 +166,14 @@ def test_run_exp_hydra_composes_a_config() -> None:
     assert config.agent.args["permission_mode"] == "bypassPermissions"  # from the claude group
     assert config.agent.args["effort"] == "high"  # CLI override
     # The features group carries each feature's own knobs.
-    assert config.features == {"controller": {"n_episodes": 1, "max_moves": 2500}}
+    assert config.features == {
+        "controller": {
+            "n_episodes": 1,
+            "max_moves": 2500,
+            "record_video": True,
+            "shadow_replay": True,
+        }
+    }
 
 
 def test_minigrid_suite_groups_compose() -> None:
@@ -213,4 +212,5 @@ def test_experiment_profile_respects_cli_agent_override() -> None:
     config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
     assert config.agent.name is AgentName.CODEX  # the CLI choice wins, not the profile's
     assert "reasoning_effort" in config.agent.args  # codex's own args, no claude leftovers
-    assert config.shadow_replay is True  # the profile's experiment field still applies
+    # the profile's experiment fields still apply (feature-owned knob)
+    assert config.features["controller"]["shadow_replay"] is True

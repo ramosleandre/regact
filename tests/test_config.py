@@ -3,7 +3,6 @@
 from regact.config.schema import (
     AgentConfig,
     AgentName,
-    Execution,
     Lifecycle,
     ObsMode,
     ProblemConfig,
@@ -17,13 +16,12 @@ def test_run_config_defaults() -> None:
         problem=ProblemConfig(name="arc_agi"),
     )
     assert cfg.features == {"controller": {}}
-    assert cfg.execution is Execution.SEQUENTIAL
     assert cfg.parallel_workers == 1
     assert cfg.problem.tasks == []
     assert cfg.problem.lifecycle is Lifecycle.MULTI_INSTANCE
     assert cfg.problem.obs_mode is ObsMode.RAW
-    assert cfg.limits.keep_alive > 0
-    assert cfg.security.sandbox is False
+    assert cfg.limits.max_turns > 0
+    assert cfg.sandbox is False
 
 
 def test_enum_string_values() -> None:

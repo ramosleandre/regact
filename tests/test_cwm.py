@@ -376,7 +376,7 @@ async def test_run_task_with_cwm_records_and_verifies(tmp_path: Path) -> None:
             "controller": {"max_moves": 10},
             "cwm": {"max_tested_transitions_per_verify": 50},
         },
-        limits=LimitsConfig(keep_alive=10),
+        limits=LimitsConfig(max_turns=10),
     )
     agent = _WritingAgent(
         [

@@ -8,6 +8,8 @@ features:
   controller:
     n_episodes: 1
     max_moves: 2500
+    record_video: true
+    shadow_replay: true
   cwm:
     max_tested_transitions_per_verify: 1000               # verify.py default cap on distinct obs per run
     max_printed_incoherence_transitions_per_verify: 10    # verify.py default cap on failure details shown

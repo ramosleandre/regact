@@ -6,5 +6,7 @@
 # file here that adds its own `features.<name>:` entry (registered via register_feature).
 features:
   controller:
-    n_episodes: 1     # eval episodes per submission (multi-instance: more = better stats)
-    max_moves: 2500   # max env.step per controller rollout (eval)
+    n_episodes: 1        # eval episodes per submission (multi-instance: more = better stats)
+    max_moves: 2500      # max env.step per controller rollout (eval)
+    record_video: true   # record a video of each eval episode (per game's render_frame)
+    shadow_replay: true  # re-score by replaying actions on a trusted env (anti-cheat; ~2x eval cost)

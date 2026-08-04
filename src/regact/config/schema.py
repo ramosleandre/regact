@@ -42,11 +42,6 @@ class InfoMode(StrEnum):
     MINIMAL = "minimal"  # the agent discovers the rules by interaction
 
 
-class Execution(StrEnum):
-    SEQUENTIAL = "sequential"
-    PARALLEL = "parallel"
-
-
 @dataclass
 class AgentConfig:
     name: AgentName
@@ -69,15 +64,11 @@ class ProblemConfig:
 
 @dataclass
 class LimitsConfig:
-    keep_alive: int = 150  # max idle agent turns before the loop gives up
-    walltime_s: int | None = None  # wall-clock budget for the whole task (per game)
-    env_step_budget: int | None = None  # hard cap on env steps per env (anti-runaway; None = off)
+    """Per-task run limits; each name states its scope."""
 
-
-@dataclass
-class SecurityConfig:
-    sandbox: bool = False
-    runtime_opts: dict[str, Any] = field(default_factory=dict)
+    max_turns: int = 150  # agent turns per task before the loop gives up
+    max_seconds_per_task: int | None = None  # wall-clock per task, from session start
+    max_actions_per_env: int | None = None  # env.step cap per env instance (from its make)
 
 
 @dataclass
@@ -86,14 +77,13 @@ class RunConfig:
 
     agent: AgentConfig
     problem: ProblemConfig
-    # Tasks live under ``problem.tasks``; features own their own knobs (``features.<name>``).
+    # Tasks live under ``problem.tasks``; features own their own knobs (``features.<name>``),
+    # including the controller's eval knobs (n_episodes, max_moves, record_video, shadow_replay).
     features: dict[str, dict[str, Any]] = field(default_factory=lambda: {"controller": {}})
-    execution: Execution = Execution.SEQUENTIAL
-    parallel_workers: int = 1
+    parallel_workers: int = 1  # 1 = sequential
     limits: LimitsConfig = field(default_factory=LimitsConfig)
-    security: SecurityConfig = field(default_factory=SecurityConfig)
-    record_video: bool = True
-    shadow_replay: bool = False
+    sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
+    sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=..., image=...
     experiment_name: str | None = None
     output_root: str = "experiments"
 

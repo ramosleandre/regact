@@ -15,8 +15,7 @@ problem:
   tasks: [ls20]              # one game, so the run is quick
   lifecycle: multi_instance  # remake per episode: keeps the smoke run allowed with the
                              # controller eval (single_instance + eval is refused)
-security:
-  sandbox: false          # dev convenience; no confinement
+sandbox: false            # dev convenience; no confinement
 limits:
-  keep_alive: 3
+  max_turns: 3
 experiment_name: dev

@@ -22,7 +22,6 @@ from regact.config.schema import (
     AgentName,
     Lifecycle,
     RunConfig,
-    SecurityConfig,
     redacted_config_dict,
 )
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
@@ -99,12 +98,12 @@ def _bridged(wrapper: Wrapper, mirror: LoopbackMirror | None, ports: Sequence[in
     return lambda argv: wrapper([*prefix, *argv])
 
 
-def _requested_runtime(security: SecurityConfig) -> SandboxRuntime:
+def _requested_runtime(config: RunConfig) -> SandboxRuntime:
     """The runtime to hand the security layer: auto-detect when confined, unless
-    ``runtime_opts.backend`` forces one; ``NONE`` when unconfined."""
-    if not security.sandbox:
+    ``sandbox_opts.backend`` forces one; ``NONE`` when unconfined."""
+    if not config.sandbox:
         return SandboxRuntime.NONE
-    backend = security.runtime_opts.get("backend")
+    backend = config.sandbox_opts.get("backend")
     return SandboxRuntime(backend) if backend else SandboxRuntime.AUTO
 
 
@@ -135,7 +134,7 @@ def _build_server(
         renderer=problem.obs_renderer(task_name, mode=config.problem.obs_mode),
         lifecycle=_lifecycle_policy(config.problem.lifecycle),
         milestone_detector=problem.milestone_detector(task_name),
-        step_budget=config.limits.env_step_budget,
+        step_budget=config.limits.max_actions_per_env,
         wrappers=wrappers,
     )
     server = EnvServer()
@@ -177,11 +176,11 @@ async def run_task(
     ``agent`` is injectable (tests pass a scripted agent); by default it is built
     from ``config.agent``.
     """
-    requested_runtime = _requested_runtime(config.security)
-    if config.security.sandbox and resolve(requested_runtime) is SandboxRuntime.NONE:
+    requested_runtime = _requested_runtime(config)
+    if config.sandbox and resolve(requested_runtime) is SandboxRuntime.NONE:
         raise RuntimeError(
-            "security.sandbox=true but no sandbox backend is usable on this host; "
-            "enable one (bwrap/seatbelt/apptainer) or set security.sandbox=false"
+            "sandbox=true but no sandbox backend is usable on this host; "
+            "enable one (bwrap/seatbelt/apptainer) or set sandbox=false"
         )
     features = build_features(config.features)
     if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and any(
@@ -239,7 +238,7 @@ async def run_task(
                         deny_egress=True,
                         deny_read=deny_read,
                         allow_rw=_mirror_sockets(mirror, eval_ports),
-                        image=config.security.runtime_opts.get("image"),
+                        image=config.sandbox_opts.get("image"),
                     ),
                     mirror,
                     eval_ports,
@@ -255,9 +254,7 @@ async def run_task(
                 aggregate_episode_metrics=problem.aggregate_episode_metrics,
                 sandbox_wrap=eval_wrap,
                 render_frame=problem.render_frame,
-                record_video=config.record_video,
                 seed=config.problem.seed,
-                shadow_replay=config.shadow_replay,
             )
             tools: list[Tool] = [
                 LoggingTool(tool, logger) for feature in features for tool in feature.tools(deps)
@@ -279,7 +276,7 @@ async def run_task(
             agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
             egress: EgressProxy | None = None
             egress_hosts = agent.host_egress_hosts()
-            if config.security.sandbox and egress_hosts:
+            if config.sandbox and egress_hosts:
                 egress = EgressProxy(egress_hosts)
                 proxy_url = f"http://127.0.0.1:{await egress.start()}"
                 agent_env |= {
@@ -303,11 +300,11 @@ async def run_task(
                     requested_runtime,
                     workdir=workdir,
                     allow_read=[src_dir, *agent.host_read_paths()],
-                    deny_egress=config.security.sandbox,
+                    deny_egress=config.sandbox,
                     deny_read=deny_read,
                     allow_write_prefixes=agent.host_write_prefixes(),
                     allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
-                    image=config.security.runtime_opts.get("image"),
+                    image=config.sandbox_opts.get("image"),
                 ),
                 mirror,
                 agent_ports,

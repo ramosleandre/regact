@@ -15,7 +15,7 @@ from typing import Any, cast
 from omegaconf import OmegaConf
 
 from regact.config.loader import run_config_from_mapping
-from regact.config.schema import AgentName, Execution, RunConfig
+from regact.config.schema import AgentName, RunConfig
 from regact.orchestration.experiment import resolve_run_dir, run_experiment
 
 _DEFAULT_PROFILE = Path(__file__).parent / "conf" / "experiment" / "competition.yaml"
@@ -57,7 +57,6 @@ def run_kaggle(argv: list[str] | None = None) -> int:
         config.problem.tasks = args.games
     if args.parallel is not None:
         config.parallel_workers = args.parallel
-        config.execution = Execution.PARALLEL if args.parallel > 1 else Execution.SEQUENTIAL
     if args.output_root is not None:
         config.output_root = args.output_root
     if args.agent is not None:

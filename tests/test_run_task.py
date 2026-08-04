@@ -20,7 +20,6 @@ from regact.config.schema import (
     LimitsConfig,
     ProblemConfig,
     RunConfig,
-    SecurityConfig,
 )
 from regact.env.renderer import RawRenderer
 from regact.envclient.obs import Obs
@@ -90,7 +89,7 @@ def _config() -> RunConfig:
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake", kwargs={"env_id": "fake-v0"}),
         features={"controller": {"n_episodes": 2, "max_moves": 10}},
-        limits=LimitsConfig(keep_alive=10),
+        limits=LimitsConfig(max_turns=10),
     )
 
 
@@ -146,8 +145,8 @@ async def test_run_task_sandbox_true_fails_when_no_backend(
 
     monkeypatch.setattr(task_module, "resolve", lambda _: SandboxRuntime.NONE)
     config = _config()
-    config.security = SecurityConfig(sandbox=True)
-    with pytest.raises(RuntimeError, match=r"security\.sandbox"):
+    config.sandbox = True
+    with pytest.raises(RuntimeError, match="sandbox"):
         await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
     assert not (tmp_path / "logs").exists()  # refused before writing any artifact
 
@@ -163,6 +162,6 @@ async def test_run_task_refuses_single_instance_with_evaluating_feature(tmp_path
 async def test_run_task_builds_agent_from_config_when_none(tmp_path: Path) -> None:
     """With no injected agent, build_agent(scripted) runs (default turns -> exits on limit)."""
     config = _config()
-    config.limits = LimitsConfig(keep_alive=1)
+    config.limits = LimitsConfig(max_turns=1)
     reason = await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
     assert reason == "loop_limit"  # the default scripted agent never submits/exits

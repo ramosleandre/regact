@@ -65,7 +65,7 @@ async def test_run_experiment_runs_all_tasks(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake_exp"),
-        limits=LimitsConfig(keep_alive=1),
+        limits=LimitsConfig(max_turns=1),
     )
     reasons = await run_experiment(config, output_root=str(tmp_path))
 
@@ -81,7 +81,7 @@ async def test_problem_tasks_selects_experiment_subset(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake_exp", tasks=["g2"]),
-        limits=LimitsConfig(keep_alive=1),
+        limits=LimitsConfig(max_turns=1),
     )
     reasons = await run_experiment(config, output_root=str(tmp_path))
 
