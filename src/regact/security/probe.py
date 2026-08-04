@@ -299,9 +299,7 @@ def _main(argv: list[str] | None = None) -> int:
             handle.write("WINNING = [3, 1, 2, 0]  # the game answer\n")
 
     if args.sandbox:
-        return _rerun_sandboxed(
-            workdir, secret, no_egress=args.no_egress, as_json=args.json
-        )
+        return _rerun_sandboxed(workdir, secret, no_egress=args.no_egress, as_json=args.json)
 
     results = run_probe(
         workdir=workdir,
@@ -318,9 +316,7 @@ def _main(argv: list[str] | None = None) -> int:
     return 0 if all(r.defended for r in results) else 1
 
 
-def _rerun_sandboxed(
-    workdir: str, secret: str, *, no_egress: bool, as_json: bool
-) -> int:
+def _rerun_sandboxed(workdir: str, secret: str, *, no_egress: bool, as_json: bool) -> int:
     """Re-exec this probe inside the auto-detected sandbox, forbidding the secret's dir."""
     import subprocess
 
