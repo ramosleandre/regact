@@ -22,6 +22,18 @@ help:  ## general ── Show this help, grouped by category
 install:  ## setup ── Editable install with dev extras, pinned to the validated set (py3.12)
 	$(PYTHON) -m pip install -e ".[dev]" -c constraints.txt
 
+.PHONY: install-arc
+install-arc:  ## setup ── Add the ARC-AGI-3 game engine (the arc_agi problem)
+	$(PYTHON) -m pip install -e ".[arc]" -c constraints.txt
+
+.PHONY: install-minigrid
+install-minigrid:  ## setup ── Add the MiniGrid environments (the minigrid problem)
+	$(PYTHON) -m pip install -e ".[minigrid]" -c constraints.txt
+
+.PHONY: install-agents
+install-agents:  ## setup ── Add the Alan code agent (agent=alan; claude/codex are separate CLIs)
+	$(PYTHON) -m pip install -e ".[agents]" -c constraints.txt
+
 .PHONY: lock
 lock:  ## setup ── Regenerate constraints.txt from the current venv
 	@{ echo "# Validated dependency set for the research/CI environment (pip constraints file)."; \
