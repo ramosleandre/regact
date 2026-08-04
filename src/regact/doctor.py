@@ -79,8 +79,6 @@ def _sandbox_rows() -> list[Row]:
     backends = (
         ("sandbox-exec", "macOS Seatbelt"),
         ("bwrap", "Linux bubblewrap"),
-        ("apptainer", "HPC Apptainer"),
-        ("singularity", "HPC Singularity"),
     )
     rows = [
         Row("sandbox", binary, OK, f"{label} — {shutil.which(binary)}")

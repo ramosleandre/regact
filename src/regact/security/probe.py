@@ -269,7 +269,6 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--sandbox", action="store_true", help="re-run this probe inside the detected OS sandbox"
     )
-    parser.add_argument("--image", default=None, help="apptainer/singularity .sif image (HPC)")
     parser.add_argument(
         "--loopback-port",
         type=int,
@@ -301,7 +300,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     if args.sandbox:
         return _rerun_sandboxed(
-            workdir, secret, no_egress=args.no_egress, as_json=args.json, image=args.image
+            workdir, secret, no_egress=args.no_egress, as_json=args.json
         )
 
     results = run_probe(
@@ -320,7 +319,7 @@ def _main(argv: list[str] | None = None) -> int:
 
 
 def _rerun_sandboxed(
-    workdir: str, secret: str, *, no_egress: bool, as_json: bool, image: str | None = None
+    workdir: str, secret: str, *, no_egress: bool, as_json: bool
 ) -> int:
     """Re-exec this probe inside the auto-detected sandbox, forbidding the secret's dir."""
     import subprocess
@@ -330,13 +329,6 @@ def _rerun_sandboxed(
 
     backend = detect()
     print(f"detect() -> {backend.value}")
-    if backend is SandboxRuntime.APPTAINER and not image:
-        print(
-            "apptainer needs a .sif image: pass --image PATH (build it off-node), "
-            "or run where bwrap/seatbelt is available."
-        )
-        return 2
-
     src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
     child = [sys.executable, "-m", "regact.security.probe"]
     child += ["--workdir", workdir, "--secret", secret]
@@ -360,7 +352,6 @@ def _rerun_sandboxed(
             allow_read=[src],
             deny_egress=deny_egress,
             allow_rw=[bridge],
-            image=image,
         )
         # TMPDIR inside the (allowed) workdir: scratch for the child without exposing /tmp.
         env = {**os.environ, "PYTHONPATH": src, "TMPDIR": workdir}

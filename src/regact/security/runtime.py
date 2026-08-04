@@ -14,8 +14,6 @@ Backends:
   ``none``       no sandbox: used when none is configured or available.
   ``seatbelt``   macOS ``sandbox-exec``: deny paths outside the workdir, allow the workdir.
   ``bwrap``      Linux bubblewrap mount namespace: bind only the allowed paths.
-  ``apptainer``  HPC Singularity/Apptainer SIF (``--containall --no-home``).
-  ``landlock``   Linux Landlock LSM: declared; needs a helper, not yet implemented.
 
 ``wrap_argv`` is pure (``argv -> argv``), so each backend's command is unit-testable
 without running a sandbox; ``seatbelt`` is also exercised end-to-end by the probe on
@@ -45,21 +43,14 @@ class SandboxRuntime(StrEnum):
     NONE = "none"  # no sandbox: when none is configured or available
     SEATBELT = "seatbelt"  # macOS sandbox-exec
     BWRAP = "bwrap"  # Linux bubblewrap (mount namespace)
-    LANDLOCK = "landlock"  # Linux Landlock LSM (declared; helper not yet built)
-    APPTAINER = "apptainer"  # HPC Singularity/Apptainer SIF
 
 
 def detect() -> SandboxRuntime:
     """Pick the strongest sandbox actually available on this host."""
     if sys.platform == "darwin":
         return SandboxRuntime.SEATBELT if shutil.which("sandbox-exec") else SandboxRuntime.NONE
-    if sys.platform.startswith("linux"):
-        if os.environ.get("SINGULARITY_ALLOWED_DIR") and (
-            shutil.which("apptainer") or shutil.which("singularity")
-        ):
-            return SandboxRuntime.APPTAINER
-        if shutil.which("bwrap") and userns_ok():
-            return SandboxRuntime.BWRAP
+    if sys.platform.startswith("linux") and shutil.which("bwrap") and userns_ok():
+        return SandboxRuntime.BWRAP
     return SandboxRuntime.NONE
 
 
@@ -109,7 +100,6 @@ def make_wrapper(
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
     allow_rw: Sequence[str] = (),
-    image: str | None = None,
 ) -> Wrapper:
     """Return a pure ``argv -> argv`` wrapper that runs argv inside the sandbox.
 
@@ -134,7 +124,6 @@ def make_wrapper(
             deny_read=deny_read,
             allow_write_prefixes=allow_write_prefixes,
             allow_rw=allow_rw,
-            image=image,
         )
 
     return wrap
@@ -150,7 +139,6 @@ def wrap_argv(
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
     allow_rw: Sequence[str] = (),
-    image: str | None = None,
 ) -> Argv:
     """Prepend the per-platform launcher so ``argv`` runs inside the sandbox (deny-by-default)."""
     resolved = resolve(runtime)
@@ -162,10 +150,6 @@ def wrap_argv(
         )
     if resolved is SandboxRuntime.BWRAP:
         return _bwrap(argv, workdir, allow_read, deny_egress, deny_read, allow_rw)
-    if resolved is SandboxRuntime.APPTAINER:
-        return _apptainer(argv, workdir, allow_read, image, allow_rw)
-    if resolved is SandboxRuntime.LANDLOCK:
-        raise NotImplementedError("landlock backend needs a helper binary; not yet built")
     return list(argv)
 
 
@@ -238,7 +222,7 @@ def _interpreter_lib_dirs() -> tuple[str, ...]:
         return ()
     dirs: set[str] = set()
     for path in _parse_ldd_lib_paths(proc.stdout):
-        for candidate in (path, os.path.realpath(path)):
+        for candidate in (os.path.normpath(path), os.path.realpath(path)):
             parent = os.path.dirname(candidate)
             if not parent.startswith(("/usr/", "/lib", "/bin", "/sbin", "/etc")):
                 dirs.add(parent)
@@ -382,27 +366,3 @@ def _bwrap(
     cmd += ["--", *argv]
     return cmd
 
-
-def _apptainer(
-    argv: Sequence[str],
-    workdir: str,
-    allow_read: Sequence[str],
-    image: str | None,
-    allow_rw: Sequence[str] = (),
-) -> Argv:
-    """HPC: a Singularity/Apptainer SIF with ONLY the allowlist bound.
-
-    ``--containall --no-home`` are mandatory: without them Apptainer auto-mounts
-    ``$HOME``/``$PWD``/``$TMP`` and the game source stays readable.
-    """
-    if not image:
-        raise ValueError("apptainer runtime needs an image (.sif); set runtime_opts['image']")
-    wd = os.path.realpath(workdir)
-    binary = "apptainer" if shutil.which("apptainer") else "singularity"
-    cmd = [binary, "exec", "--containall", "--no-home", "--bind", f"{wd}:{wd}", "--pwd", wd]
-    paths = (*_python_prefixes(), *(os.path.realpath(p) for p in (*allow_read, *allow_rw)))
-    for path in paths:
-        if os.path.exists(path):  # apptainer --bind errors on a missing source
-            cmd += ["--bind", f"{path}:{path}"]
-    cmd += [image, *argv]
-    return cmd

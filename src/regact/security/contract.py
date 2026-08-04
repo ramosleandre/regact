@@ -1,10 +1,9 @@
 """The sandbox contract: the invariants the agent's sandbox must satisfy on every platform.
 
 The contract is identical on every platform (macOS / Linux / Jean-Zay / Adastra /
-Kaggle); only the enforcing mechanism differs (seatbelt / bwrap / landlock /
-apptainer / intrinsic). The probe (:mod:`regact.security.probe`) checks these same
-invariants on each platform, so "the same restriction everywhere" is verifiable
-rather than asserted.
+Kaggle); only the enforcing mechanism differs (seatbelt / bwrap / intrinsic). The
+probe (:mod:`regact.security.probe`) checks these same invariants on each platform,
+so "the same restriction everywhere" is verifiable rather than asserted.
 
 Pure data: no agent, environment, or feature types, so the security layer stays
 agnostic.

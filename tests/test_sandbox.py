@@ -129,20 +129,6 @@ def test_wrap_argv_bwrap_binds_workdir_but_not_the_repo() -> None:
     assert "--ro-bind /repo /repo" not in joined  # the repo root is NOT bound => absent
 
 
-def test_wrap_argv_apptainer_is_containall_and_needs_an_image() -> None:
-    out = wrap_argv(
-        SandboxRuntime.APPTAINER,
-        ["python3", "x.py"],
-        workdir="/tmp/wd",
-        image="/sif/agent.sif",
-    )
-    assert "--containall" in out and "--no-home" in out
-    assert out[-3:] == ["/sif/agent.sif", "python3", "x.py"]
-
-    with pytest.raises(ValueError):
-        wrap_argv(SandboxRuntime.APPTAINER, ["x"], workdir="/tmp/wd", image=None)
-
-
 def test_wrap_argv_allows_a_file_path(tmp_path: Path) -> None:
     """A FILE in allow_read (e.g. ~/.claude.json) is handled, not silently dropped."""
     config = tmp_path / "config.json"

@@ -8,7 +8,7 @@ dicts -- never an agent/env/feature object):
   absent from its filesystem view. ``wrap_argv`` is the single integration point; the
   rest of regact does not depend on which backend is used. The ``contract`` (R1-R6)
   is the same on every platform; only the enforcing mechanism differs (seatbelt /
-  bwrap / landlock / apptainer / intrinsic). ``probe`` checks the contract identically
+  bwrap / intrinsic). ``probe`` checks the contract identically
   on each platform.
 - **Tool-call flagging** (``detection`` + ``policy``): a cheap scan of the agent's
   tool-call arguments that only logs/flags suspicious access for metrics; it never

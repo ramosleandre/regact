@@ -180,7 +180,7 @@ async def run_task(
     if config.sandbox and resolve(requested_runtime) is SandboxRuntime.NONE:
         raise RuntimeError(
             "sandbox=true but no sandbox backend is usable on this host; "
-            "enable one (bwrap/seatbelt/apptainer) or set sandbox=false"
+            "enable one (bwrap on Linux, seatbelt on macOS) or set sandbox=false"
         )
     features = build_features(config.features)
     if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and any(
@@ -238,7 +238,6 @@ async def run_task(
                         deny_egress=True,
                         deny_read=deny_read,
                         allow_rw=_mirror_sockets(mirror, eval_ports),
-                        image=config.sandbox_opts.get("image"),
                     ),
                     mirror,
                     eval_ports,
@@ -304,7 +303,6 @@ async def run_task(
                     deny_read=deny_read,
                     allow_write_prefixes=agent.host_write_prefixes(),
                     allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
-                    image=config.sandbox_opts.get("image"),
                 ),
                 mirror,
                 agent_ports,

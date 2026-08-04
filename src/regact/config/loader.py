@@ -52,7 +52,7 @@ def _sandbox_bool(value: Any) -> bool:
         return bool(value)
     raise ValueError(
         f"sandbox must be true/false (got {value!r}); to force a backend use "
-        "sandbox_opts.backend=<seatbelt|bwrap|apptainer>"
+        "sandbox_opts.backend=<seatbelt|bwrap>"
     )
 
 

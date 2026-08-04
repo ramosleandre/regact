@@ -82,7 +82,7 @@ class RunConfig:
     parallel_workers: int = 1  # 1 = sequential
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
-    sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=..., image=...
+    sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap
     experiment_name: str | None = None
     output_root: str = "experiments"
 

@@ -11,9 +11,7 @@
 #   TASK_NAMES            default `ls20`  (comma-separated, e.g. "ls20,vc33")
 #   LIFECYCLE             default `multi_instance`  (or `single_instance`)
 #   AGENT                 default `alan` (alancode in a sandboxable child process)
-#   SANDBOX               default `false`. `true` = confine (auto backend) + deny egress;
-#                         `apptainer` = confine forcing the apptainer backend (+ SIF below).
-#   SIF                   apptainer image (.sif) — REQUIRED when SANDBOX=apptainer
+#   SANDBOX               default `false`. `true` = confine (bwrap, validated on Adastra) + deny egress.
 #   WALLTIME_S            default `3000`  (per-game wall-clock cap, seconds)
 #   OUTPUT_ROOT           default `experiments` -> regact writes experiments/<EXP_NAME>/<game>/,
 #                         next to ClusterControl's experiments/<EXP_NAME>/logs/ (one dir per run)
@@ -50,12 +48,7 @@ done
 
 export AGENT_BASE_URL="${BASE}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
-if [ "${SANDBOX}" = "apptainer" ]; then
-    SANDBOX_ARGS=("sandbox=true" "+sandbox_opts.backend=apptainer"
-                  "+sandbox_opts.image=${SIF:?SANDBOX=apptainer needs SIF=<image.sif>}")
-else
-    SANDBOX_ARGS=("sandbox=${SANDBOX}")  # true | false
-fi
+SANDBOX_ARGS=("sandbox=${SANDBOX}")  # true | false
 
 echo "[regact] run_exp problem=arc_agi tasks=[${TASK_NAMES}] agent=${AGENT} model=openai/${MODEL_NAME} sandbox=${SANDBOX}"
 python -m regact.run_exp \

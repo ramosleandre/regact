@@ -117,7 +117,7 @@ backend but has no run group yet.)
 - `parallel_workers`: int (1 = sequential).
 - `limits.{max_turns, max_seconds_per_task, max_actions_per_env}`; eval knobs live on the feature:
   `features.controller.{n_episodes, max_moves, record_video, shadow_replay}`.
-- `sandbox`: true/false (+ expert `sandbox_opts.{backend,image}`).
+- `sandbox`: true/false (+ expert `sandbox_opts.backend`).
 - `experiment_name`, `output_root` (outputs under `<output_root>/<experiment_name>/`).
 
 See it composed without running: `python -m regact.run_exp agent=claude problem=arc_agi --cfg job`.
