@@ -33,16 +33,33 @@ def test_capabilities_mark_client_cli() -> None:
 
 def test_host_paths_are_per_agent_and_ambient_config_stays_out() -> None:
     """Each backend declares only its OWN dirs, and never the user-level config roots
-    (~/.claude, ~/.codex) — those hold other sessions' transcripts and history."""
+    (~/.claude read-only, ~/.codex) — those hold other sessions' transcripts and history."""
     home = os.path.expanduser("~")
-    claude_ro, claude_rw = ClaudeAgent().host_read_paths(), ClaudeAgent().host_rw_paths()
+    claude_ro = ClaudeAgent().host_read_paths()
     codex_rw = CodexAgent().host_rw_paths()
-    assert os.path.join(home, ".claude") not in claude_ro  # other sessions' transcripts
-    assert os.path.join(home, ".claude.json") not in claude_ro  # prompt history
-    assert any(p.endswith("/claude-home") for p in claude_rw)  # the isolated config dir
+    assert os.path.join(home, ".claude") not in claude_ro  # never in the read-only set
+    # .claude.json IS exposed read-only: the CLI will not start a session without it.
+    assert os.path.join(home, ".claude.json") in claude_ro
     assert any(p.endswith("/codex-home") for p in codex_rw)  # codex's isolated CODEX_HOME
-    assert not any("codex" in p for p in claude_rw)  # no cross-contamination
-    assert not any("claude" in p for p in codex_rw)
+    assert not any("claude" in p for p in codex_rw)  # no cross-contamination
+
+
+def test_claude_config_dir_isolates_when_forced(tmp_path) -> None:
+    """Forcing ``claude_home`` (or a file-based .credentials.json) relocates the config
+    dir; that isolated dir is what host_rw_paths binds — never codex's."""
+    isolated = str(tmp_path / "claude-home")
+    agent = ClaudeAgent({"claude_home": isolated})
+    rw = agent.host_rw_paths()
+    assert any(p == os.path.realpath(isolated) for p in rw)
+    assert not any("codex" in p for p in rw)
+
+
+def test_claude_config_dir_falls_back_to_real_home_for_keychain_auth(monkeypatch) -> None:
+    """With no forced home and no copyable .credentials.json (macOS Keychain auth),
+    relocating would strand the CLI as 'Not logged in', so it uses the real ~/.claude."""
+    monkeypatch.setattr(os.path, "exists", lambda p: False)  # no .credentials.json anywhere
+    agent = ClaudeAgent()  # no claude_home forced
+    assert agent._config_dir() == os.path.join(os.path.expanduser("~"), ".claude")
 
 
 def test_codex_uses_an_isolated_home(tmp_path) -> None:

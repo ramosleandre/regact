@@ -14,6 +14,9 @@ Three diagnostics, one question each — this one is presence:
   * ``regact.doctor``          is everything installed, and where?
   * ``regact.agentcheck``      do the backends launch *under the sandbox*?
   * ``regact.security.probe``  does the sandbox honor the R1-R6 contract?
+
+``--auth`` adds a per-backend authentication check (spends one trivial LLM call per CLI
+agent), catching the "present but not logged in" case a plain ``--version`` misses.
 """
 
 from __future__ import annotations
@@ -127,11 +130,14 @@ def _version_of(argv: list[str]) -> tuple[str, str]:
     return OK, f"{first[0][:40] if first else 'ok'} — {real}"
 
 
-def _agent_rows() -> list[Row]:
+def _agent_rows(check_auth: bool = False) -> list[Row]:
     """Every registered backend, asked what it needs to launch (no hardcoded CLI list).
 
     Uses ``CodeAgent.launch_probe_argv``, so a newly added backend is covered here the
-    day it declares one — nothing in this module names a specific agent.
+    day it declares one — nothing in this module names a specific agent. With
+    ``check_auth``, each backend that offers an ``auth_check`` is also asked whether it
+    can actually authenticate (present-but-not-logged-in is the failure a version check
+    cannot see); this spends one trivial LLM call per CLI agent.
     """
     try:
         from regact.agent.base import build_agent
@@ -141,12 +147,15 @@ def _agent_rows() -> list[Row]:
 
     rows = []
     for name in AgentName:
-        argv = build_agent(AgentConfig(name=name)).launch_probe_argv()
+        agent = build_agent(AgentConfig(name=name))
+        argv = agent.launch_probe_argv()
         if not argv:
             rows.append(Row("agent backends", name.value, SKIP, "in-process (nothing to launch)"))
             continue
         status, detail = _version_of(argv)
         rows.append(Row("agent backends", name.value, status, detail))
+        if check_auth and status == OK and (auth := agent.auth_check()) is not None:
+            rows.append(Row("agent backends", f"{name.value} auth", auth[0], auth[1]))
     return rows
 
 
@@ -176,9 +185,9 @@ def _endpoint_row(url: str) -> Row:
     return Row("endpoint", url, OK, f"reachable on {host}:{port}")
 
 
-def collect(endpoint: str | None = None) -> list[Row]:
+def collect(endpoint: str | None = None, check_auth: bool = False) -> list[Row]:
     """Every check, in report order."""
-    rows = [*_core_rows(), *_sandbox_rows(), *_agent_rows(), *_extras_rows()]
+    rows = [*_core_rows(), *_sandbox_rows(), *_agent_rows(check_auth), *_extras_rows()]
     if endpoint:
         rows.append(_endpoint_row(endpoint))
     return rows
@@ -208,10 +217,13 @@ def main(argv: list[str] | None = None) -> int:
         prog="regact.doctor", description="Report what this machine can run."
     )
     parser.add_argument("--endpoint", default=None, help="also check a model URL is reachable")
+    parser.add_argument(
+        "--auth", action="store_true", help="also check each agent CAN log in (spends 1 call/agent)"
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable (for a job log)")
     args = parser.parse_args(argv)
 
-    rows = collect(args.endpoint)
+    rows = collect(args.endpoint, check_auth=args.auth)
     print(json.dumps([asdict(r) for r in rows], indent=2) if args.json else format_report(rows))
     return 1 if any(r.status == FAIL for r in rows) else 0
 

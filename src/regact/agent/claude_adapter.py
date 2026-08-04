@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from typing import Any
 
@@ -52,6 +53,20 @@ class ClaudeAgent(_CliAgent):
         raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
         self._claude_home = os.path.realpath(os.path.expanduser(raw_home))
 
+    def _config_dir(self) -> str:
+        """The config dir claude will actually use — decided independently of start().
+
+        Isolated home when we can relocate without losing auth (a copyable
+        ``.credentials.json`` exists, or the caller forced ``args.claude_home``); else
+        the real ``~/.claude`` so Keychain-only macOS auth keeps working. Same rule as
+        :meth:`_configure_home`, so the sandbox binds the dir claude truly writes to.
+        """
+        forced = self._args.get("claude_home") is not None
+        creds = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
+        if forced or os.path.exists(creds):
+            return self._claude_home
+        return os.path.join(os.path.expanduser("~"), ".claude")
+
     def _configure_workdir(self) -> None:
         # Native confinement: a .claude/settings.json deny-list keeps Claude's file
         # tools inside the workdir (it cannot read the game data outside it).
@@ -65,18 +80,27 @@ class ClaudeAgent(_CliAgent):
             self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)
 
     def _configure_home(self) -> None:
-        """Seed the isolated config dir and point claude at it via ``CLAUDE_CONFIG_DIR``.
+        """Seed an isolated config dir and point claude at it via ``CLAUDE_CONFIG_DIR``.
 
-        Only the credential file is copied in (macOS keeps subscription auth in the
-        Keychain, reached independently of the config dir), so a session starts with
-        auth and nothing else: no other session's transcript, no prompt history, no
-        user-level settings.
+        Isolation is best-effort and MUST NOT break auth. It only kicks in when auth
+        lives in a copyable ``.credentials.json`` (the file-based login): we copy just
+        that file in, so the session starts with auth and nothing else — no other
+        session's transcript, prompt history, or user-level settings.
+
+        When there is no such file (macOS subscription auth lives in the Keychain, keyed
+        to the DEFAULT config dir and not found from a relocated one), isolating the dir
+        would strand the CLI as "Not logged in". In that case we leave ``CLAUDE_CONFIG_DIR``
+        unset so claude uses its real home and keeps its auth. Override the home
+        explicitly with ``args.claude_home`` to force isolation regardless.
         """
-        os.makedirs(self._claude_home, exist_ok=True)
+        config_dir = self._config_dir()
+        if config_dir != self._claude_home:
+            return  # Keychain-only auth: use the real home, relocating would drop auth
+        os.makedirs(config_dir, exist_ok=True)
         creds = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
         if os.path.exists(creds):
-            shutil.copyfile(creds, os.path.join(self._claude_home, ".credentials.json"))
-        self._env_overrides["CLAUDE_CONFIG_DIR"] = self._claude_home
+            shutil.copyfile(creds, os.path.join(config_dir, ".credentials.json"))
+        self._env_overrides["CLAUDE_CONFIG_DIR"] = config_dir
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -92,11 +116,43 @@ class ClaudeAgent(_CliAgent):
         """Cheap liveness check: the Claude CLI must be executable inside the sandbox."""
         return ["claude", "--version"]
 
+    def auth_check(self) -> tuple[str, str] | None:
+        """Detect the "Not logged in" case without spending a real turn.
+
+        ``claude -p`` with a trivial prompt errors immediately with an auth message when
+        unauthenticated (or when the config dir was relocated away from Keychain auth),
+        so we can catch it cheaply. Uses the same ``CLAUDE_CONFIG_DIR`` a real run would.
+        """
+        if shutil.which("claude") is None:
+            return "warn", "'claude' not on PATH"
+        env = dict(os.environ)
+        config_dir = self._config_dir()
+        if config_dir != os.path.join(os.path.expanduser("~"), ".claude"):
+            env["CLAUDE_CONFIG_DIR"] = config_dir
+        try:
+            proc = subprocess.run(
+                ["claude", "-p", "hi", "--output-format", "json"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=env,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return "warn", f"could not run auth check ({type(exc).__name__})"
+        out = (proc.stdout or "") + (proc.stderr or "")
+        if "Not logged in" in out or "authentication_failed" in out or "Please run /login" in out:
+            return "warn", "not logged in — run `claude` once to authenticate"
+        if proc.returncode != 0 and "rate" in out.lower():
+            return "warn", "authenticated but rate-limited (out of credits / 5h window)"
+        return "ok", "authenticated"
+
     def host_read_paths(self) -> list[str]:
         home = os.path.expanduser("~")
         paths = [
             *executable_paths("claude"),  # the CLI's bin dir + its real install tree
             os.path.join(home, ".npm"),  # package cache (npm installs); no session data
+            os.path.join(home, ".claude.json"),
         ]
         if sys.platform == "darwin":
             claude_tmp = f"/tmp/claude-{os.getuid()}"
@@ -105,8 +161,9 @@ class ClaudeAgent(_CliAgent):
         return paths
 
     def host_rw_paths(self) -> list[str]:
-        os.makedirs(self._claude_home, exist_ok=True)  # must exist for a bind/subpath rule
-        return [self._claude_home]
+        home = self._config_dir()  # the dir claude truly writes to (isolated or real ~/.claude)
+        os.makedirs(home, exist_ok=True)  # must exist for a bind/subpath rule
+        return [home]
 
     def host_egress_hosts(self) -> list[str]:
         return ["api.anthropic.com"]  # block statsig.anthropic.com / sentry telemetry

@@ -83,7 +83,7 @@ class _CliAgent(CodeAgent):
         proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=self._cwd or None,
-            stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
+            stdin=asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=None,
             env={**os.environ, **self._env_overrides},

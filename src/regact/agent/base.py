@@ -127,6 +127,17 @@ class CodeAgent(ABC):
         """
         return []
 
+    def auth_check(self) -> tuple[str, str] | None:
+        """Cheaply verify the backend can actually AUTHENTICATE, not just launch.
+
+        ``launch_probe_argv`` (a ``--version``) proves the binary runs; it does NOT prove
+        the run will start — a CLI can be present yet unauthenticated (the classic
+        "Not logged in" that only surfaces once a real turn fires). Return ``(status,
+        detail)`` with ``status`` in ``{"ok","warn"}``; ``None`` (default) means the
+        backend has no cheap auth check to offer. Must be side-effect-free and fast.
+        """
+        return None
+
     def launch_probe_argv(self) -> list[str]:
         """A cheap argv proving THIS backend can actually start (e.g. ``<cli> --version``).
 
