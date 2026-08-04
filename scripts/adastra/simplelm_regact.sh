@@ -10,8 +10,7 @@
 #   SIMPLELM_TOOL_PARSER  default `universal` (per-family auto; `noop` = no tools)
 #   TASK_NAMES            default `ls20`  (comma-separated, e.g. "ls20,vc33")
 #   LIFECYCLE             default `multi_instance`  (or `single_instance`)
-#   AGENT                 default `alan` unconfined, `alan_subprocess` when SANDBOX is on
-#                         (the OS sandbox wraps subprocesses; in-process alan cannot be confined)
+#   AGENT                 default `alan` (alancode in a sandboxable child process)
 #   SANDBOX               default `false`. `true` = confine (auto backend) + deny egress;
 #                         `apptainer` = confine forcing the apptainer backend (+ SIF below).
 #   SIF                   apptainer image (.sif) — REQUIRED when SANDBOX=apptainer
@@ -28,7 +27,7 @@ TP=${SIMPLELM_TOOL_PARSER:-universal}
 TASK_NAMES=${TASK_NAMES:-ls20}
 LIFECYCLE=${LIFECYCLE:-multi_instance}
 SANDBOX=${SANDBOX:-false}
-if [ "${SANDBOX}" = "false" ]; then AGENT=${AGENT:-alan}; else AGENT=${AGENT:-alan_subprocess}; fi
+AGENT=${AGENT:-alan}
 WALLTIME_S=${WALLTIME_S:-3000}
 OUTPUT_ROOT=${OUTPUT_ROOT:-experiments}  # -> experiments/<EXP_NAME>/<game>/ (beside ClusterControl logs)
 

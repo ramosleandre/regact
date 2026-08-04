@@ -32,8 +32,8 @@ def test_every_agent_backend_is_reported() -> None:
 
 def test_in_process_backends_are_skipped_not_failed() -> None:
     rows = {r.name: r for r in collect() if r.section == "agent backends"}
-    assert rows["alan"].status == SKIP
     assert rows["scripted"].status == SKIP
+    assert rows["alan"].status != SKIP  # subprocess backend: actually probed, never skipped
 
 
 def test_endpoint_is_only_checked_when_asked() -> None:

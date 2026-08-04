@@ -1,6 +1,7 @@
-# Alan in-process agent, driven against an OpenAI-compatible endpoint (a local
-# SimpleLM / SGLang server on HPC, where the CLI agents' cloud APIs are unreachable).
-# Set model + base_url at launch, e.g.:
+# Alan Code, driven in a CHILD process (so the OS sandbox applies to it) against an
+# OpenAI-compatible endpoint (a local SimpleLM/SGLang/vLLM server on HPC, where the
+# CLI agents' cloud APIs are unreachable). Framework tools reach it over the workdir
+# control CLI.
 #   agent=alan agent.model=openai/<MODEL_NAME> agent.base_url=http://127.0.0.1:9876/v1
 # Remote-scripted mode (drive the model's responses by hand over HTTP):
 #   agent=alan agent.model=remote +agent.args.backend=scripted
@@ -11,7 +12,7 @@
 name: alan
 model: null            # openai/<MODEL_NAME> (the served model); null = none
 base_url: null         # http://127.0.0.1:9876/v1 (the SimpleLM/SGLang endpoint)
-api_key: null          # set to any dummy for a local server (litellm requires one); null = use $OPENAI_API_KEY
+api_key: null          # any dummy for a local server (litellm requires one); null = use $OPENAI_API_KEY
 args:
   permission_mode: yolo        # headless: no permission prompts
   max_output_tokens: 4096      # cap per completion — keeps small-context models (~32k) from overflowing

@@ -13,7 +13,7 @@ import dataclasses
 import sys
 import types
 
-from regact.agent.alan_adapter import AlanAgent, build_alan_agent
+from regact.agent.alan_adapter import build_alan_agent, map_alan_events
 from regact.agent.events import (
     AgentError,
     TextDelta,
@@ -75,7 +75,7 @@ class UserMessage:
 
 def test_assistant_message_unpacks_text_and_tool_call() -> None:
     msg = AssistantMessage([TextBlock("probing"), ToolUseBlock("i", "SubmitSolution", {"x": 1})])
-    events = AlanAgent._map_all(msg)
+    events = map_alan_events(msg)
     kinds = [type(e).__name__ for e in events]
     assert "TextDelta" in kinds and "ToolCall" in kinds
     tool = next(e for e in events if isinstance(e, ToolCall))
@@ -84,26 +84,26 @@ def test_assistant_message_unpacks_text_and_tool_call() -> None:
 
 def test_assistant_message_multiple_tool_calls() -> None:
     msg = AssistantMessage([ToolUseBlock("a", "RunPython", {}), ToolUseBlock("b", "ExitTask", {})])
-    calls = [e for e in AlanAgent._map_all(msg) if isinstance(e, ToolCall)]
+    calls = [e for e in map_alan_events(msg) if isinstance(e, ToolCall)]
     assert [c.name for c in calls] == ["RunPython", "ExitTask"]
 
 
 def test_assistant_api_error_becomes_agent_error() -> None:
     msg = AssistantMessage([], is_api_error_message=True, error_details="context window exceeded")
-    events = AlanAgent._map_all(msg)
+    events = map_alan_events(msg)
     assert len(events) == 1 and isinstance(events[0], AgentError)
     assert "context window" in events[0].message
 
 
 def test_hidden_streaming_message_dropped() -> None:
     # Streaming display deltas re-carry text the assembled message already holds.
-    assert AlanAgent._map_all(AssistantMessage([TextBlock("chunk")], hide_in_api=True)) == []
-    assert AlanAgent._map_all(AssistantMessage([ThinkingBlock("hmm")], hide_in_api=True)) == []
+    assert map_alan_events(AssistantMessage([TextBlock("chunk")], hide_in_api=True)) == []
+    assert map_alan_events(AssistantMessage([ThinkingBlock("hmm")], hide_in_api=True)) == []
 
 
 def test_terminal_message_derives_turn_complete() -> None:
     msg = AssistantMessage([TextBlock("done.")], usage=Usage(input_tokens=10, output_tokens=2))
-    events = AlanAgent._map_all(msg)
+    events = map_alan_events(msg)
     assert [type(e).__name__ for e in events] == ["TextDelta", "TurnComplete"]
     turn = events[-1]
     assert turn.final_text == "done."
@@ -112,24 +112,24 @@ def test_terminal_message_derives_turn_complete() -> None:
 
 def test_message_with_tool_call_has_no_turn_complete() -> None:
     msg = AssistantMessage([TextBlock("running"), ToolUseBlock("i", "Bash", {})])
-    assert not any(isinstance(e, TurnComplete) for e in AlanAgent._map_all(msg))
+    assert not any(isinstance(e, TurnComplete) for e in map_alan_events(msg))
 
 
 def test_assistant_thinking_only() -> None:
-    events = AlanAgent._map_all(AssistantMessage([ThinkingBlock("hmm")]))
+    events = map_alan_events(AssistantMessage([ThinkingBlock("hmm")]))
     assert isinstance(events[0], ThinkingDelta)
     assert isinstance(events[-1], TurnComplete)  # no tool call: the turn ends here
 
 
 def test_empty_text_block_dropped() -> None:
     # An empty TextBlock should not produce a spurious empty TextDelta.
-    events = AlanAgent._map_all(AssistantMessage([TextBlock("")]))
+    events = map_alan_events(AssistantMessage([TextBlock("")]))
     assert not any(isinstance(e, TextDelta) for e in events)
 
 
 def test_user_message_unpacks_tool_results() -> None:
     msg = UserMessage([ToolResultBlock("i", "file contents"), ToolResultBlock("j", "boom", True)])
-    events = AlanAgent._map_all(msg)
+    events = map_alan_events(msg)
     assert [type(e).__name__ for e in events] == ["ToolResult", "ToolResult"]
     assert events[0].id == "i" and events[0].output == "file contents" and not events[0].is_error
     assert events[1].id == "j" and events[1].is_error
@@ -137,13 +137,13 @@ def test_user_message_unpacks_tool_results() -> None:
 
 def test_user_message_block_list_content_flattened() -> None:
     msg = UserMessage([ToolResultBlock("i", [TextBlock("a"), TextBlock("b")])])
-    (ev,) = AlanAgent._map_all(msg)
+    (ev,) = map_alan_events(msg)
     assert ev.output == "ab"
 
 
 def test_plain_text_user_message_maps_to_nothing() -> None:
     # Interruptions/reminders are model-facing context, not agent output.
-    assert AlanAgent._map_all(UserMessage("Request interrupted")) == []
+    assert map_alan_events(UserMessage("Request interrupted")) == []
 
 
 def test_full_turn_event_order() -> None:
@@ -157,7 +157,7 @@ def test_full_turn_event_order() -> None:
         AssistantMessage([TextBlock("Done")], hide_in_api=True),
         AssistantMessage([TextBlock("Done")], usage=Usage(output_tokens=5)),
     ]
-    events = [e for item in stream for e in AlanAgent._map_all(item)]
+    events = [e for item in stream for e in map_alan_events(item)]
     assert [type(e).__name__ for e in events] == [
         "TextDelta",
         "ToolCall",
@@ -172,19 +172,19 @@ def test_full_turn_event_order() -> None:
 
 def test_legacy_single_blocks_still_map() -> None:
     # Older alancode builds may stream individual blocks/messages; _map handles those.
-    assert isinstance(AlanAgent._map_all(TextBlock("hi"))[0], TextDelta)
-    assert isinstance(AlanAgent._map_all(ToolUseBlock("i", "X", {}))[0], ToolCall)
+    assert isinstance(map_alan_events(TextBlock("hi"))[0], TextDelta)
+    assert isinstance(map_alan_events(ToolUseBlock("i", "X", {}))[0], ToolCall)
 
 
 def test_unknown_item_dropped() -> None:
     class Weird:
         pass
 
-    assert AlanAgent._map_all(Weird()) == []
+    assert map_alan_events(Weird()) == []
 
 
 def test_legacy_tool_result_maps() -> None:
-    (ev,) = AlanAgent._map_all(ToolResultBlock("i", "out"))
+    (ev,) = map_alan_events(ToolResultBlock("i", "out"))
     assert isinstance(ev, ToolResult) and ev.output == "out"
 
 

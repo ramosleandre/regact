@@ -14,10 +14,9 @@ from regact.config.schema import AgentName
 
 
 def test_in_process_backends_have_nothing_to_launch(tmp_path: Path) -> None:
-    """alan (in-process) and scripted run inside the orchestrator, so there is no argv
-    to wrap — the diagnostic must skip them rather than invent a check."""
-    for name in (AgentName.ALAN, AgentName.SCRIPTED):
-        assert check_agent(name, workdir=str(tmp_path)) == []
+    """scripted runs inside the orchestrator, so there is no argv to wrap — the
+    diagnostic must skip it rather than invent a check."""
+    assert check_agent(AgentName.SCRIPTED, workdir=str(tmp_path)) == []
 
 
 def test_subprocess_backends_declare_a_launch_probe() -> None:
@@ -26,7 +25,7 @@ def test_subprocess_backends_declare_a_launch_probe() -> None:
     from regact.agent.base import build_agent
     from regact.config.schema import AgentConfig
 
-    for name in (AgentName.CLAUDE, AgentName.CODEX, AgentName.ALAN_SUBPROCESS):
+    for name in (AgentName.CLAUDE, AgentName.CODEX, AgentName.ALAN):
         argv = build_agent(AgentConfig(name=name)).launch_probe_argv()
         assert argv, f"{name.value} declares no launch probe"
 

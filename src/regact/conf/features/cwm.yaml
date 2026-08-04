@@ -1,15 +1,13 @@
 # @package _global_
-# Controller + the Code World Model: transitions recorded server-side (canonical in
+# The Code World Model feature alone: transitions recorded server-side (canonical in
 # the run output dir, a mirror in the workdir), a world_model/ scaffold, and the
-# agent-run verify.py coherence check. Each feature owns its knobs; override on the
-# CLI as e.g. `features.cwm.max_tested_transitions_per_verify=500`.
+# agent-run verify.py coherence check. Override on the CLI as e.g.
+# `features.cwm.max_tested_transitions_per_verify=500`.
 #   python -m regact.run_exp features=cwm
+# NOTE: no controller here — a cwm-only run has no SubmitSolution/ExitTask, so it ends
+# on a limit (max_turns/max_seconds_per_task). To stack features, list them together
+# in a profile or on the CLI (features.controller + features.cwm).
 features:
-  controller:
-    n_episodes: 1
-    max_moves: 2500
-    record_video: true
-    shadow_replay: true
   cwm:
     max_tested_transitions_per_verify: 1000               # verify.py default cap on distinct obs per run
     max_printed_incoherence_transitions_per_verify: 10    # verify.py default cap on failure details shown

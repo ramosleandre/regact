@@ -73,11 +73,11 @@ def test_build_agent_scripted() -> None:
 
 
 def test_build_agent_alan_constructs_without_alancode() -> None:
-    # Construction must not import alancode (only start() does).
-    from regact.agent.alan_adapter import AlanAgent
+    # Construction must not import alancode (only the spawned child does).
+    from regact.agent.alan_subprocess import AlanSubprocessAgent
 
     agent = build_agent(AgentConfig(name=AgentName.ALAN))
-    assert isinstance(agent, AlanAgent)
+    assert isinstance(agent, AlanSubprocessAgent)
 
 
 def test_build_agent_unknown_raises() -> None:
@@ -93,8 +93,8 @@ def test_agent_event_union_members() -> None:
 
 
 def test_alan_event_mapping() -> None:
-    """AlanAgent._map translates native blocks to the normalized union by class name."""
-    from regact.agent.alan_adapter import AlanAgent
+    """The legacy mapper translates native blocks to the normalized union by class name."""
+    from regact.agent.alan_adapter import _map_legacy
 
     class TextBlock:
         text = "hi"
@@ -119,7 +119,7 @@ def test_alan_event_mapping() -> None:
     class Unknown:
         pass
 
-    m = AlanAgent._map
+    m = _map_legacy
     assert m(TextBlock()) == TextDelta("hi")
     assert m(ToolUseBlock()) == ToolCall("t1", "submit_solution", {"path": "c.py"})
     assert m(ToolResultBlock()) == ToolResult("t1", "scored", False)
@@ -128,11 +128,10 @@ def test_alan_event_mapping() -> None:
     assert m(Unknown()) is None
 
 
-@pytest.mark.live
-def test_alan_start_requires_alancode() -> None:
-    """Runtime-gated: only meaningful where alancode is installed."""
-    pytest.importorskip("alancode")
-    from regact.agent.alan_adapter import AlanAgent
+def test_alan_capabilities_are_subprocess_shaped() -> None:
+    from regact.agent.alan_subprocess import AlanSubprocessAgent
 
-    agent = AlanAgent()
-    assert agent.capabilities().writes_native_transcript is True
+    caps = AlanSubprocessAgent().capabilities()
+    assert caps.writes_native_transcript is True
+    assert caps.control_actions == "client_cli"  # tools over the workdir CLI
+    assert caps.executes_tools is False

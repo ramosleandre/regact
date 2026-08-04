@@ -1,5 +1,5 @@
 # @package _global_
-# Competition profile (Kaggle ARC-AGI-3): in-process Alan agent driven by a local
+# Competition profile (Kaggle ARC-AGI-3): subprocess Alan agent driven by a local
 # vLLM endpoint, playing the live games one make per game (single_instance).
 #
 # Two ways to use it:

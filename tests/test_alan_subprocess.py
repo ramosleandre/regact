@@ -55,7 +55,7 @@ def test_event_from_json_ignores_what_it_cannot_decode() -> None:
 
 
 def test_registry_builds_the_subprocess_backend() -> None:
-    agent = build_agent(AgentConfig(name=AgentName.ALAN_SUBPROCESS))
+    agent = build_agent(AgentConfig(name=AgentName.ALAN))
     assert isinstance(agent, AlanSubprocessAgent)
 
 
