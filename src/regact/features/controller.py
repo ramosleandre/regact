@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from regact.controllers.executor import ControllerExecutor, SandboxedExecutor
+from regact.controllers.executor import ControllerExecutor, SandboxedExecutor, write_result
 from regact.features.base import (
     Feature,
     FeatureContext,
@@ -149,6 +149,11 @@ class FinalizeControllerHook(Hook):
             max_moves=self._max_moves,
             record_video=self._record_video,
         )
+        if deps.feature_metrics is not None:
+            result.features = deps.feature_metrics()
+            write_result(
+                os.path.join(deps.submissions_dir, "final", "results.json"), result
+            )
         deps.experiment.last_submission_results = result.to_json()
         return result
 
@@ -201,6 +206,7 @@ class ControllerFeature(Feature):
             n_episodes=self._n_episodes,
             max_moves=self._max_moves,
             record_video=self._record_video,
+            feature_metrics=deps.feature_metrics,
         )
         return [submit, ExitTask(deps.experiment)]
 

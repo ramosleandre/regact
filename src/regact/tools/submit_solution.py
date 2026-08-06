@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from typing import Any
 
 from regact.config.schema import Lifecycle
-from regact.controllers.executor import Executor
+from regact.controllers.executor import Executor, write_result
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -34,6 +35,7 @@ class SubmitSolution(Tool):
         n_episodes: int = 1,
         max_moves: int = 400,
         record_video: bool = False,
+        feature_metrics: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._experiment = experiment
         self._executor = executor
@@ -44,6 +46,7 @@ class SubmitSolution(Tool):
         self._n_episodes = n_episodes
         self._max_moves = max_moves
         self._record_video = record_video
+        self._feature_metrics = feature_metrics
 
     @property
     def name(self) -> str:
@@ -78,6 +81,10 @@ class SubmitSolution(Tool):
             max_moves=self._max_moves,
             record_video=self._record_video,
         )
+
+        if self._feature_metrics is not None:
+            result.features = self._feature_metrics()
+            write_result(output_path, result)  # re-persist with the features' numbers
 
         self._experiment.submission_count = index + 1
         self._experiment.last_submission_results = result.to_json()

@@ -47,6 +47,7 @@ class EvalResult:
     error: str | None = None
     error_category: ErrorCategory | None = None
     executor: str | None = None  # "subprocess" | "in_process" — disambiguates the schema shape
+    features: dict[str, Any] = field(default_factory=dict)  # {feature_name: its own metrics}
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -56,4 +57,5 @@ class EvalResult:
             "error": self.error,
             "error_category": self.error_category.value if self.error_category else None,
             "executor": self.executor,
+            "features": self.features,
         }

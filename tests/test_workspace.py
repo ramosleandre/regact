@@ -69,10 +69,35 @@ async def test_submit_solution_runs_executor_and_records(tmp_path: Path) -> None
         "error": None,
         "error_category": None,
         "executor": None,
+        "features": {},
     }
     assert out.data == {"submission": 0, "aggregate": {"success_rate": 1.0}}
     # The executor wrote into submissions/0/results.json
     assert (tmp_path / "submissions" / "0").is_dir()
+
+
+async def test_submit_solution_records_feature_metrics(tmp_path: Path) -> None:
+    """A feature's own numbers land in the submission under its name, so several
+    features can contribute without knowing about each other."""
+    import json
+
+    state = ExperimentState(problem_name="p", task_name="t")
+    executor = _FakeExecutor()
+    tool = SubmitSolution(
+        state,
+        executor,  # type: ignore[arg-type]
+        solution_path=str(tmp_path / "solution.py"),
+        submissions_dir=str(tmp_path / "submissions"),
+        task_name="t",
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        feature_metrics=lambda: {"cwm": {"coherence": 0.9}},
+    )
+    await tool.call({}, ToolContext(cwd=str(tmp_path)))
+
+    assert state.last_submission_results is not None
+    assert state.last_submission_results["features"] == {"cwm": {"coherence": 0.9}}
+    written = json.loads((tmp_path / "submissions" / "0" / "results.json").read_text())
+    assert written["features"] == {"cwm": {"coherence": 0.9}}
 
 
 def test_workspace_bootstrap_multi(tmp_path: Path) -> None:

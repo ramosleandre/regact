@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
+from typing import Any
 from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent, build_agent
@@ -105,6 +106,33 @@ def _requested_runtime(config: RunConfig) -> SandboxRuntime:
         return SandboxRuntime.NONE
     backend = config.sandbox_opts.get("backend")
     return SandboxRuntime(backend) if backend else SandboxRuntime.AUTO
+
+
+def _collect_feature_metrics(
+    features: list[Feature], deps: RunDeps, logger: RunLogger
+) -> dict[str, Any]:
+    """Every loaded feature's own submission numbers, keyed by feature name.
+
+    Empty contributions are dropped so a submission only carries features that
+    actually scored something. A faulty contributor is logged and skipped — extra
+    metrics must never break the submission that carries them.
+    """
+    collected: dict[str, Any] = {}
+    for feature in features:
+        try:
+            metrics = feature.submission_metrics(deps)
+        except Exception as exc:
+            logger.log(
+                LogComponent.EVAL,
+                "WARNING",
+                "feature_metrics_failed",
+                feature=feature.name,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            continue
+        if metrics:
+            collected[feature.name] = metrics
+    return collected
 
 
 def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
@@ -255,6 +283,7 @@ async def run_task(
                 render_frame=problem.render_frame,
                 seed=config.problem.seed,
             )
+            deps.feature_metrics = lambda: _collect_feature_metrics(features, deps, logger)
             tools: list[Tool] = [
                 LoggingTool(tool, logger) for feature in features for tool in feature.tools(deps)
             ]

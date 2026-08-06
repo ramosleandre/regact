@@ -295,7 +295,7 @@ class ControllerExecutor:
                 error_category=ErrorCategory.AGENT_SOLUTION,
                 executor="in_process",
             )
-            _write(output_path, result)
+            write_result(output_path, result)
             return result
         result = score_episodes(
             raw,
@@ -304,7 +304,7 @@ class ControllerExecutor:
             aggregate_metrics=self._aggregate_metrics,
             executor="in_process",
         )
-        _write(output_path, result)
+        write_result(output_path, result)
         if record_video and self._render_frame is not None:
             _write_episode_videos(raw, output_path, self._render_frame)
         return result
@@ -361,7 +361,7 @@ class SandboxedExecutor:
         result = self._spawn_and_score(
             task_name, solution_path, raw_path, lifecycle, n_episodes, max_moves, video
         )
-        _write(output_path, result)
+        write_result(output_path, result)
         return result
 
     def _spawn_and_score(
@@ -472,7 +472,8 @@ def _load_controller_factory(solution_path: str) -> Any:
     return module.get_controller
 
 
-def _write(output_path: str, result: EvalResult) -> None:
+def write_result(output_path: str, result: EvalResult) -> None:
+    """Persist a result to ``output_path`` (also used to re-write it with late metrics)."""
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as handle:
         json.dump(result.to_json(), handle, indent=2)

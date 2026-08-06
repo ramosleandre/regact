@@ -76,6 +76,10 @@ class RunDeps:
     sandbox_wrap: Callable[[list[str]], list[str]] | None = None
     render_frame: Callable[..., Any] | None = None  # one obs -> RGB frame, for the eval video
     seed: int | None = None  # base seed for eval episodes (episode i uses seed+i); None = unseeded
+    # Collects every loaded feature's ``submission_metrics`` as ``{feature_name: {...}}``.
+    # The orchestrator supplies it; whichever feature records a submission merges the
+    # result in, so contributors and recorder stay unaware of each other.
+    feature_metrics: Callable[[], dict[str, Any]] | None = None
 
 
 class HookPhase(StrEnum):
@@ -130,6 +134,19 @@ class Feature(ABC):
     def hooks(self, deps: RunDeps) -> list[Hook]:
         """Framework-run hooks fired by the loop at their phase (finalize, verify…)."""
         ...
+
+    def submission_metrics(self, deps: RunDeps) -> dict[str, Any]:
+        """Numbers THIS feature contributes to a submission's recorded result.
+
+        The orchestrator merges each loaded feature's dict into the submission under
+        the feature's own ``name`` key, so features never collide and none has to know
+        another exists (a feature that scores nothing keeps the empty default). Read by
+        the viewer to show a feature's own metric without naming any key itself.
+
+        Called once per submission, after the evaluation that produced it. Plain
+        JSON-able values; faults are contained by the caller.
+        """
+        return {}
 
     def env_wrapper(self, ctx: FeatureContext) -> Callable[[Any], Any] | None:
         """A wrapper factory (``env -> wrapped env``) applied around the server-side
