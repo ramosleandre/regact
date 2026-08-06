@@ -151,9 +151,7 @@ class FinalizeControllerHook(Hook):
         )
         if deps.feature_metrics is not None:
             result.features = deps.feature_metrics()
-            write_result(
-                os.path.join(deps.submissions_dir, "final", "results.json"), result
-            )
+            write_result(os.path.join(deps.submissions_dir, "final", "results.json"), result)
         deps.experiment.last_submission_results = result.to_json()
         return result
 
