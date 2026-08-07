@@ -28,7 +28,11 @@ Interact with the environment only through `make_env()`.
 4. Write your solution, test it, then submit it and read the score.
 5. Iterate until you win the game.
 
+You act only by **calling your tools** (shell and file operations): probing, editing
+and running code are all tool calls, and a text-only reply ends your turn without
+doing anything. Never describe what you would do instead of doing it.
+
 Discover the rules by **playing** the environment through `make_env()` — never by
 inspecting the framework's own code or fetching answers from elsewhere. And be
-efficient: every interaction with the environment is high costly, so reason your way to the
+efficient: every interaction with the environment is highly costly, so reason your way to the
 rules and act deliberately, rather than brute-forcing or simulating many paths.
