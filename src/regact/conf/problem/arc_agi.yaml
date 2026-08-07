@@ -6,6 +6,7 @@ tasks: []               # empty = every game discovered in environments_dir
 lifecycle: single_instance
 obs_mode: raw
 info_mode: informative
+seed: null              # ignored by deterministic ARC; here so the override composes
 kwargs:
   operation_mode: offline
   environments_dir: environnement
