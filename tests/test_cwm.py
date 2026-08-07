@@ -191,6 +191,7 @@ def test_feature_knobs_bake_into_verify(tmp_path: Path) -> None:
         "world_model/model_state.py",
         "world_model/model_parser.py",
         "world_model/model_render.py",
+        "world_model/model_transition.py",
         "world_model/model_notes.py",
         "world_model/verify.py",
     }
@@ -319,6 +320,103 @@ def test_verify_complexity_ignores_notes_and_itself(tmp_path: Path) -> None:
     notes = tmp_path / "world_model" / "model_notes.py"
     notes.write_text(notes.read_text() + "\n" + "JUNK = [0]\n" * 30)
     assert _run_verify(script)["complexity"]["ast_nodes"] == before
+
+
+# --------------------------------------------------------------------------- #
+# verify.py: the transition check (v3)
+# --------------------------------------------------------------------------- #
+# The fake dataset's true rule, over the identity representation: pos advances,
+# done at pos 3, recorded r is always 0.0 (see _scaffold).
+_CORRECT_TRANSITION = (
+    "def step(state, action):\n"
+    "    pos = state['frame']['pos'] + 1\n"
+    "    done = pos == 3\n"
+    "    next_obs = {\n"
+    "        'frame': {'pos': pos, 'cells': [0] * pos},\n"
+    "        'reward': 1.0 if done else 0.0,\n"
+    "        'is_done': done,\n"
+    "        'available_actions': [1],\n"
+    "        'info': {},\n"
+    "    }\n"
+    "    return next_obs, 0.0, done\n"
+)
+
+
+def _with_transition(workdir: Path, transition_src: str, **scaffold_kwargs: Any) -> Path:
+    script = _scaffold(workdir, **scaffold_kwargs)
+    (workdir / "world_model" / "model_transition.py").write_text(transition_src)
+    return script
+
+
+def test_verify_stub_transition_reports_null_not_failures(tmp_path: Path) -> None:
+    """A v2-style workflow (step still raising) keeps coherence and earns no
+    transition metric - and no noise."""
+    report = _run_verify(_scaffold(tmp_path))
+    assert report["transition_accuracy"] is None
+    assert report["n_transitions_tested"] == 0
+    assert report["coherence"] == 1.0 and report["failures"] == []
+
+
+def test_verify_missing_transition_module_is_tolerated(tmp_path: Path) -> None:
+    script = _scaffold(tmp_path)
+    (tmp_path / "world_model" / "model_transition.py").unlink()
+    report = _run_verify(script)
+    assert report["transition_accuracy"] is None and report["coherence"] == 1.0
+
+
+def test_verify_correct_transition_model_scores_one(tmp_path: Path) -> None:
+    report = _run_verify(_with_transition(tmp_path, _CORRECT_TRANSITION))
+    assert report["transition_accuracy"] == 1.0
+    assert report["n_transitions_tested"] == 3  # 3 distinct (o, a) pairs
+    assert report["failures"] == []
+
+
+def test_verify_wrong_next_state_is_a_pointed_transition_failure(tmp_path: Path) -> None:
+    wrong = _CORRECT_TRANSITION.replace("state['frame']['pos'] + 1", "state['frame']['pos'] + 2")
+    report = _run_verify(_with_transition(tmp_path, wrong))
+    assert report["transition_accuracy"] == 0.0
+    failure = report["failures"][0]
+    assert failure["check"] == "transition" and failure["kind"] == "mismatch"
+    assert failure["detail"].startswith("obs.frame.pos: ")
+
+
+def test_verify_wrong_reward_and_done_are_caught(tmp_path: Path) -> None:
+    ret = "return next_obs, 0.0, done"
+    wrong_reward = _CORRECT_TRANSITION.replace(ret, "return next_obs, 5.0, done")
+    report = _run_verify(_with_transition(tmp_path, wrong_reward))
+    assert report["transition_accuracy"] == 0.0
+    assert all(f["detail"].startswith("reward: 5.0 != ") for f in report["failures"])
+
+    wrong_done = _CORRECT_TRANSITION.replace(ret, "return next_obs, 0.0, False")
+    report = _run_verify(_with_transition(tmp_path, wrong_done))
+    details = [f["detail"] for f in report["failures"]]
+    assert details == ["done: False != True"]  # only the terminal transition mismatches
+
+
+def test_verify_raising_step_counts_as_transition_error(tmp_path: Path) -> None:
+    raising = "def step(state, action):\n    raise KeyError('rule')\n"
+    report = _run_verify(_with_transition(tmp_path, raising))
+    assert report["transition_accuracy"] == 0.0
+    assert all(f["check"] == "transition" and f["kind"] == "error" for f in report["failures"])
+
+
+def test_verify_transition_dedup_and_cap(tmp_path: Path) -> None:
+    script = _with_transition(tmp_path, _CORRECT_TRANSITION)
+    data = tmp_path / "data" / "transitions.jsonl"
+    data.write_text(data.read_text() * 2)  # every (o, a) duplicated
+    report = _run_verify(script)
+    assert report["n_transitions"] == 6
+    assert report["n_transitions_tested"] == 3  # distinct (o, a) only
+    capped = _run_verify(script, "--max-obs", "2")
+    assert capped["n_transitions_tested"] == 2 and capped["n_transitions_skipped"] == 1
+
+
+def test_verify_complexity_counts_the_transition_model(tmp_path: Path) -> None:
+    script = _with_transition(tmp_path, _CORRECT_TRANSITION)
+    before = _run_verify(script)["complexity"]["ast_nodes"]
+    transition = tmp_path / "world_model" / "model_transition.py"
+    transition.write_text(transition.read_text() + "\nJUNK = [0]\n" * 10)
+    assert _run_verify(script)["complexity"]["ast_nodes"] > before
 
 
 # --------------------------------------------------------------------------- #

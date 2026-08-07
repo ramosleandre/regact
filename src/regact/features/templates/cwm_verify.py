@@ -1,8 +1,14 @@
 """Verify your world model against every recorded transition.
 
-Checks coherence — ``render(parse(obs)) == obs`` — over the observations in
-``../data/transitions.jsonl``, reports the model's code complexity, and points
-at the exact transitions where the model fails, so you can load and study them:
+Two checks over ``../data/transitions.jsonl``:
+
+- **coherence** - ``render(parse(o)) == o`` over distinct observations;
+- **transition accuracy** - ``render(step(parse(o), a)) == o'`` plus exact
+  reward/done, over distinct ``(o, a)`` pairs (null while ``step`` is not
+  implemented yet - build parse/render first).
+
+Reports the model's code complexity and points at the exact transitions where
+the model fails, so you can load and study them:
 
     python world_model/verify.py [--max-obs N] [--max-failures K] [--json]
 
@@ -11,7 +17,8 @@ Also importable from your own scripts:
     from verify import load_transitions
     bad = load_transitions()[17]        # the transition a failure points at
 
-Diff details read ``rendered != observed``. Stdlib only; edit freely.
+Diff details read ``rendered != observed`` (coherence) or
+``predicted != observed`` (transition). Stdlib only; edit freely.
 """
 
 from __future__ import annotations
@@ -109,12 +116,83 @@ def _select_obs(
     return picked, skipped
 
 
-def _load_model() -> tuple[Any, Any]:
-    """Import the sibling model modules; return ``(parse, render)``."""
+def _load_model() -> tuple[Any, Any, Any]:
+    """Import the sibling model modules; return ``(parse, render, step)``.
+
+    ``step`` is ``None`` when ``model_transition.py`` is absent (a pre-v3
+    workdir) - the transition check is then skipped, not failed.
+    """
     sys.path.insert(0, str(_DIR))  # so model modules can import each other by name
     parser_module = importlib.import_module("model_parser")
     render_module = importlib.import_module("model_render")
-    return parser_module.parse, render_module.render
+    try:
+        step = importlib.import_module("model_transition").step
+    except ModuleNotFoundError:
+        step = None
+    return parser_module.parse, render_module.render, step
+
+
+def _select_transitions(
+    transitions: list[dict[str, Any]], max_transitions: int
+) -> tuple[list[tuple[int, dict[str, Any]]], int]:
+    """Distinct ``(o, a)`` transitions to test (deterministic env: one occurrence
+    carries all the information), most recent first, capped. Returns
+    ``(picked, n_distinct_skipped)``."""
+    seen: set[str] = set()
+    picked: list[tuple[int, dict[str, Any]]] = []
+    skipped = 0
+    for index in range(len(transitions) - 1, -1, -1):
+        transition = transitions[index]
+        key = json.dumps([transition["o"], transition["a"]], sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(picked) < max_transitions:
+            picked.append((index, transition))
+        else:
+            skipped += 1
+    picked.reverse()
+    return picked, skipped
+
+
+def _check_transitions(
+    tested: list[tuple[int, dict[str, Any]]], parse: Any, render: Any, step: Any
+) -> tuple[int | None, list[dict[str, Any]]]:
+    """Score ``render(step(parse(o), a)) == o'`` + reward/done over ``tested``.
+
+    Returns ``(n_correct, failures)``; ``n_correct`` is ``None`` when ``step``
+    is still the unimplemented stub (the metric is not earned yet).
+    """
+    failures: list[dict[str, Any]] = []
+    correct = 0
+    for index, transition in tested:
+        try:
+            state, reward, done = step(parse(transition["o"]), transition["a"])
+            predicted = _normalize(render(state))
+        except NotImplementedError:
+            return None, []
+        except Exception as exc:
+            failures.append(
+                {
+                    "transition": index,
+                    "check": "transition",
+                    "kind": "error",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        detail = _diff(_normalize(transition["o2"]), predicted)
+        if not detail and reward != transition["r"]:
+            detail = f"reward: {reward!r} != {transition['r']!r}"
+        if not detail and bool(done) != bool(transition["done"]):
+            detail = f"done: {bool(done)!r} != {bool(transition['done'])!r}"
+        if detail:
+            failures.append(
+                {"transition": index, "check": "transition", "kind": "mismatch", "detail": detail}
+            )
+        else:
+            correct += 1
+    return correct, failures
 
 
 def _complexity() -> dict[str, int]:
@@ -130,7 +208,7 @@ def _complexity() -> dict[str, int]:
 def run(max_obs: int, max_failures: int) -> dict[str, Any]:
     transitions = load_transitions()
     tested, skipped = _select_obs(transitions, max_obs)
-    parse, render = _load_model()
+    parse, render, step = _load_model()
     failures: list[dict[str, Any]] = []
     coherent = 0
     for index, obs in tested:
@@ -139,18 +217,44 @@ def run(max_obs: int, max_failures: int) -> dict[str, Any]:
             rendered = _normalize(render(parse(obs)))
         except Exception as exc:
             failures.append(
-                {"transition": index, "kind": "error", "detail": f"{type(exc).__name__}: {exc}"}
+                {
+                    "transition": index,
+                    "check": "representation",
+                    "kind": "error",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
             )
             continue
         detail = _diff(observed, rendered)
         if detail:
-            failures.append({"transition": index, "kind": "mismatch", "detail": detail})
+            failures.append(
+                {
+                    "transition": index,
+                    "check": "representation",
+                    "kind": "mismatch",
+                    "detail": detail,
+                }
+            )
         else:
             coherent += 1
+
+    tested_tr: list[tuple[int, dict[str, Any]]] = []
+    skipped_tr = 0
+    n_correct: int | None = None
+    if step is not None:
+        tested_tr, skipped_tr = _select_transitions(transitions, max_obs)
+        n_correct, transition_failures = _check_transitions(tested_tr, parse, render, step)
+        if n_correct is not None:
+            failures.extend(transition_failures)
     return {
         "coherence": coherent / len(tested) if tested else 0.0,
         "n_obs_tested": len(tested),
         "n_obs_skipped": skipped,
+        "transition_accuracy": (
+            n_correct / len(tested_tr) if n_correct is not None and tested_tr else None
+        ),
+        "n_transitions_tested": len(tested_tr) if n_correct is not None else 0,
+        "n_transitions_skipped": skipped_tr if n_correct is not None else 0,
         "n_transitions": len(transitions),
         "n_failures": len(failures),
         "complexity": _complexity(),
@@ -180,15 +284,26 @@ def main(argv: list[str] | None = None) -> int:
         f"{report['n_obs_skipped']} skipped by --max-obs, "
         f"{report['n_transitions']} transitions on disk)"
     )
+    if report["transition_accuracy"] is None:
+        print("transition accuracy: n/a (implement world_model/model_transition.py to earn it)")
+    else:
+        print(
+            f"transition accuracy: {report['transition_accuracy']:.4f} "
+            f"({report['n_transitions_tested']} distinct (o, a) tested, "
+            f"{report['n_transitions_skipped']} skipped by --max-obs)"
+        )
     print(f"complexity: {report['complexity']['ast_nodes']} AST nodes")
     if report["n_failures"]:
         shown = len(report["failures"])
-        print(f"failures ({shown} of {report['n_failures']} shown; rendered != observed):")
+        print(f"failures ({shown} of {report['n_failures']} shown; model != observed):")
         for failure in report["failures"]:
-            print(f"  transition {failure['transition']} [{failure['kind']}]: {failure['detail']}")
+            print(
+                f"  transition {failure['transition']} "
+                f"[{failure['check']}/{failure['kind']}]: {failure['detail']}"
+            )
         print("load one with: from verify import load_transitions; load_transitions()[<n>]")
     else:
-        print("no failures: the model reproduces every tested observation exactly")
+        print("no failures: the model reproduces every tested observation and transition exactly")
     return 0
 
 

@@ -1,11 +1,13 @@
-"""The Code World Model feature (v2: the representation model).
+"""The Code World Model feature (representation + transition model).
 
 Records every real env transition into the agent's workdir (via the env-wrapper
 seam, server-side — the agent cannot forge or lose data) and scaffolds
-``world_model/``: the ``parse``/``render``/``State`` stubs the agent fills, plus
-a self-contained ``verify.py`` the agent runs to measure coherence
-(``render(parse(o)) == o``) against the recorded data. Design and decisions:
-``context/cwm_v2.md``.
+``world_model/``: the ``parse``/``render``/``State``/``step`` stubs the agent
+fills, plus a self-contained ``verify.py`` the agent runs to measure coherence
+(``render(parse(o)) == o``) and transition accuracy
+(``render(step(parse(o), a)) == o'`` + reward/done) against the recorded data.
+Design and decisions: ``context/cwm_v2.md`` (foundations), ``context/cwm_v3.md``
+(transition model).
 """
 
 from __future__ import annotations
@@ -65,6 +67,21 @@ from model_state import State
 
 
 def render(state: State) -> dict:
+    raise NotImplementedError
+'''
+
+_TRANSITION_STUB = '''\
+"""step(state, action) -> (State, reward, done): how the world MOVES.
+
+Fill it once parse/render are coherent; verify.py then also scores
+transition accuracy. Leave it raising until then - verify reports the
+transition metric as null instead of failing.
+"""
+
+from model_state import State
+
+
+def step(state: State, action) -> tuple[State, float, bool]:
     raise NotImplementedError
 '''
 
@@ -193,6 +210,7 @@ class CwmFeature(Feature):
             TemplateFile("world_model/model_state.py", _STATE_STUB),
             TemplateFile("world_model/model_parser.py", _PARSER_STUB),
             TemplateFile("world_model/model_render.py", _RENDER_STUB),
+            TemplateFile("world_model/model_transition.py", _TRANSITION_STUB),
             TemplateFile("world_model/model_notes.py", _NOTES_STUB),
             TemplateFile("world_model/verify.py", self._verify_source()),
         ]
