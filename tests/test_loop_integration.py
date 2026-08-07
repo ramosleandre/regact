@@ -162,14 +162,32 @@ async def test_graceful_stop_still_finalizes(tmp_path: Path) -> None:
     assert (stack.workdir / "submissions" / "final" / "results.json").is_file()
 
 
-async def test_pipeline_stops_on_backend_error(tmp_path: Path) -> None:
+async def test_pipeline_stops_on_persistent_backend_error(tmp_path: Path) -> None:
+    """Only a wall of consecutive backend errors ends the run (transient ones retry)."""
     stack = _Stack(tmp_path)
-    agent = ScriptedAgent([[AgentError(ErrorCategory.AGENT_API, "429"), TurnComplete()]])
+    error_turn = [AgentError(ErrorCategory.AGENT_API, "429"), TurnComplete()]
+    agent = ScriptedAgent([list(error_turn), list(error_turn), list(error_turn)])
     reason = await stack.run(agent)
 
     assert reason == "agent_api"
     assert stack.experiment.last_error_category == "agent_api"
     assert Path(stack.state_path).exists()  # artifacts still written on error
+
+
+async def test_pipeline_survives_a_transient_backend_error(tmp_path: Path) -> None:
+    """One failed turn (e.g. a 500 from a slow local server) must not kill the session."""
+    stack = _Stack(tmp_path)
+    agent = ScriptedAgent(
+        [
+            [AgentError(ErrorCategory.AGENT_API, "500"), TurnComplete()],
+            [ToolCall("c1", "ExitTask", {}), TurnComplete()],
+        ]
+    )
+    reason = await stack.run(agent)
+
+    assert reason == "agent_exit"  # the error was retried, then the agent finished normally
+    assert stack.experiment.last_error_category == "agent_api"  # ...but it stays on record
+    assert "agent_error_retry" in (stack.logs / "events.jsonl").read_text()
 
 
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ ONE loop over the normalized ``AgentEvent`` stream, replacing the two divergent
 loops in GameAgents. It is provider-independent: it sends a message, consumes the
 agent's event stream, executes the *framework* tools it recognizes (submit/exit),
 mirrors everything to the canonical ``transcript.jsonl``, and stops on the agent's
-request, a limit, an interrupt, a backend error, or a crash.
+request, a limit, an interrupt, a persistent backend error, or a crash.
 
 It is deliberately agnostic of controllers/games/eval: it only knows agents,
 framework tools, hooks, limits, and writers — all generic interfaces. It imports
@@ -50,6 +50,14 @@ _ABORTED_REASONS = frozenset({"loop_crash"})
 _KEEP_ALIVE_MESSAGE = (
     "Continue working. Submit again to re-measure your approach to win the game, "
     "or call ExitTask when you are done."
+)
+
+# A single backend error (one 500/timeout from a slow local server) must not end the
+# session; only a wall of them means the backend is really gone.
+_MAX_CONSECUTIVE_ERROR_TURNS = 3
+_ERROR_RETRY_MESSAGE = (
+    "Your previous turn was interrupted by a backend error. "
+    "Continue working from where you left off."
 )
 
 
@@ -115,6 +123,7 @@ async def run_session(
 
     message = first_message
     turns = 0
+    error_turns = 0  # consecutive turns that ended in a backend error
     watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
     try:
         while True:
@@ -140,9 +149,22 @@ async def run_session(
                 break
             if outcome.error_category is not None:
                 experiment.last_error_category = outcome.error_category.value
-                reason = outcome.error_category.value
-                break
+                error_turns += 1
+                if error_turns >= _MAX_CONSECUTIVE_ERROR_TURNS:
+                    reason = outcome.error_category.value
+                    break
+                logger.log(
+                    LogComponent.ORCHESTRATOR,
+                    "WARNING",
+                    "agent_error_retry",
+                    attempt=error_turns,
+                    max_attempts=_MAX_CONSECUTIVE_ERROR_TURNS,
+                )
+                turns += 1
+                message = _ERROR_RETRY_MESSAGE
+                continue
 
+            error_turns = 0
             turns += 1
             message = _KEEP_ALIVE_MESSAGE
     finally:
