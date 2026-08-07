@@ -20,6 +20,7 @@ command-injection surface — the same rule the other subprocess adapters follow
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import json
 import os
@@ -37,6 +38,11 @@ from regact.obs.transcript import event_from_json
 from regact.tools.base import Tool
 
 _STDOUT_LINE_LIMIT = 64 * 1024 * 1024
+# Child-stderr tail kept in memory for the crash report (lines / chars of the joined tail).
+_STDERR_TAIL_LINES = 40
+_STDERR_TAIL_CHARS = 4000
+_REAP_TIMEOUT_S = 3.0  # how long to wait for the exit status after stdout EOF
+_DRAIN_TIMEOUT_S = 10.0  # bound on consuming an abandoned turn's leftover frames
 
 
 class AlanSubprocessAgent(CodeAgent):
@@ -46,6 +52,9 @@ class AlanSubprocessAgent(CodeAgent):
         self._args = dict(args or {})  # alancode tuning, forwarded verbatim to the child
         self._proc: asyncio.subprocess.Process | None = None
         self._pending: list[str] = []  # queued by inject(), prepended to the next turn
+        self._stderr_tail: collections.deque[str] = collections.deque(maxlen=_STDERR_TAIL_LINES)
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._needs_drain = False  # a prior turn's stream was abandoned before its _turn_end
 
     async def start(
         self,
@@ -72,11 +81,12 @@ class AlanSubprocessAgent(CodeAgent):
             cwd=cwd or None,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=None,
+            stderr=asyncio.subprocess.PIPE,  # drained below; its tail feeds the crash report
             env={**os.environ, **(env or {})},
             limit=_STDOUT_LINE_LIMIT,
             start_new_session=True,
         )
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
         self._send_command(
             {
                 "cmd": "start",
@@ -99,14 +109,18 @@ class AlanSubprocessAgent(CodeAgent):
             yield AgentError(ErrorCategory.AGENT_API, "alan runner is not started")
             return
 
+        if self._needs_drain:
+            await self._drain_stale_turn()
         self._send_command({"cmd": "send", "message": message})
+        self._needs_drain = True
         async for frame in self._read_frames():
             if frame.get("type") == TURN_END:
+                self._needs_drain = False
                 return
             event = self._to_event(frame)
             if event is not None:
                 yield event
-        yield AgentError(ErrorCategory.AGENT_API, self._exit_message())
+        yield AgentError(ErrorCategory.AGENT_API, await self._exit_message())
 
     async def inject(self, message: str) -> None:
         """Queue a message; it is prepended to the next turn (mirrors the CLI agents)."""
@@ -130,6 +144,11 @@ class AlanSubprocessAgent(CodeAgent):
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._proc.wait(), timeout=5.0)
         await self.abort()
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._stderr_task
+            self._stderr_task = None
         self._proc = None
 
     def capabilities(self) -> Capabilities:
@@ -206,7 +225,9 @@ class AlanSubprocessAgent(CodeAgent):
                 return
             if kind == FATAL:
                 raise RuntimeError(f"alan runner failed to start: {frame.get('message')}")
-        raise RuntimeError(f"alan runner exited before becoming ready: {self._exit_message()}")
+        raise RuntimeError(
+            f"alan runner exited before becoming ready: {await self._exit_message()}"
+        )
 
     @staticmethod
     def _to_event(frame: dict[str, Any]) -> AgentEvent | None:
@@ -215,6 +236,41 @@ class AlanSubprocessAgent(CodeAgent):
             return AgentError(ErrorCategory.AGENT_API, str(frame.get("message", "runner fault")))
         return event_from_json(frame)
 
-    def _exit_message(self) -> str:
-        code = self._proc.returncode if self._proc is not None else None
-        return f"alan runner exited with code {code}"
+    async def _drain_stale_turn(self) -> None:
+        """Consume frames left over when a turn's consumer stopped early (the loop breaks
+        on an error event), so the next turn does not read a stale ``_turn_end`` as its own."""
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(_DRAIN_TIMEOUT_S):
+                async for frame in self._read_frames():
+                    if frame.get("type") == TURN_END:
+                        break
+        self._needs_drain = False
+
+    async def _drain_stderr(self) -> None:
+        """Keep the child's stderr pipe from filling, holding the last lines for diagnostics."""
+        assert self._proc is not None and self._proc.stderr is not None
+        async for raw in self._proc.stderr:
+            self._stderr_tail.append(raw.decode(errors="replace").rstrip())
+
+    async def _exit_message(self) -> str:
+        """Describe how the child ended: its reaped exit code plus the stderr tail.
+
+        ``returncode`` is None until the child is actually waited on, so reading it
+        right after the stdout EOF would always print ``None`` - reap it (briefly)
+        first. A timeout means stdout closed while the process lives on.
+        """
+        proc = self._proc
+        code: int | None = None
+        if proc is not None:
+            with contextlib.suppress(TimeoutError):
+                code = await asyncio.wait_for(proc.wait(), timeout=_REAP_TIMEOUT_S)
+        if self._stderr_task is not None:  # let the drain reach EOF so the tail is complete
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(self._stderr_task), timeout=1.0)
+        detail = (
+            "alan runner closed stdout but is still alive"
+            if proc is not None and code is None
+            else f"alan runner exited with code {code}"
+        )
+        tail = "\n".join(self._stderr_tail)[-_STDERR_TAIL_CHARS:]
+        return f"{detail}; stderr tail:\n{tail}" if tail else detail

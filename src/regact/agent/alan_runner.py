@@ -76,8 +76,10 @@ async def _run_turn(agent: Any, message: str) -> None:
         async for native in agent.query_events_async(message):
             for event in map_alan_events(native):
                 _write(dict(event_to_json(event)))
-    except Exception as exc:  # a backend fault must reach the parent, not kill the turn silently
+    except BaseException as exc:  # any fault must reach the parent, not die silently
         _write({"type": FATAL, "message": f"{type(exc).__name__}: {exc}"})
+        if not isinstance(exc, Exception):
+            raise  # SystemExit/KeyboardInterrupt still terminate the child, now reported
     finally:
         _write({"type": TURN_END})
 
@@ -107,7 +109,7 @@ async def _serve() -> int:
 def main() -> int:
     try:
         return asyncio.run(_serve())
-    except Exception as exc:  # startup faults (e.g. alancode missing) must be reportable
+    except BaseException as exc:  # startup faults AND process-killing escapes (e.g. sys.exit)
         _write({"type": FATAL, "message": f"{type(exc).__name__}: {exc}"})
         return 1
 
