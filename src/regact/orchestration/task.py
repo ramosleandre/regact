@@ -358,8 +358,10 @@ async def run_task(
                     env=agent_env,
                     runtime_wrap=runtime_wrap,
                 )
-                first_obs = server.first_obs(task_name)
-                first_message = builder.build_first_message(problem.render_obs_text(first_obs))
+                rendered_first_obs = None
+                if config.first_obs_in_prompt:
+                    rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
+                first_message = builder.build_first_message(rendered_first_obs)
 
                 if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
                     logger.log(

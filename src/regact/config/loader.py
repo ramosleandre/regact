@@ -88,6 +88,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         ),
         features=_features_from(data.get("features")),
         parallel_workers=int(data.get("parallel_workers", 1)),
+        first_obs_in_prompt=bool(data.get("first_obs_in_prompt", False)),
         limits=_limits_from(data.get("limits") or {}),
         sandbox=_sandbox_bool(data.get("sandbox", False)),
         sandbox_opts=dict(data.get("sandbox_opts") or {}),

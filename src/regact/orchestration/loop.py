@@ -48,8 +48,9 @@ from regact.tools.base import Tool, ToolContext
 _ABORTED_REASONS = frozenset({"loop_crash"})
 
 _KEEP_ALIVE_MESSAGE = (
-    "Continue working. Submit again to re-measure your approach to win the game, "
-    "or call ExitTask when you are done."
+    "Keep-alive reminder - Continue working or finish your work : 1) Produce a "
+    "controller in solution.py, 2) Submit this solution by calling SubmitSolution, "
+    "3) Exit your task through ExitTask if you are satisfied with your solution."
 )
 
 # A single backend error (one 500/timeout from a slow local server) must not end the

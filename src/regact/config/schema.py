@@ -80,6 +80,7 @@ class RunConfig:
     # including the controller's eval knobs (n_episodes, max_moves, record_video, shadow_replay).
     features: dict[str, dict[str, Any]] = field(default_factory=lambda: {"controller": {}})
     parallel_workers: int = 1  # 1 = sequential
+    first_obs_in_prompt: bool = False  # render the first observation into the first message
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap

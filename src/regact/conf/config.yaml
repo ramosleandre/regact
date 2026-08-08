@@ -11,6 +11,7 @@ defaults:
   - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
 
 parallel_workers: 1     # concurrent tasks; 1 = sequential
+first_obs_in_prompt: false  # true = render the first observation into the first message
 limits:
   max_turns: 350                # agent turns per task before the loop gives up
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit

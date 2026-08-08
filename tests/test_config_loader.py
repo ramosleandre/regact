@@ -49,6 +49,18 @@ def test_mapping_defaults() -> None:
     assert config.features == {"controller": {}}
     assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE
     assert config.problem.tasks == []
+    assert config.first_obs_in_prompt is False  # the first message carries no obs by default
+
+
+def test_mapping_carries_first_obs_in_prompt() -> None:
+    config = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "minigrid"},
+            "first_obs_in_prompt": True,
+        }
+    )
+    assert config.first_obs_in_prompt is True
 
 
 def test_mapping_preserves_controller_eval_knobs() -> None:
