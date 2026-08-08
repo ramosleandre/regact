@@ -200,6 +200,20 @@ async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     assert stack.experiment.submission_count == 0
 
 
+async def test_pipeline_is_stable_over_many_turns(tmp_path: Path) -> None:
+    """A long run must terminate cleanly on the turn limit, not crash or hang: the loop
+    streams the transcript to disk and offloads the growing conversation to the agent,
+    so it stays stable across many turns rather than accumulating state to failure."""
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=200)
+    agent = ScriptedAgent([])  # never exits: drives straight to the turn limit
+    reason = await stack.run(agent)
+
+    assert reason == "loop_limit"  # clean stop, not loop_crash
+    assert len(agent.sent) == 200  # every turn actually ran
+    assert Path(stack.state_path).exists()
+
+
 async def test_pipeline_survives_tool_crash(tmp_path: Path) -> None:
     class _BoomTool(Tool):
         @property

@@ -14,7 +14,7 @@ import pytest
 
 import regact.agent.alan_subprocess as alan_subprocess
 from regact.agent.alan_runner import FATAL, READY, TURN_END, _run_turn
-from regact.agent.alan_subprocess import AlanSubprocessAgent
+from regact.agent.alan_subprocess import _STDERR_TAIL_LINES, AlanSubprocessAgent
 from regact.agent.base import build_agent
 from regact.agent.events import (
     AgentError,
@@ -136,6 +136,38 @@ async def test_child_death_reports_exit_code_and_stderr(tmp_path) -> None:  # ty
     assert len(events) == 1 and isinstance(events[0], AgentError)
     assert "exited with code 7" in events[0].message
     assert "kaboom" in events[0].message
+
+
+# Floods stderr with many lines, then dies - a long/chatty run must not retain them all.
+_STDERR_FLOOD = 500
+_FLOODING_CHILD = (
+    "import json, sys\n"
+    "sys.stdin.readline()\n"
+    'print(json.dumps({"type": "_ready"}), flush=True)\n'
+    "sys.stdin.readline()\n"
+    f"for i in range({_STDERR_FLOOD}):\n"
+    '    print(f"noise line {i}", file=sys.stderr)\n'
+    "sys.stderr.flush()\n"
+    "sys.exit(1)\n"
+)
+
+
+async def test_child_stderr_tail_is_bounded_under_a_flood(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Memory safety in a long/chatty run: the retained stderr tail is a bounded deque,
+    so a child that prints thousands of lines never grows the parent's footprint - only
+    the last ``_STDERR_TAIL_LINES`` reach the crash report."""
+    agent = AlanSubprocessAgent()
+    await _start_scripted_child(agent, _FLOODING_CHILD, str(tmp_path))
+    try:
+        events = [event async for event in agent.send("go")]
+    finally:
+        await agent.close()
+    (error,) = events
+    assert isinstance(error, AgentError)
+    tail_lines = [ln for ln in error.message.splitlines() if ln.startswith("noise line ")]
+    assert len(tail_lines) == _STDERR_TAIL_LINES  # capped, not all 500
+    assert f"noise line {_STDERR_FLOOD - 1}" in error.message  # the most recent survived
+    assert "noise line 0" not in error.message  # the oldest was dropped
 
 
 async def test_live_child_with_closed_stdout_is_distinguished(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
