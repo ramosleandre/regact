@@ -18,6 +18,13 @@
 #   N_EPISODES            default `1` (controller eval episodes per submission)
 #   CONTEXT_WINDOW        default `30000` (agent.args.context_window)
 #   TOOL_CALL_FORMAT      default empty = native; e.g. `hermes` to force text format
+#   CONCURRENCY           default `4`. Tasks run against the shared endpoint this many
+#                         at a time (1 = sequential). SimpleLM serializes generation
+#                         under a lock, so this does NOT batch decode; the win is that
+#                         while one task holds the lock generating, the others run their
+#                         off-GPU phases (tool exec, env steps, HTTP), so the GPU stops
+#                         idling during any single task's tool work. VRAM-safe (one live
+#                         KV cache at a time); 3-5 keeps the lock always contended.
 #   SIMPLELM_TOOL_PARSER  default `universal`
 #   BASE_URL              default empty = serve MODEL_PATH locally. Set to an
 #                         already-running endpoint (e.g. the 2-node PP server's
@@ -45,6 +52,7 @@ WALLTIME_S=${WALLTIME_S:-3600}
 N_EPISODES=${N_EPISODES:-1}
 CONTEXT_WINDOW=${CONTEXT_WINDOW:-30000}
 TOOL_CALL_FORMAT=${TOOL_CALL_FORMAT:-}
+CONCURRENCY=${CONCURRENCY:-4}
 
 PID=""
 if [ -z "${BASE_URL:-}" ]; then
@@ -54,7 +62,11 @@ if [ -z "${BASE_URL:-}" ]; then
     PID=$!
 fi
 
-READY_TIMEOUT_S=${READY_TIMEOUT_S:-1800}
+# 60 min: a big MoE (e.g. Coder-Next ~159 GB) loads in ~26-30 min, and high job
+# parallelism adds shared-FS I/O contention that pushes it past 30 min - so 1800 was a
+# footgun. A crashed serve still fails fast via the process check below; this only
+# lengthens the wait for a genuinely slow-but-alive load.
+READY_TIMEOUT_S=${READY_TIMEOUT_S:-3600}
 ready=0
 for i in $(seq 1 $((READY_TIMEOUT_S / 10))); do
     if curl -sf "${BASE}/models" >/dev/null 2>&1; then
@@ -71,11 +83,16 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
 EXTRA_ARGS=("agent.args.context_window=${CONTEXT_WINDOW}")
 [ -n "${TOOL_CALL_FORMAT}" ] && EXTRA_ARGS+=("+agent.args.tool_call_format=${TOOL_CALL_FORMAT}")
 
-failed=0
 IFS=',' read -ra TASKS <<< "${TASK_NAMES}"
-for task in "${TASKS[@]}"; do
-    exp="exp_${task}_${AGENT}-${MODEL_NAME}_seed${SEED}"
-    echo "[bench] task=${task} -> experiments/bench_${BENCH_DATE}/${exp}"
+WORK_DIR="$(mktemp -d)"  # per-task exit codes + unique Hydra run dirs (outside experiments/)
+
+# One task's run_exp; exit code parked in WORK_DIR so the parent can tally after the wait.
+# A distinct hydra.run.dir per task keeps concurrent invocations off Hydra's shared default
+# outputs/<timestamp>/ dir; it lives outside experiments/ so it never looks like a run stamp.
+run_task_bench() {
+    local task="$1"
+    local exp="exp_${task}_${AGENT}-${MODEL_NAME}_seed${SEED}"
+    echo "[bench] start task=${task} -> experiments/bench_${BENCH_DATE}/${exp}"
     python -m regact.run_exp \
         agent="${AGENT}" \
         agent.model="openai/${MODEL_NAME}" \
@@ -90,11 +107,32 @@ for task in "${TASKS[@]}"; do
         output_root="experiments/bench_${BENCH_DATE}" \
         experiment_name="${exp}" \
         sandbox="${SANDBOX}" \
+        hydra.run.dir="${WORK_DIR}/hydra_${task}" \
         "${EXTRA_ARGS[@]}"
-    rc=$?
-    echo "[bench] task=${task} exit=${rc}"
+    local rc=$?
+    echo "${rc}" > "${WORK_DIR}/${task}.rc"
+    echo "[bench] done task=${task} exit=${rc}"
+}
+
+# Bounded parallelism: at most CONCURRENCY task jobs live at once. Count only OUR task
+# PIDs (not the server), so the throttle is unaffected by the background SimpleLM process.
+task_pids=()
+_running() { local n=0 p; for p in "${task_pids[@]}"; do kill -0 "${p}" 2>/dev/null && n=$((n + 1)); done; echo "${n}"; }
+
+echo "[bench] running ${#TASKS[@]} tasks, up to ${CONCURRENCY} concurrent against ${BASE}"
+for task in "${TASKS[@]}"; do
+    while [ "$(_running)" -ge "${CONCURRENCY}" ]; do sleep 2; done
+    run_task_bench "${task}" &
+    task_pids+=("$!")
+done
+for p in "${task_pids[@]}"; do wait "${p}"; done
+
+failed=0
+for task in "${TASKS[@]}"; do
+    rc=$(cat "${WORK_DIR}/${task}.rc" 2>/dev/null || echo 1)  # missing marker = it died = failure
     [ "${rc}" -ne 0 ] && failed=$((failed + 1))
 done
+rm -rf "${WORK_DIR}"
 
 if [ -n "${PID}" ]; then
     kill "${PID}" 2>/dev/null; sleep 2; kill -9 "${PID}" 2>/dev/null; wait 2>/dev/null || true
