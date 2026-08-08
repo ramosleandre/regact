@@ -17,6 +17,8 @@ every rerun.
 from __future__ import annotations
 
 import argparse
+import ast
+import collections
 import csv
 import json
 import sys
@@ -69,6 +71,48 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     return rows
 
 
+def _classify_controller(solution_path: Path) -> str:
+    """Classify the submitted controller by what its ``act`` actually does.
+
+    The benchmark's core question is whether the agent writes a *real* policy, so
+    "not the stub" is not enough - a Phase-0 baseline that returns a constant or
+    ``available_actions[0]`` is a genuine edit but reads nothing from the obs.
+
+    - ``stub``: untouched scaffold (``raise NotImplementedError``);
+    - ``trivial``: a single return that ignores the observation's content
+      (a constant, or ``available_actions[i]`` / a random pick over them);
+    - ``reasoned``: anything that inspects the obs (``obs.frame``/``obs.info``,
+      branching, loops, kept state) to choose the action;
+    - ``missing`` / ``unparsable`` when the file is absent or not valid Python.
+    """
+    try:
+        source = solution_path.read_text(encoding="utf-8")
+    except OSError:
+        return "missing"
+    if "raise NotImplementedError" in source:
+        return "stub"
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "unparsable"
+    act = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "act"), None
+    )
+    if act is None:
+        return "unparsable"
+    body = [s for s in act.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
+    # Any control flow or bound state is reasoning about the situation.
+    if any(isinstance(n, (ast.If, ast.For, ast.While, ast.Assign, ast.AugAssign)) for n in body):
+        return "reasoned"
+    # A single return: reasoned only if it reads the obs beyond the action list.
+    reads = {
+        n.attr
+        for n in ast.walk(act)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "obs"
+    }
+    return "reasoned" if reads - {"available_actions"} else "trivial"
+
+
 def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
     agent = config.get("agent", {})
     model = str(agent.get("model") or "?").removeprefix("openai/")
@@ -92,6 +136,7 @@ def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]
         "agent": agent.get("name", "?"),
         "model": model,
         "seed": (config.get("problem") or {}).get("seed"),
+        "controller": _classify_controller(task_dir / "workdir" / "solution.py"),
         "success_rate": aggregate.get("success_rate"),
         "n_episodes": aggregate.get("n_episodes"),
         "mean_levels_completed": aggregate.get("mean_levels_completed"),
@@ -115,24 +160,31 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
-def pivot_markdown(rows: list[dict[str, Any]]) -> str:
-    """Success-rate pivot: one row per task, one column per model."""
+def _pivot(rows: list[dict[str, Any]], field: str) -> str:
+    """One row per task, one column per model, cells = ``field`` of that run."""
     models = sorted({row["model"] for row in rows})
     tasks = sorted({row["task"] for row in rows})
     by_key = {(row["task"], row["model"]): row for row in rows}
-    lines = ["| task | " + " | ".join(models) + " |"]
-    lines.append("|---|" + "---|" * len(models))
+    lines = ["| task | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
     for task in tasks:
-        cells = []
-        for model in models:
-            row = by_key.get((task, model))
-            cells.append(_fmt(row["success_rate"]) if row else "-")
+        cells = [_fmt(by_key[(task, m)][field]) if (task, m) in by_key else "-" for m in models]
         lines.append(f"| {task} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
+def pivot_markdown(rows: list[dict[str, Any]]) -> str:
+    """Success-rate pivot: one row per task, one column per model."""
+    return _pivot(rows, "success_rate")
+
+
+def controller_pivot_markdown(rows: list[dict[str, Any]]) -> str:
+    """Controller-state pivot (stub/trivial/reasoned) - the behavioral signal that,
+    unlike success, is not confounded by walltime."""
+    return _pivot(rows, "controller")
+
+
 _DETAIL_COLUMNS = [
-    "task", "model", "seed", "success_rate", "exit_reason", "submissions",
+    "task", "model", "seed", "controller", "success_rate", "exit_reason", "submissions",
     "tool_calls", "turns", "error_retries", "duration_s", "env_moves", "stamp",
 ]
 
@@ -162,7 +214,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"# Benchmark aggregate: {args.bench_root} ({len(rows)} runs)\n")
-    print("## Final success rate (task x model)\n")
+    counts = collections.Counter(row["controller"] for row in rows)
+    print("Controller states: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
+    print("## Controller written (task x model)\n")
+    print(controller_pivot_markdown(rows))
+    print("\n## Final success rate (task x model)\n")
     print(pivot_markdown(rows))
     print("\n## Runs\n")
     print(detail_markdown(rows))
