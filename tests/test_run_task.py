@@ -165,3 +165,41 @@ async def test_run_task_builds_agent_from_config_when_none(tmp_path: Path) -> No
     config.limits = LimitsConfig(max_turns=1)
     reason = await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
     assert reason == "loop_limit"  # the default scripted agent never submits/exits
+
+
+def test_workdir_on_pythonpath_lets_subdir_scripts_import_framework(tmp_path: Path) -> None:
+    """The scaffolding contract: ``import framework`` must resolve even when the agent
+    runs a script from a SUBDIR (``python code_library/probe.py``). Python only puts the
+    script's own dir on sys.path, so this works only with the workdir root on PYTHONPATH -
+    which run_task sets (see task.py agent_env). Guards that papercut from regressing."""
+    import os
+    import subprocess
+    import sys
+
+    workdir = tmp_path / "workdir"
+    (workdir / "framework").mkdir(parents=True)
+    (workdir / "framework" / "__init__.py").write_text("MARKER = 'ok'\n")
+    (workdir / "code_library").mkdir()
+    probe = workdir / "code_library" / "probe.py"
+    probe.write_text("import framework; print(framework.MARKER)\n")
+    bare = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+    # Without the workdir on PYTHONPATH: the documented import fails (the papercut).
+    missing = subprocess.run(
+        [sys.executable, "code_library/probe.py"],
+        cwd=workdir,
+        env=bare,
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode != 0 and "ModuleNotFoundError" in missing.stderr
+
+    # With it (what run_task now sets): the import resolves from the subdir.
+    ok = subprocess.run(
+        [sys.executable, "code_library/probe.py"],
+        cwd=workdir,
+        env={**bare, "PYTHONPATH": str(workdir)},
+        capture_output=True,
+        text=True,
+    )
+    assert ok.returncode == 0 and ok.stdout.strip() == "ok"

@@ -301,7 +301,11 @@ async def run_task(
 
             agent_tmp = os.path.join(workdir, "tmp")
             os.makedirs(agent_tmp, exist_ok=True)
-            agent_env = {"PYTHONPATH": src_dir, "TMPDIR": agent_tmp}
+            # workdir first so ``import framework`` (and code_library) resolves no matter
+            # which directory the agent runs a script from - Python only puts the script's
+            # own dir on sys.path, so ``python code_library/probe.py`` otherwise can't see
+            # the root-level framework/ package.
+            agent_env = {"PYTHONPATH": os.pathsep.join([workdir, src_dir]), "TMPDIR": agent_tmp}
             egress: EgressProxy | None = None
             egress_hosts = agent.host_egress_hosts()
             if config.sandbox and egress_hosts:
