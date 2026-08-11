@@ -18,5 +18,8 @@ We advise you follow this approach to solve the game:
   the controller, and execute the script.
 - 3) After a script result, observe its output to understand the environment, and iterate on
   (1) on the controllers/scripts. Balance exploration and exploitation.
-- 4) Once you have a performing controller, submit it by importing it in `solution.py` and
-  using the SubmitSolution python command.
+- 4) Once you have a performing controller, submit it by importing it into `solution.py`'s
+  `get_controller` function and using the SubmitSolution python command.
+
+When you have finished - your best controller is in `solution.py` and you do not wish to
+improve it further - end the run with the **ExitTask** python command.

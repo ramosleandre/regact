@@ -65,6 +65,7 @@ async def test_submit_solution_runs_executor_and_records(tmp_path: Path) -> None
     assert state.last_submission_results == {
         "task": "t",
         "aggregate": {"success_rate": 1.0},
+        "aggregate_unverified": None,
         "episodes": [],
         "error": None,
         "error_category": None,

@@ -214,3 +214,101 @@ def test_executor_flags_missing_factory(tmp_path: Path) -> None:
     )
     assert result.error_category is ErrorCategory.AGENT_SOLUTION
     assert result.episodes == []
+
+
+def test_shadow_replay_reproduces_solve_with_recorded_seed(tmp_path: Path) -> None:
+    """Regression: the shadow replay must reset to the SAME seed the rollout recorded, so a
+    controller that genuinely solves a seed-dependent (procedural) env is scored the same by
+    the replay. Before the fix, the replay reset to a fresh random layout and scored real
+    solves as 0 (this is exactly what zeroed working MiniGrid controllers).
+    """
+    from regact.controllers.executor import (
+        replay_and_score,
+        run_episodes_raw,
+        score_episodes,
+    )
+
+    class SeedKeyedEnv:
+        """The winning action IS the seed; a reset to a different seed makes it unwinnable."""
+
+        def __init__(self) -> None:
+            self._seed: int | None = None
+            self._done = False
+
+        def _obs(self) -> Obs:
+            return Obs(
+                frame=None,
+                reward=1.0 if self._done else 0.0,
+                is_done=self._done,
+                available_actions=[self._seed],
+                info={"win_action": self._seed},
+            )
+
+        def reset(self, *, seed: int | None = None) -> Obs:
+            self._seed, self._done = seed, False
+            return self._obs()
+
+        def current(self) -> Obs:
+            return self._obs()
+
+        def step(self, action: object) -> Obs:
+            self._done = action == self._seed
+            return self._obs()
+
+    solution = tmp_path / "solution.py"
+    solution.write_text(
+        "class Controller:\n"
+        "    def act(self, obs):\n"
+        "        return obs.info['win_action']\n"
+        "def get_controller():\n"
+        "    return Controller()\n"
+    )
+
+    def metrics(final_obs: Obs, *, steps: int) -> dict:
+        reward = final_obs.reward or 0.0
+        return {"success": bool(final_obs.is_done and reward > 0), "reward": reward, "steps": steps}
+
+    def aggregate(eps: list[dict]) -> dict:
+        n = len(eps) or 1
+        return {
+            "n_episodes": len(eps),
+            "success_rate": sum(bool(e["success"]) for e in eps) / n,
+            "mean_reward": sum(e["reward"] for e in eps) / n,
+        }
+
+    raw = run_episodes_raw(
+        SeedKeyedEnv(),  # type: ignore[arg-type]
+        str(solution),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        n_episodes=3,
+        max_moves=5,
+        seed=None,
+    )
+    assert [e["seed"] for e in raw] == [0, 1, 2]  # concrete seeds recorded (seed=None -> base 0)
+
+    direct = score_episodes(
+        raw, task_name="t", compute_metrics=metrics, aggregate_metrics=aggregate, executor="x"
+    )
+    assert direct.aggregate["success_rate"] == 1.0  # the controller really solves each episode
+
+    shadow = replay_and_score(
+        SeedKeyedEnv(),  # type: ignore[arg-type]
+        raw,
+        task_name="t",
+        seed=None,
+        compute_metrics=metrics,
+        aggregate_metrics=aggregate,
+    )
+    assert shadow.aggregate["success_rate"] == 1.0  # THE FIX: replay reproduces the solve
+
+    # Negative control: replaying against a MISMATCHED seed misses -> proves the seed is used.
+    mismatched = [{**e, "seed": e["seed"] + 100} for e in raw]
+    bad = replay_and_score(
+        SeedKeyedEnv(),  # type: ignore[arg-type]
+        mismatched,
+        task_name="t",
+        seed=None,
+        compute_metrics=metrics,
+        aggregate_metrics=aggregate,
+    )
+    assert bad.aggregate["success_rate"] == 0.0

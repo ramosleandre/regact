@@ -133,3 +133,29 @@ def test_logs_reads_output_and_events(tmp_path: Path) -> None:
     out = load_logs(exp, "ls20")
     assert "hello run" in out["output"]
     assert out["events"][0]["event"] == "turn_crash"
+
+
+def test_final_score_falls_back_past_errored_final_and_surfaces_both() -> None:
+    """The Score KPI must show the last REAL submission when 'final' errored (e.g. a teardown
+    ReadTimeout -> empty aggregate), instead of rendering blank; and it surfaces both the
+    verified (shadow-replay) score and the direct one."""
+    from regact.viz.metrics import game_metrics
+    from regact.viz.reader import GameView, SubmissionView
+
+    submissions = [
+        SubmissionView(
+            "0",
+            {"n_episodes": 5, "success_rate": 1.0, "mean_reward": 0.98},
+            [],
+            None,
+            [],
+            aggregate_unverified={"n_episodes": 5, "success_rate": 1.0, "mean_reward": 0.98},
+        ),
+        SubmissionView("final", {}, [], "ReadTimeout: timed out", []),  # errored -> empty
+    ]
+    game = GameView(name="g", state={}, turns=[], submissions=submissions, config={})
+    m = game_metrics(game)
+
+    assert m["final_aggregate"]["success_rate"] == 1.0  # fell back past the blank final
+    assert m["success_rate"] == 1.0
+    assert m["final_aggregate_unverified"]["success_rate"] == 1.0  # both scores surfaced

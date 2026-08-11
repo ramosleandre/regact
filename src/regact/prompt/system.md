@@ -22,11 +22,11 @@ Your working directory is your current directory. Reference every file by a path
 **relative** to it (`code_library/foo.py`), never an absolute path (`/code_library/foo.py`).
 
 framework/
-  __init__.py            # empty - makes `framework` an importable package
-  make_env.py            # make_env() -> the env client
-  control.py             # CLI to submit / exit the task
+  __init__.py            # empty
+  make_env.py            # the env factory
+  control.py             # usable to run framework commands
 code_library/
-  __init__.py            # empty - makes `code_library` an importable package
+  __init__.py            # empty
   base_controller.py     # the controller contract (subclass this)
   example_controller.py  # a trivial controller example
   interactive_script_example.py   # an example of how to interact with the environment

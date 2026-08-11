@@ -63,6 +63,20 @@ def test_registry_builds_the_subprocess_backend() -> None:
     assert isinstance(agent, AlanSubprocessAgent)
 
 
+def test_external_base_url_is_egress_allowlisted() -> None:
+    """An external endpoint must reach the sandbox's egress allow-list, or the run
+    fails closed with the model unreachable (a loopback server is bridged instead)."""
+    agent = build_agent(
+        AgentConfig(name=AgentName.ALAN, base_url="https://my-server.example.dev/api")
+    )
+    assert agent.host_egress_hosts() == ["my-server.example.dev"]
+
+
+def test_loopback_or_absent_base_url_needs_no_egress() -> None:
+    for base_url in (None, "http://127.0.0.1:9876/v1", "http://localhost:8000/v1"):
+        assert AlanSubprocessAgent(base_url=base_url).host_egress_hosts() == []
+
+
 def test_capabilities_route_tools_through_the_control_channel() -> None:
     """Out-of-process, framework tools cannot be native Python objects: they must go
     over the workdir control CLI, and the loop must not also run them."""

@@ -121,9 +121,10 @@ class CodeAgent(ABC):
         """External hosts THIS backend must reach (for an egress-allowlist proxy).
 
         Per-backend like :meth:`host_read_paths` (Claude: ``api.anthropic.com``; codex:
-        ``api.openai.com`` / ``auth.openai.com`` / ``chatgpt.com``). Empty when the model
-        is reached via a configured ``base_url`` (e.g. a local server on HPC) rather than
-        a fixed host. Plain strings, so the security/proxy layer stays agnostic.
+        ``api.openai.com`` / ``auth.openai.com`` / ``chatgpt.com``; alan: the
+        ``base_url`` host when external). Empty when the model is reached over loopback
+        (a local server, bridged into the sandbox rather than allow-listed). Plain
+        strings, so the security/proxy layer stays agnostic.
         """
         return []
 
@@ -167,7 +168,7 @@ def build_agent(config: AgentConfig) -> CodeAgent:
     if config.name is AgentName.ALAN:
         from regact.agent.alan_subprocess import AlanSubprocessAgent
 
-        return AlanSubprocessAgent(config.args)
+        return AlanSubprocessAgent(config.args, base_url=config.base_url)
     if config.name is AgentName.CLAUDE:
         from regact.agent.claude_adapter import ClaudeAgent
 

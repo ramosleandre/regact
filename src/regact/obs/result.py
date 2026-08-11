@@ -48,11 +48,16 @@ class EvalResult:
     error_category: ErrorCategory | None = None
     executor: str | None = None  # "subprocess" | "in_process" — disambiguates the schema shape
     features: dict[str, Any] = field(default_factory=dict)  # {feature_name: its own metrics}
+    # The un-replayed (direct) score, set only on a shadow-replay run so both can be shown:
+    # ``aggregate`` is the verified (shadow) score, this is the controller's reported one. A
+    # gap between them flags either cheating OR a scoring bug (e.g. a seed mismatch).
+    aggregate_unverified: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
             "task": self.task,
             "aggregate": self.aggregate,
+            "aggregate_unverified": self.aggregate_unverified,
             "episodes": [e.to_json() for e in self.episodes],
             "error": self.error,
             "error_category": self.error_category.value if self.error_category else None,

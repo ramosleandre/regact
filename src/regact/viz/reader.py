@@ -65,10 +65,11 @@ class TurnView:
 @dataclass
 class SubmissionView:
     name: str  # "0", "1", …, "final"
-    aggregate: dict[str, Any]
+    aggregate: dict[str, Any]  # verified (shadow-replay) score on a shadow run, else the direct one
     episodes: list[dict[str, Any]]
     error: str | None
     videos: list[str]  # relative file names under the submission dir
+    aggregate_unverified: dict[str, Any] | None = None  # direct score, when shadow-replay also ran
 
 
 @dataclass
@@ -250,6 +251,7 @@ def _load_submissions(submissions_dir: Path) -> list[SubmissionView]:
                 episodes=results.get("episodes", []),
                 error=results.get("error"),
                 videos=videos,
+                aggregate_unverified=results.get("aggregate_unverified"),
             )
         )
     return out

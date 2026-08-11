@@ -89,19 +89,28 @@ def run_episodes_raw(
     """
     factory = _load_controller_factory(solution_path)
     episode_count = 1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes
+    # Pin a concrete per-episode seed and RECORD it, so the shadow replay can reset the
+    # trusted env to the *same* layout the controller faced. With ``seed=None`` a procedural
+    # env (MiniGrid) would otherwise randomize a different layout on every reset, and the
+    # replay of a fixed action sequence on the wrong layout scores 0 for a real solve.
+    base_seed = 0 if seed is None else seed
     out: list[dict[str, Any]] = []
     for index in range(episode_count):
-        env.reset(seed=None if seed is None else seed + index)
+        episode_seed = base_seed + index
+        env.reset(seed=episode_seed)
         try:
             summary = run_controller(
                 env, factory(), max_steps=max_moves, collect_frames=record_video
             )
         except Exception as exc:  # a fault inside the agent's controller
-            out.append({"episode": index, "error": f"{type(exc).__name__}: {exc}"})
+            out.append(
+                {"episode": index, "seed": episode_seed, "error": f"{type(exc).__name__}: {exc}"}
+            )
             continue
         out.append(
             {
                 "episode": index,
+                "seed": episode_seed,
                 "stop_kind": summary.stop_kind,
                 "stop_reason": summary.stop_reason,
                 "milestones": [
@@ -177,7 +186,11 @@ def replay_and_score(
 ) -> EvalResult:
     """Shadow replay (anti-cheat): score by RE-APPLYING the controller's recorded actions on a fresh
     **trusted** env here, instead of trusting the obs the untrusted subprocess reported. The actions
-    must really win on the real env, so a sandboxed controller cannot fake its own score."""
+    must really win on the real env, so a sandboxed controller cannot fake its own score.
+
+    The replay resets to the SAME seed the rollout recorded per episode (``raw["seed"]``), so a
+    procedural env reproduces the exact layout the controller faced - otherwise a fixed action
+    sequence replayed on a fresh random layout would score a genuine solve as 0."""
     episodes: list[EpisodeResult] = []
     for raw in raw_episodes:
         index = int(raw["episode"])
@@ -190,9 +203,8 @@ def replay_and_score(
                 )
             )
             continue
-        final_obs, steps = _replay_episode(
-            env, raw.get("actions", []), seed=None if seed is None else seed + index
-        )
+        episode_seed = raw.get("seed", None if seed is None else seed + index)
+        final_obs, steps = _replay_episode(env, raw.get("actions", []), seed=episode_seed)
         episodes.append(
             EpisodeResult(
                 episode=index,
@@ -438,6 +450,16 @@ class SandboxedExecutor:
                 compute_metrics=self._compute_metrics,
                 aggregate_metrics=self._aggregate_metrics,
             )
+            # Also keep the un-replayed (direct) score, so the viewer can show both and any
+            # gap between them is visible (cheating, or a replay/scoring bug).
+            direct = score_episodes(
+                episodes,
+                task_name=task_name,
+                compute_metrics=self._compute_metrics,
+                aggregate_metrics=self._aggregate_metrics,
+                executor="subprocess",
+            )
+            result.aggregate_unverified = direct.aggregate
         else:
             result = score_episodes(
                 episodes,

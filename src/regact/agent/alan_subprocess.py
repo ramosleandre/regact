@@ -28,6 +28,7 @@ import signal
 import sys
 from collections.abc import AsyncIterator, Callable
 from typing import Any
+from urllib.parse import urlparse
 
 from regact.agent.alan_runner import FATAL, READY, TURN_END
 from regact.agent.base import CodeAgent
@@ -43,13 +44,15 @@ _STDERR_TAIL_LINES = 40
 _STDERR_TAIL_CHARS = 4000
 _REAP_TIMEOUT_S = 3.0  # how long to wait for the exit status after stdout EOF
 _DRAIN_TIMEOUT_S = 10.0  # bound on consuming an abandoned turn's leftover frames
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class AlanSubprocessAgent(CodeAgent):
     """``CodeAgent`` backed by an ``alancode`` agent in a sandboxable child process."""
 
-    def __init__(self, args: dict[str, Any] | None = None) -> None:
+    def __init__(self, args: dict[str, Any] | None = None, *, base_url: str | None = None) -> None:
         self._args = dict(args or {})  # alancode tuning, forwarded verbatim to the child
+        self._base_url = base_url
         self._proc: asyncio.subprocess.Process | None = None
         self._pending: list[str] = []  # queued by inject(), prepended to the next turn
         self._stderr_tail: collections.deque[str] = collections.deque(maxlen=_STDERR_TAIL_LINES)
@@ -193,9 +196,10 @@ class AlanSubprocessAgent(CodeAgent):
         return [os.path.realpath(os.path.dirname(spec.origin))] if spec.origin else []
 
     def host_egress_hosts(self) -> list[str]:
-        # The model is reached via the configured base_url (typically a local server),
-        # so there is no fixed external host to allow-list.
-        return []
+        # A loopback base_url needs no egress: its port is bridged into the sandbox
+        # by the LoopbackMirror instead.
+        host = urlparse(self._base_url).hostname if self._base_url else None
+        return [host] if host and host not in _LOOPBACK_HOSTS else []
 
     # --- internals --------------------------------------------------------- #
     def _send_command(self, command: dict[str, Any]) -> None:

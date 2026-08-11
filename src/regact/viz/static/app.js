@@ -89,13 +89,19 @@ async function renderOverview(name) {
   const m = d.metrics;
   const wrap = h("div");
   const kpis = h("div", "kpis");
+  const unverified = m.final_aggregate_unverified || {};
+  const hasUnverified = Object.keys(unverified).length > 0;
+  const scoreKpis = [
+    kpi("Score", aggLine(m.final_aggregate), hasUnverified ? "shadow-replay verified" : "final submission"),
+  ];
+  if (hasUnverified) scoreKpis.push(kpi("Score · no replay", aggLine(unverified), "controller-reported"));
   kpis.append(
     kpi("Status", statusOf(m)),
     kpi("Iterations", m.n_turns, "agent turns"),
     kpi("Tool calls", m.n_tool_calls),
     kpi("Submissions", m.n_submissions),
     kpi("Output tokens", fmt(m.tokens.output), `cache ${fmt(m.tokens.cache_read)}`),
-    kpi("Score", aggLine(m.final_aggregate), `final submission`),
+    ...scoreKpis,
     kpi("Time", dur(m.duration_s)),
     kpi("Success", pct(m.success_rate)),
     kpi("Thinking", fmt(m.thinking_chars) + " ch"),

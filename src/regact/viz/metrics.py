@@ -36,6 +36,9 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         "submission_trajectory": submissions,
         # The final submission's whole metric dict, opaque — each game owns its keys.
         "final_aggregate": _final_aggregate(game),
+        # The same submission's un-replayed (direct) score, when shadow-replay also ran; empty
+        # otherwise. A gap vs final_aggregate flags cheating OR a replay/scoring bug.
+        "final_aggregate_unverified": _final_aggregate_unverified(game),
         "duration_s": game.state.get("duration_s", 0),
         "success_rate": _final_metric(game, "success_rate"),
         "last_error_category": game.state.get("last_error_category"),
@@ -110,19 +113,30 @@ def _submission_trajectory(game: GameView) -> list[dict[str, Any]]:
     return out
 
 
-def _final_aggregate(game: GameView) -> dict[str, Any]:
-    """The 'final' submission's whole metric dict (else the last numbered one), opaque."""
+def _scored_submission(game: GameView) -> Any:
+    """The submission whose score we report: 'final' if it actually scored, else the last
+    numbered submission that has a non-empty aggregate. So an errored/empty 'final' (e.g. a
+    teardown ReadTimeout) falls back to the last real score instead of rendering a blank."""
     final = next((s for s in game.submissions if s.name == "final"), None)
-    if final is not None:
-        return dict(final.aggregate)
-    numbered = [s for s in game.submissions if s.name.isdigit()]
-    return dict(numbered[-1].aggregate) if numbered else {}
+    if final is not None and final.aggregate:
+        return final
+    numbered = [s for s in game.submissions if s.name.isdigit() and s.aggregate]
+    return numbered[-1] if numbered else final
+
+
+def _final_aggregate(game: GameView) -> dict[str, Any]:
+    """The reported submission's whole metric dict (verified score on a shadow run), opaque."""
+    sub = _scored_submission(game)
+    return dict(sub.aggregate) if sub else {}
+
+
+def _final_aggregate_unverified(game: GameView) -> dict[str, Any]:
+    """The reported submission's un-replayed (direct) score, when shadow-replay also ran."""
+    sub = _scored_submission(game)
+    return dict(sub.aggregate_unverified) if sub and sub.aggregate_unverified else {}
 
 
 def _final_metric(game: GameView, key: str) -> Any:
-    """The metric from the 'final' submission, else the last numbered one."""
-    final = next((s for s in game.submissions if s.name == "final"), None)
-    if final is not None:
-        return final.aggregate.get(key)
-    numbered = [s for s in game.submissions if s.name.isdigit()]
-    return numbered[-1].aggregate.get(key) if numbered else None
+    """One metric from the reported submission (verified score on a shadow run)."""
+    sub = _scored_submission(game)
+    return sub.aggregate.get(key) if sub else None
