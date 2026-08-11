@@ -6,4 +6,4 @@ obs_mode: raw
 info_mode: informative
 seed: null              # null = the env's own default seeding
 kwargs:
-  fully_obs: false
+  fully_obs: true

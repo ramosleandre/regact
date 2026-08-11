@@ -173,7 +173,7 @@ def test_run_exp_hydra_composes_a_config() -> None:
         )
     config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
     assert config.problem.name == "arc_agi"
-    assert config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE  # from the arc_agi group
+    assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE  # from the arc_agi group
     assert config.agent.name is AgentName.CLAUDE
     assert config.agent.args["permission_mode"] == "bypassPermissions"  # from the claude group
     assert config.agent.args["effort"] == "high"  # CLI override

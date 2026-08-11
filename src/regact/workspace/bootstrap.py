@@ -1,7 +1,7 @@
 """Workdir bootstrap.
 
 Lays out the agent's working directory. The common base is **agnostic**: the
-directory tree (``code_library/``, ``knowledge_base/``, ``framework/``) and the
+directory tree (``code_library/``, ``framework/``) and the
 env/lifecycle-specific ``framework/make_env.py``. Everything controller-specific
 (the ``solution.py`` stub, the example controller, the contract prompt) belongs
 to ``ControllerFeature`` and arrives as feature templates layered on top.
@@ -112,10 +112,11 @@ class Workspace:
     ) -> None:
         """Create the agnostic base, then drop problem helpers + every feature's templates."""
         os.makedirs(self.root, exist_ok=True)
-        for sub in ("code_library", "knowledge_base", "framework"):
+        for sub in ("code_library", "framework"):
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
 
         self._write("framework/__init__.py", "")
+        self._write("code_library/__init__.py", "")
         template = _MAKE_ENV_SINGLE if lifecycle is Lifecycle.SINGLE_INSTANCE else _MAKE_ENV_MULTI
         self._write(
             "framework/make_env.py",

@@ -57,6 +57,46 @@ class ExampleController(BaseController):
         return obs.available_actions[0]
 '''
 
+# A runnable template tying make_env + a controller together, so the agent has one
+# obvious file to copy for its own probing scripts. Prints small, readable facts about
+# each obs (never the whole frame, which would flood the output).
+_INTERACTIVE_SCRIPT = '''\
+"""Example interactive script: run a controller on the environment for one episode.
+
+Copy and adapt this to probe the game. It shows the whole loop: make the env, run a
+controller, read each observation. It prints only small facts about each obs (never the
+full frame - that floods your output); do your real analysis on obs.frame in code.
+"""
+
+from framework.make_env import make_env
+from code_library.example_controller import ExampleController
+
+MAX_STEPS = 20  # cap the demo to a short run
+
+
+def main() -> None:
+    env = make_env()
+    controller = ExampleController()
+    obs = env.current()  # the current observation, without spending an action
+    steps = 0
+    while not obs.is_done and steps < MAX_STEPS:
+        action = controller.act(obs)
+        obs = env.step(action)
+        steps += 1
+        # Any observation analysis operation here: inspect obs.frame (a list of 64x64
+        # grids) in code - locate objects, diff consecutive frames, count cells, ...
+        print(
+            f"step={steps} action={action} reward={obs.reward} is_done={obs.is_done} "
+            f"n_available={len(obs.available_actions)} available={obs.available_actions} "
+            f"n_frames={len(obs.frame)} state={obs.info.get('state')}"
+        )
+    print(f"episode stopped after {steps} steps: reward={obs.reward} info={obs.info}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
 # The deliverable the agent edits and submits.
 _SOLUTION_STUB = '''\
 """Your controller. Implement ``act`` and submit this file.
@@ -184,6 +224,7 @@ class ControllerFeature(Feature):
         return [
             TemplateFile("code_library/base_controller.py", _BASE_CONTROLLER),
             TemplateFile("code_library/example_controller.py", _EXAMPLE_CONTROLLER),
+            TemplateFile("code_library/interactive_script_example.py", _INTERACTIVE_SCRIPT),
             TemplateFile("solution.py", _SOLUTION_STUB),
         ]
 

@@ -1,28 +1,22 @@
-### Controller
+## Controller
 
-A **controller** is a pure policy `act(obs) -> action`. You do not play the game by hand:
-you **write the controller code** that chooses the actions, then run and submit it. Do not
-reply with actions yourself.
+You interact with the environment through coding **controllers**, i.e. classes inheriting
+`BaseController` (from `code_library/base_controller.py`) that implement the
+`act(self, obs) -> action` method. You can do that in your code library; see for example
+`code_library/example_controller.py`.
 
-It is re-instantiated for each episode (so `__init__` is your per-episode reset; keep state
-on `self`), and it never receives or imports the environment — it acts only on the `obs` it
-is given.
+You analyse the environment through coding and executing **interactive scripts**, i.e.
+scripts that instantiate the environment, run a controller on it, and operate on the
+observations to print/log/compute information. You can use the provided
+`code_library/interactive_script_example.py` as a template, which runs the example dummy
+controller on the environment and prints some part of the observations.
 
-Your working directory already holds the files to edit:
-
-- `solution.py` — the stub you implement and submit (a `Controller` class and a
-  `get_controller()` factory).
-- `code_library/base_controller.py` — the contract to subclass.
-- `code_library/example_controller.py` — a trivial worked example.
-
-Implement your controller in `solution.py`, then run **SubmitSolution** to score it
-against the environment; you may submit as many times as you like. Call **ExitTask** to
-finish the run once you are satisfied. See *Framework tools* below for how to run these.
-
-**Be a policy, not a search.** Your controller is judged as a *policy* `act(obs) -> action`
-in the reinforcement-learning sense: it must *react to the observation* and generalise. Do
-**not** run a search or exploration algorithm (BFS/DFS, exhaustive sweeps) over the
-environment to discover a fixed winning sequence and then replay it — a hard-coded,
-brute-forced path ignores `obs` and is exactly the failure mode that scores poorly. Be
-**economical with environment interactions**: probe with curiosity only enough to infer the
-dynamics, then encode that rule as the policy so it works from any state.
+We advise you follow this approach to solve the game:
+- 1.a) When needing to create/edit a controller policy, do it as a controller class in `code_library/`.
+- 1.b) When needing to create/edit an exploration script, do it in `code_library/`.
+- 2) When needing to run a controller in an exploration script, edit the script to import
+  the controller, and execute the script.
+- 3) After a script result, observe its output to understand the environment, and iterate on
+  (1) on the controllers/scripts. Balance exploration and exploitation.
+- 4) Once you have a performing controller, submit it by importing it in `solution.py` and
+  using the SubmitSolution python command.

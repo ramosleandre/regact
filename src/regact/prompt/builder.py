@@ -26,12 +26,8 @@ _LIFECYCLE_MD = {
     Lifecycle.SINGLE_INSTANCE: _PROMPT_DIR / "lifecycle_single.md",
     Lifecycle.MULTI_INSTANCE: _PROMPT_DIR / "lifecycle_multi.md",
 }
-_CLOSING = "Do not stop until you have feedback confirming you have solved the game."
-
-_FEATURES_INTRO = (
-    "You are given the following features to help you interact with the environment — it "
-    "is important that you use them rather than acting by hand:"
-)
+_BASH_TERMINAL_MD = _PROMPT_DIR / "bash_terminal.md"  # bash-only agents: shell idioms + submit/exit
+_FEATURES_INTRO = "# Features :\n\nYou are given the following features to help you."
 
 
 class PromptBuilder:
@@ -47,6 +43,7 @@ class PromptBuilder:
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         control_actions: Literal["native_tools", "client_cli"] = "native_tools",
         tool_names: list[str] | None = None,
+        bash_only: bool = False,
     ) -> str:
         """The full static brief: framework role + game + features + control + lifecycle.
 
@@ -62,9 +59,10 @@ class PromptBuilder:
         if fragments:  # generic intro, then each feature describes its own deliverable
             sections.append(_FEATURES_INTRO)
             sections += fragments
-        sections.append(_control_channel_block(control_actions, tool_names or []))
+        sections.append(
+            _control_channel_block(control_actions, tool_names or [], bash_only=bash_only)
+        )
         sections.append(_LIFECYCLE_MD[lifecycle].read_text(encoding="utf-8"))
-        sections.append(_CLOSING)
         return "\n\n".join(s.strip() for s in sections if s and s.strip())
 
     def build_first_message(self, rendered_obs: str | None = None) -> str:
@@ -78,16 +76,24 @@ class PromptBuilder:
 
 
 def _control_channel_block(
-    control_actions: Literal["native_tools", "client_cli"], tool_names: list[str]
+    control_actions: Literal["native_tools", "client_cli"],
+    tool_names: list[str],
+    *,
+    bash_only: bool = False,
 ) -> str:
-    """How to invoke framework tools — depends on the agent, not the feature.
+    """How to invoke framework tools - depends on the agent, not the feature.
 
     Generic: lists the tool NAMES (from the run's tools) and the invocation the backend
-    supports; it never imports a tool or a feature type.
+    supports; it never imports a tool or a feature type. For a bash-only agent it also
+    teaches the shell idioms for file ops and folds submit/exit into that one section.
     """
     if not tool_names:
         return ""
     if control_actions == "client_cli":
+        if bash_only:
+            commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
+            terminal = _BASH_TERMINAL_MD.read_text(encoding="utf-8")
+            return terminal.replace("{control_commands}", commands).strip()
         lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
         return (
             "## Framework tools\n\n"

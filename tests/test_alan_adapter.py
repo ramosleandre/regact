@@ -188,7 +188,8 @@ def test_legacy_tool_result_maps() -> None:
     assert isinstance(ev, ToolResult) and ev.output == "out"
 
 
-def test_build_alan_agent_forwards_backend(monkeypatch) -> None:
+def _fake_alancode(monkeypatch, builtins):
+    """Install a fake ``alancode`` package (agent + tools.registry) for the builder."""
     captured: dict = {}
 
     class FakeAgent:
@@ -197,7 +198,21 @@ def test_build_alan_agent_forwards_backend(monkeypatch) -> None:
 
     fake = types.ModuleType("alancode")
     fake.AlanCodeAgent = FakeAgent
+    registry = types.ModuleType("alancode.tools.registry")
+    registry.get_all_builtin_tools = lambda: builtins
+    registry.find_tool_by_name = lambda tools, name: next(
+        (t for t in tools if t.name == name), None
+    )
     monkeypatch.setitem(sys.modules, "alancode", fake)
+    monkeypatch.setitem(sys.modules, "alancode.tools", types.ModuleType("alancode.tools"))
+    monkeypatch.setitem(sys.modules, "alancode.tools.registry", registry)
+    return captured
+
+
+def test_build_alan_agent_forwards_backend(monkeypatch) -> None:
+    bash = types.SimpleNamespace(name="Bash")
+    others = [types.SimpleNamespace(name=n) for n in ("Read", "Write", "Edit")]
+    captured = _fake_alancode(monkeypatch, [bash, *others])
     build_alan_agent(
         cwd=".",
         model="remote",
@@ -208,3 +223,20 @@ def test_build_alan_agent_forwards_backend(monkeypatch) -> None:
         args={"backend": "scripted"},
     )
     assert captured["backend"] == "scripted" and captured["model"] == "remote"
+
+
+def test_build_alan_agent_restricts_to_bash_only(monkeypatch) -> None:
+    """The bash-only agent: only the Bash tool is passed, Read/Write/Edit/... dropped."""
+    bash = types.SimpleNamespace(name="Bash")
+    others = [types.SimpleNamespace(name=n) for n in ("Read", "Write", "Edit", "Glob", "Grep")]
+    captured = _fake_alancode(monkeypatch, [bash, *others])
+    build_alan_agent(
+        cwd=".",
+        model="m",
+        base_url=None,
+        api_key=None,
+        system_prompt=None,
+        extra_tools=[],
+        args={},
+    )
+    assert captured["tools"] == [bash]  # only Bash reaches the agent

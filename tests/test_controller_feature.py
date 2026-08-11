@@ -66,23 +66,30 @@ def _deps(tmp_path: Path) -> RunDeps:
     )
 
 
-def test_controller_templates_lay_out_three_files() -> None:
+def test_controller_templates_lay_out_files() -> None:
     relpaths = {t.relpath for t in ControllerFeature().templates(_ctx())}
     assert relpaths == {
         "code_library/base_controller.py",
         "code_library/example_controller.py",
+        "code_library/interactive_script_example.py",
         "solution.py",
     }
+
+
+def test_interactive_script_template_wires_env_and_controller() -> None:
+    templates = {t.relpath: t.content for t in ControllerFeature().templates(_ctx())}
+    script = templates["code_library/interactive_script_example.py"]
+    assert "from framework.make_env import make_env" in script
+    assert "from code_library.example_controller import ExampleController" in script
+    assert "obs.available_actions" in script  # prints small facts, not the full frame
 
 
 def test_controller_prompt_fragment_explains_contract() -> None:
     fragment = ControllerFeature().prompt_fragment(_ctx())
     assert fragment is not None
-    assert "act(obs)" in fragment  # the controller contract
-    assert "pure policy" in fragment
-    # The feature names its own tools (SubmitSolution/ExitTask); the generic control
-    # block carries the per-agent invocation (native vs `python framework/control.py`).
-    assert "SubmitSolution" in fragment and "ExitTask" in fragment
+    assert "act(self, obs)" in fragment  # the controller contract
+    assert "interactive_script_example.py" in fragment  # points at the runnable template
+    assert "SubmitSolution" in fragment  # how to submit (ExitTask lives in the control block)
     # The stub code lives in the workdir file, not pasted into the prompt.
     assert "def get_controller" not in fragment
 

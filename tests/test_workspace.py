@@ -115,7 +115,7 @@ def test_workspace_bootstrap_multi(tmp_path: Path) -> None:
     # ControllerFeature's template, not part of the base.
     assert not (root / "solution.py").exists()
     assert (root / "code_library").is_dir()
-    assert (root / "knowledge_base").is_dir()
+    assert (root / "code_library" / "__init__.py").exists()  # importable package
     make_env = (root / "framework" / "make_env.py").read_text()
     assert "http://127.0.0.1:9000" in make_env
     assert "grid-lvl1" in make_env
@@ -174,7 +174,7 @@ class _StubProblem:
 
 
 def test_prompt_builder_system_carries_everything_static() -> None:
-    """The system prompt holds role + game + feature + control + lifecycle (all static)."""
+    """The system prompt holds role + game + feature + control (multi adds no lifecycle block)."""
     builder = PromptBuilder()
     system = builder.build_system_prompt(
         _StubProblem(),  # type: ignore[arg-type]
@@ -187,8 +187,32 @@ def test_prompt_builder_system_carries_everything_static() -> None:
     assert "make_env" in system  # role
     assert "grid" in system and "lvl1" in system  # game section
     assert "Stub feature" in system  # feature fragment layered in
-    assert "fresh" in system.lower()  # multi-instance lifecycle block (enum-keyed)
     assert "framework/control.py SubmitSolution" in system  # client_cli control block
+
+
+def test_prompt_builder_bash_only_merges_shell_examples_into_control_block() -> None:
+    """A bash-only agent gets shell idioms + submit/exit folded into one terminal section;
+    a native-tool agent gets the plain Framework tools block instead."""
+    builder = PromptBuilder()
+
+    def build(**extra: object) -> str:
+        return builder.build_system_prompt(
+            _StubProblem(),  # type: ignore[arg-type]
+            "lvl1",
+            [_StubFeature()],
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+            control_actions="client_cli",
+            tool_names=["SubmitSolution", "ExitTask"],
+            **extra,  # type: ignore[arg-type]
+        )
+
+    bash = build(bash_only=True)
+    assert "Working in the terminal" in bash and "cat > code_library" in bash
+    assert "framework/control.py SubmitSolution" in bash  # submit/exit folded in
+    assert "## Framework tools" not in bash  # merged away
+
+    native = build()
+    assert "## Framework tools" in native and "cat > code_library" not in native
 
 
 def test_prompt_builder_drops_empty_feature_fragments() -> None:

@@ -160,6 +160,7 @@ class AlanSubprocessAgent(CodeAgent):
             supports_inject=True,  # queued, delivered on the next turn
             writes_native_transcript=True,  # <workdir>/.alan
             executes_tools=False,  # framework tools run behind the control channel
+            bash_only=True,  # build_alan_agent enforces tools=[Bash]
         )
 
     def launch_probe_argv(self) -> list[str]:

@@ -32,3 +32,6 @@ class Capabilities:
     # run them (it would double-submit); it only observes. False (default): the loop runs the
     # framework tools when it sees the agent's ToolCall (the scripted test backend relies on this).
     executes_tools: bool = False
+    # The agent is restricted to a single Bash tool (Alan, Mini-SWE-Agent style), so the prompt
+    # teaches shell idioms for file ops. False: the agent has native file tools (Claude, Codex).
+    bash_only: bool = False

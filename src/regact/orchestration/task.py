@@ -350,6 +350,7 @@ async def run_task(
                 info_mode=config.problem.info_mode,
                 control_actions=agent.capabilities().control_actions,
                 tool_names=[tool.name for tool in tools],
+                bash_only=agent.capabilities().bash_only,
             )
             try:
                 await agent.start(

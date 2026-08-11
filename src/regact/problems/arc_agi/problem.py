@@ -411,16 +411,16 @@ class ArcAgiProblem(BaseProblem):
                 "`obs.available_actions` from your own scripts with `make_env()`; "
                 "the framework tells you nothing more about this task."
             )
-        parts = [_PROMPT.read_text(encoding="utf-8").replace("{task}", task.title)]
-        parts.append(f"**Game id**: `{task.game_id}`")
+        body = _PROMPT.read_text(encoding="utf-8").replace("{task}", task.title).rstrip()
+        meta = [f"Game id: {task.game_id}"]
         if task.win_levels is not None:
-            parts.append(f"**Levels to win**: {task.win_levels}")
+            meta.append(f"Levels to win: {task.win_levels}")
         if task.baseline_actions:
             total = sum(task.baseline_actions)
-            parts.append(f"**Human baseline**: {total} actions total.")
+            meta.append(f"Human baseline: {total} actions total.")
         # The actions are described live in the first observation (render_obs_text), from
         # the real available_actions, so they are not duplicated statically here.
-        return "\n\n".join(parts)
+        return body + "\n" + "\n".join(meta)
 
     def config_kwargs(self) -> dict[str, Any]:
         return {"environments_dir": self._dir, "operation_mode": self._operation_mode}

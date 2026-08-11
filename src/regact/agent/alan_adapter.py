@@ -57,6 +57,12 @@ def build_alan_agent(
     optional.
     """
     from alancode import AlanCodeAgent
+    from alancode.tools.registry import find_tool_by_name, get_all_builtin_tools
+
+    # Bash-only agent (Mini-SWE-Agent style): the model is given ONE tool and does all
+    # file operations (read/write/edit) through shell commands. ``tools=[...]``
+    bash = find_tool_by_name(get_all_builtin_tools(), "Bash")
+    tools = [bash] if bash is not None else None
 
     extra: dict[str, Any] = {}
     if args.get("context_window") is not None:
@@ -69,6 +75,7 @@ def build_alan_agent(
         cwd=cwd,
         programmatic=True,
         custom_system_prompt=system_prompt,
+        tools=tools,  # only Bash
         extra_tools=extra_tools,
         permission_mode=args.get("permission_mode"),
         max_iterations_per_turn=args.get("max_iterations_per_turn"),
