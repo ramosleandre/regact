@@ -11,6 +11,7 @@ workspace base.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -24,10 +25,13 @@ from regact.features.base import (
     TemplateFile,
     register_feature,
 )
+from regact.obs.errors import ErrorCategory
 from regact.obs.result import EvalResult
 from regact.tools.base import Tool
 from regact.tools.exit_task import ExitTask
 from regact.tools.submit_solution import SubmitSolution
+
+logger = logging.getLogger(__name__)
 
 # Copied verbatim into the workdir as ``code_library/base_controller.py`` — the
 # contract the agent inherits. Mirrors ``regact.controllers.base.BaseController``.
@@ -102,7 +106,7 @@ _SOLUTION_STUB = '''\
 """Your controller. Implement ``act`` and submit this file.
 
 Instantiation is the per-episode reset; keep state on ``self``. Never import the
-game — use ``framework.make_env`` in your own scripts to test, then submit.
+game - use ``framework.make_env`` in your own scripts to test, then submit.
 """
 
 from code_library.base_controller import BaseController
@@ -180,15 +184,26 @@ class FinalizeControllerHook(Hook):
         deps = self._deps
         if not os.path.exists(deps.solution_path):
             return None  # nothing was ever written; nothing to finalize
-        result = _make_executor(deps, shadow_replay=self._shadow_replay).run(
-            task_name=deps.experiment.task_name,
-            solution_path=deps.solution_path,
-            output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
-            lifecycle=deps.lifecycle,
-            n_episodes=self._n_episodes,
-            max_moves=self._max_moves,
-            record_video=self._record_video,
-        )
+        try:
+            result = _make_executor(deps, shadow_replay=self._shadow_replay).run(
+                task_name=deps.experiment.task_name,
+                solution_path=deps.solution_path,
+                output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
+                lifecycle=deps.lifecycle,
+                n_episodes=self._n_episodes,
+                max_moves=self._max_moves,
+                record_video=self._record_video,
+            )
+        except Exception as exc:
+            # The out-of-process eval can raise at teardown past its own catches (e.g. a parent-side
+            # read timeout); log the traceback and record it gracefully so finalize never aborts.
+            logger.exception("finalize re-score crashed: %s", deps.experiment.task_name)
+            result = EvalResult(
+                task=deps.experiment.task_name,
+                error=f"{type(exc).__name__}: {exc}",
+                error_category=ErrorCategory.EVAL_HARNESS,
+                executor="finalize",
+            )
         if deps.feature_metrics is not None:
             result.features = deps.feature_metrics()
             write_result(os.path.join(deps.submissions_dir, "final", "results.json"), result)

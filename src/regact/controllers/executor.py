@@ -97,12 +97,12 @@ def run_episodes_raw(
     out: list[dict[str, Any]] = []
     for index in range(episode_count):
         episode_seed = base_seed + index
-        env.reset(seed=episode_seed)
         try:
+            env.reset(seed=episode_seed)
             summary = run_controller(
                 env, factory(), max_steps=max_moves, collect_frames=record_video
             )
-        except Exception as exc:  # a fault inside the agent's controller
+        except Exception as exc:  # a fault in the reset (e.g. a slow-env timeout) or the controller
             out.append(
                 {"episode": index, "seed": episode_seed, "error": f"{type(exc).__name__}: {exc}"}
             )
@@ -204,7 +204,17 @@ def replay_and_score(
             )
             continue
         episode_seed = raw.get("seed", None if seed is None else seed + index)
-        final_obs, steps = _replay_episode(env, raw.get("actions", []), seed=episode_seed)
+        try:
+            final_obs, steps = _replay_episode(env, raw.get("actions", []), seed=episode_seed)
+        except Exception as exc:
+            episodes.append(
+                EpisodeResult(
+                    episode=index,
+                    error=f"{type(exc).__name__}: {exc}",
+                    error_category=ErrorCategory.EVAL_HARNESS,
+                )
+            )
+            continue
         episodes.append(
             EpisodeResult(
                 episode=index,

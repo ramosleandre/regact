@@ -83,9 +83,16 @@ _URL = "__BASE_URL__/control/__GAME_ID__/tool"
 def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
-    response = httpx.post(_URL, json={"name": name, "input": payload}, timeout=300.0)
-    response.raise_for_status()
-    print(json.dumps(response.json()))
+    try:
+        response = httpx.post(_URL, json={"name": name, "input": payload}, timeout=600.0)
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:  # never exit silently: the agent reads no-output as a failed submit
+        print(f"{name}: could not reach the control channel: {type(exc).__name__}: {exc}")
+        raise SystemExit(1)
+    # Server wraps the result as {"output": str, "is_error": bool}; print one clear line either way.
+    status = "ERROR" if body.get("is_error") else "OK"
+    print(f"{name}: {status} -> {body.get('output', body)}")
 
 
 if __name__ == "__main__":

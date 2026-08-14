@@ -312,3 +312,49 @@ def test_shadow_replay_reproduces_solve_with_recorded_seed(tmp_path: Path) -> No
         aggregate_metrics=aggregate,
     )
     assert bad.aggregate["success_rate"] == 0.0
+
+
+def test_eval_isolates_a_per_episode_env_timeout(tmp_path: Path) -> None:
+    """A slow-env timeout during one episode's reset must fail only THAT episode, not the whole
+    eval. Regression: env.reset() sat outside the per-episode try, so one reset timeout zeroed
+    the entire submission.
+    """
+    from regact.controllers.executor import run_episodes_raw
+
+    class FlakyEnv:
+        """Times out on episode index 1's reset (seed 1); healthy otherwise."""
+
+        def __init__(self) -> None:
+            self._done = False
+
+        def _obs(self) -> Obs:
+            r = 1.0 if self._done else 0.0
+            return Obs(frame=None, reward=r, is_done=self._done, available_actions=[0])
+
+        def reset(self, *, seed: int | None = None) -> Obs:
+            if seed == 1:
+                raise TimeoutError("timed out")  # stands in for httpx.ReadTimeout under load
+            self._done = False
+            return self._obs()
+
+        def current(self) -> Obs:
+            return self._obs()
+
+        def step(self, action: object) -> Obs:
+            self._done = True
+            return self._obs()
+
+    solution = tmp_path / "solution.py"
+    solution.write_text("class C:\n def act(self, o): return 0\ndef get_controller(): return C()\n")
+
+    raw = run_episodes_raw(
+        FlakyEnv(),  # type: ignore[arg-type]
+        str(solution),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        n_episodes=3,
+        max_moves=5,
+        seed=None,
+    )
+    assert len(raw) == 3  # the eval SURVIVED the one bad episode
+    assert raw[1].get("error") and "timed out" in raw[1]["error"]  # episode 1 isolated as an error
+    assert "error" not in raw[0] and "error" not in raw[2]  # 0 and 2 ran clean
