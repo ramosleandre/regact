@@ -443,6 +443,13 @@ class SandboxedExecutor:
                 error_category=ErrorCategory.EVAL_HARNESS,
                 executor="subprocess",
             )
+        if payload.get("env_error"):  # env handshake failed in the child: a harness fault
+            return EvalResult(
+                task=task_name,
+                error=str(payload["env_error"]),
+                error_category=ErrorCategory.EVAL_HARNESS,
+                executor="subprocess",
+            )
         if payload.get("load_error"):  # solution.py failed to import/load — the agent's fault
             return EvalResult(
                 task=task_name,

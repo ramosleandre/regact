@@ -15,6 +15,7 @@ from regact.env.renderer import RawRenderer
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.features.controller import ControllerFeature
+from regact.obs.errors import ErrorCategory
 from regact.orchestration.env_transport import serve_env
 from regact.testing.fakes import FakeNativeEnv
 from regact.workspace.bootstrap import Workspace
@@ -76,6 +77,33 @@ async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path) -> None:
     # results.json + a snapshot of the evaluated controller were persisted for the viewer.
     assert (Path(workdir) / "submissions" / "0" / "results.json").is_file()
     assert (Path(workdir) / "submissions" / "0" / "solution.py").is_file()
+
+
+def test_sandboxed_executor_categorizes_env_handshake_failure(tmp_path: Path) -> None:
+    """An env handshake failure in the child (here: unreachable env) is a harness fault, not the
+    agent's. Regression: make_env() and solution-load shared one except, so an env timeout was
+    reported as load_error and scored agent_solution, polluting the agent-solution stats."""
+    workdir = str(tmp_path / "wd")
+    Workspace(workdir).bootstrap(
+        [ControllerFeature()],
+        problem_name="p",
+        task_name="g",
+        env_base_url="http://127.0.0.1:1",  # nothing listening -> make_env() connect fails
+        game_id="g",
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+    )
+    (Path(workdir) / "solution.py").write_text(_FORWARD)
+    executor = SandboxedExecutor(workdir=workdir, sandbox_wrap=lambda argv: argv)
+    result = executor.run(
+        task_name="g",
+        solution_path=str(Path(workdir) / "solution.py"),
+        output_path=str(Path(workdir) / "submissions" / "0" / "results.json"),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        n_episodes=1,
+        max_moves=10,
+    )
+    assert result.error_category is ErrorCategory.EVAL_HARNESS
+    assert result.error and not result.episodes
 
 
 async def test_sandboxed_executor_records_video(tmp_path: Path) -> None:
