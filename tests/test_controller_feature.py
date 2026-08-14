@@ -125,6 +125,37 @@ async def test_finalize_hook_skips_when_no_solution(tmp_path: Path) -> None:
     assert not (tmp_path / "submissions" / "final").exists()
 
 
+async def test_default_solution_scores_without_editing(tmp_path: Path) -> None:
+    """A freshly bootstrapped, unedited solution.py runs and scores: the default subclasses
+    ExampleController, so a no-op submission no longer raises NotImplementedError."""
+    templates = {t.relpath: t.content for t in ControllerFeature().templates(_ctx())}
+    stub = templates["solution.py"]
+    assert "from code_library.example_controller import ExampleController" in stub
+    assert "raise NotImplementedError" not in stub
+
+    ws = Workspace(str(tmp_path / "wd"))
+    ws.bootstrap(
+        build_features({"controller": {}}),
+        problem_name="grid",
+        task_name="lvl1",
+        env_base_url="http://127.0.0.1:9000",
+        game_id="grid-lvl1",
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+    )
+    deps = RunDeps(
+        experiment=ExperimentState(
+            problem_name="grid", task_name="g", n_eval_episodes=1, n_videos=0
+        ),
+        env_client=_client(),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        solution_path=str(Path(ws.root) / "solution.py"),
+        submissions_dir=str(tmp_path / "submissions"),
+    )
+    result = await ControllerFeature(n_episodes=1, max_moves=50).hooks(deps)[0].run()
+    assert result is not None
+    assert result.error is None  # the untouched stub ran end-to-end
+
+
 def test_build_features_resolves_controller() -> None:
     features = build_features({"controller": {"n_episodes": 3}})
     assert len(features) == 1 and isinstance(features[0], ControllerFeature)

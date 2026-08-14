@@ -103,23 +103,20 @@ if __name__ == "__main__":
 
 # The deliverable the agent edits and submits.
 _SOLUTION_STUB = '''\
-"""Your controller. Implement ``act`` and submit this file.
+"""Your controller: edit ``act`` and submit this file.
 
-Instantiation is the per-episode reset; keep state on ``self``. Never import the
-game - use ``framework.make_env`` in your own scripts to test, then submit.
+It subclasses ``ExampleController`` (which picks the first available action), so it
+runs and scores as-is. Instantiation is the per-episode reset; keep state on
+``self``. Never import the game; use ``framework.make_env`` in your own scripts to
+test, then submit.
 """
 
-from code_library.base_controller import BaseController
+from code_library.example_controller import ExampleController
 
 
-class Controller(BaseController):
-    def __init__(self):
-        super().__init__()
-        # Reset any per-episode state here.
-
+class Controller(ExampleController):
     def act(self, obs):
-        # Return an action drawn from obs.available_actions.
-        raise NotImplementedError
+        return super().act(obs)  # your policy goes here
 
 
 def get_controller() -> Controller:
