@@ -34,6 +34,18 @@ def _client(server: EnvServer, game_id: str = "g") -> EnvClient:
     return EnvClient(TestClient(server.app), game_id)
 
 
+def test_env_client_connect_timeout_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The env-call budget is generous by default and tunable via REGACT_ENV_CLIENT_TIMEOUT_S,
+    so a slow first make_env() handshake under CPU contention does not hit a tight 30s budget."""
+    default = EnvClient.connect("http://127.0.0.1:1", "g")
+    assert default._http.timeout.read == 120.0  # generous default, not the old 30s
+    default._http.close()
+    monkeypatch.setenv("REGACT_ENV_CLIENT_TIMEOUT_S", "45")
+    tuned = EnvClient.connect("http://127.0.0.1:1", "g")
+    assert tuned._http.timeout.read == 45.0
+    tuned._http.close()
+
+
 def test_http_roundtrip() -> None:
     client = _client(_server(MultiInstancePolicy()))
     obs = client.reset()
