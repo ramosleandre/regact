@@ -63,6 +63,7 @@ class EnvSession:
         self._live = self._lifecycle.acquire(self._build, key=self.key)
         if prev is not None and prev is not self._live:
             self._retired_actions += prev.action_count
+            prev.close()  # release the retired instance now, not whenever GC runs
         return self._live
 
     def reset(self, *, seed: int | None = None) -> Obs:

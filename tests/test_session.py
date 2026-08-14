@@ -51,6 +51,32 @@ def test_total_action_count_accumulates_across_instances() -> None:
     assert session.total_action_count == 3
 
 
+def test_multi_instance_closes_retired_instance() -> None:
+    """Multi-instance make() closes the retired native env instead of leaking it to GC."""
+    natives = []
+
+    class TrackingNative(FakeNativeEnv):
+        def __init__(self) -> None:
+            super().__init__(goal=3)
+            self.closed = False
+            natives.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    session = EnvSession(
+        make_native=TrackingNative,
+        key="fake",
+        renderer=RawRenderer(),
+        lifecycle=MultiInstancePolicy(),
+    )
+    session.make()
+    session.make()  # retires the first instance
+    assert natives[0].closed and not natives[1].closed
+    session.close()
+    assert natives[1].closed  # the live instance is closed on session close
+
+
 def test_total_action_count_single_instance_no_double_count() -> None:
     # Single-instance: make() returns the same cached handle; re-acquiring it must
     # not fold its live counter into the retired total.
