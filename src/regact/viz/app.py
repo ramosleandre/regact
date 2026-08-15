@@ -23,7 +23,7 @@ _STATIC = Path(__file__).parent / "static"
 
 
 def build_app(experiment_dir: str) -> FastAPI:
-    app = FastAPI(title="🥵 regact viz")
+    app = FastAPI(title="regact viz")
     root = Path(experiment_dir)
 
     @app.get("/", response_class=HTMLResponse)
@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     print(
-        f"🥵 regact viz → http://{args.host}:{args.port}  (experiment: {args.experiment})"
+        f"regact viz → http://{args.host}:{args.port}  (experiment: {args.experiment})"
     )
     uvicorn.run(
         build_app(args.experiment), host=args.host, port=args.port, log_level="warning"
