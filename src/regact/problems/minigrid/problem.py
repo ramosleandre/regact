@@ -205,6 +205,12 @@ class MiniGridProblem(BaseProblem):
             return []
         return [TemplateFile("code_library/minigrid_helper.py", _MINIGRID_HELPER)]
 
+    def warmup(self) -> None:
+        # Preimport the heavy libs so the first make_env (server-side) is instant - the import
+        # is the ReadTimeout risk on a shared HPC node (gym/minigrid over Lustre).
+        import gymnasium  # noqa: F401
+        import minigrid  # noqa: F401
+
     def secret_modules(self) -> tuple[str, ...]:
         """Hide the ``minigrid`` engine from the agent + eval sandboxes.
 

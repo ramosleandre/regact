@@ -39,6 +39,16 @@ def test_minigrid_config_kwargs_roundtrip() -> None:
     assert rebuilt.config_kwargs() == kwargs
 
 
+def test_minigrid_warmup_preimports_the_heavy_libs() -> None:
+    """warmup() must actually import gym+minigrid so the first make_env (server-side) is fast -
+    the lazy import is the EnvClient ReadTimeout risk on a shared HPC node."""
+    import sys
+
+    pytest.importorskip("minigrid")
+    MiniGridProblem().warmup()
+    assert "gymnasium" in sys.modules and "minigrid" in sys.modules
+
+
 def test_minigrid_hides_the_engine_from_the_sandbox() -> None:
     """MiniGrid must be a secret module (like ARC's arcengine): otherwise an agent could
     ``import minigrid; gymnasium.make(<task>)`` to reconstruct the exact env in-process and

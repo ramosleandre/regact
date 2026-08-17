@@ -69,6 +69,19 @@ class BaseProblem(ABC):
         """
         return ()
 
+    def warmup(self) -> None:
+        """Import the game library ONCE, up front, so the first ``make_env`` is fast.
+
+        ``make_env`` imports the game lib lazily, so the FIRST call pays the whole import
+        (heavy on a shared HPC node: gym/minigrid over Lustre). The orchestrator runs this in
+        a background thread at run start so the import overlaps agent boot; because module
+        imports are process-global, the env server thread then finds the library cached and
+        the agent's first ``make_env`` no longer risks an EnvClient ReadTimeout. Best-effort:
+        a failure here is swallowed (the real error, if any, surfaces at ``make_env``).
+        Default: nothing to warm.
+        """
+        return None
+
     def render_frame(self, obs: Obs) -> Any | None:
         """Colorize one observation into an RGB frame for video, or ``None``.
 

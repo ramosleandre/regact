@@ -13,7 +13,9 @@ Scheduler.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlparse
@@ -44,6 +46,14 @@ from regact.security.runtime import SandboxRuntime, Wrapper, make_wrapper, resol
 from regact.session.state import ExperimentState
 from regact.tools.base import LoggingTool, Tool
 from regact.workspace.bootstrap import Workspace
+
+
+def _warmup_problem(problem: BaseProblem) -> None:
+    """Import the game lib off the agent's critical path (best-effort, runs in a bg thread)."""
+    try:
+        problem.warmup()
+    except Exception as exc:  # best-effort; the real error, if any, surfaces at make_env
+        logging.getLogger(__name__).debug("problem warmup failed: %s", exc)
 
 
 def _regact_src_dir() -> str:
@@ -213,6 +223,14 @@ async def run_task(
             "sandbox=true but no sandbox backend is usable on this host; "
             "enable one (bwrap on Linux, seatbelt on macOS) or set sandbox=false"
         )
+    # Warm the game library NOW, in the background, so its heavy first import (gym/minigrid
+    # over Lustre on a shared HPC node) overlaps agent boot instead of blocking the agent's
+    # first make_env into an EnvClient ReadTimeout. Module imports are process-global, so the
+    # env server thread finds it cached.
+    threading.Thread(
+        target=_warmup_problem, args=(problem,), daemon=True, name="env-warmup"
+    ).start()
+
     controller = Controller.from_config(config.controller)
     features = build_features(config.features)
     if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and (
