@@ -39,6 +39,9 @@ class InfoMode(StrEnum):
 
     INFORMATIVE = "informative"  # full description (obs, actions, goal)
     MINIMAL = "minimal"  # the agent discovers the rules by interaction
+    # informative + the env library's own upstream task docstring appended (mission, rewards,
+    # termination). A problem that has no such docs falls back to plain informative.
+    INFORMATIVE_DOCSTRING = "informative_docstring"
 
 
 @dataclass

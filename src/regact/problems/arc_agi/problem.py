@@ -331,7 +331,11 @@ class ArcAgiProblem(BaseProblem):
     def milestone_detector(self, task_name: str) -> Any:
         return _milestone_detector
 
-    def helper_templates(self, task_name: str) -> list[TemplateFile]:
+    def helper_templates(
+        self, task_name: str, *, info_mode: InfoMode = InfoMode.INFORMATIVE
+    ) -> list[TemplateFile]:
+        # The ARC helper is the action-construction interface (not a rules spoiler), so it
+        # ships under every info_mode - unchanged behaviour.
         return [TemplateFile("code_library/arc_agi_helper.py", _HELPER)]
 
     def secret_modules(self) -> tuple[str, ...]:

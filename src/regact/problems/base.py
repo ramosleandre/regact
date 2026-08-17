@@ -46,12 +46,15 @@ class BaseProblem(ABC):
         """Optional per-step milestone detector for the wrapper."""
         return None
 
-    def helper_templates(self, task_name: str) -> list[TemplateFile]:
+    def helper_templates(
+        self, task_name: str, *, info_mode: InfoMode = InfoMode.INFORMATIVE
+    ) -> list[TemplateFile]:
         """Game-specific helper files dropped into the agent's workdir.
 
         Distinct from a feature's templates: these are problem-specific (e.g. ARC's
         action-id constants + ``complex_action`` builder). They must be import-free —
-        the agent never imports the game library. Default: none.
+        the agent never imports the game library. ``info_mode`` lets a problem withhold
+        game-revealing helpers under ``minimal`` (discover-it-yourself). Default: none.
         """
         return []
 

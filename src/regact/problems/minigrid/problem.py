@@ -18,9 +18,42 @@ from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, register_problem
 from regact.problems.minigrid.tasks import ALL_MINIGRID_TASKS
+from regact.workspace.templates import TemplateFile
 
-_PROMPT = Path(__file__).parents[1] / "prompts" / "minigrid.md"
+_PROMPTS = Path(__file__).parents[1] / "prompts"
+_PROMPT = _PROMPTS / "minigrid.md"  # intro + mechanics + completion, with a {obs_section} hole
+_PROMPT_FULL = _PROMPTS / "minigrid_full.md"  # fully-observable grid fragment
+_PROMPT_PARTIAL = _PROMPTS / "minigrid_partial.md"  # egocentric partial-view fragment
 _TILE_SIZE = 24  # px per cell in the video render
+
+# Upstream env docstrings mix task flavour (mission/rewards) with a NATIVE obs/action
+# description that conflicts with our regact-serialized contract; keep only the flavour.
+_DOCSTRING_KEEP = ("Description", "Mission Space", "Rewards", "Termination")
+
+# MiniGrid encoding constants, dropped into the workdir (informative modes) so the agent
+# imports them instead of guessing. Hardcoded, NOT re-exported from ``minigrid`` - that
+# package is a secret module, hidden from the agent sandbox. Values verified against it.
+_MINIGRID_HELPER = '''\
+"""MiniGrid encoding constants - import these instead of guessing the values.
+
+Each ``obs.frame["image"]`` cell is a triple ``[object, color, state]``. Door ``state`` is
+meaningful (open/closed/locked); other objects use 0.
+"""
+
+OBJECT_TO_IDX = {
+    "unseen": 0, "empty": 1, "wall": 2, "floor": 3, "door": 4,
+    "key": 5, "ball": 6, "box": 7, "goal": 8, "lava": 9, "agent": 10,
+}
+COLOR_TO_IDX = {"red": 0, "green": 1, "blue": 2, "purple": 3, "yellow": 4, "grey": 5}
+STATE_TO_IDX = {"open": 0, "closed": 1, "locked": 2}
+
+IDX_TO_OBJECT = {v: k for k, v in OBJECT_TO_IDX.items()}
+IDX_TO_COLOR = {v: k for k, v in COLOR_TO_IDX.items()}
+IDX_TO_STATE = {v: k for k, v in STATE_TO_IDX.items()}
+
+# Agent facing (obs.frame["direction"], and the agent cell's state channel in full obs):
+DIR_RIGHT, DIR_DOWN, DIR_LEFT, DIR_UP = 0, 1, 2, 3
+'''
 
 
 class MiniGridRenderer(ObsRenderer):
@@ -144,7 +177,33 @@ class MiniGridProblem(BaseProblem):
                 "`obs.available_actions` from your own scripts with `make_env()`; "
                 "the framework tells you nothing more about this task."
             )
-        return _PROMPT.read_text(encoding="utf-8").replace("{task}", task_name)
+        # The observation section is mode-specific: full-map vs egocentric are genuinely
+        # different and must never both appear (agents mistook one for the other).
+        obs_fragment = (_PROMPT_FULL if self._fully_obs else _PROMPT_PARTIAL).read_text(
+            encoding="utf-8"
+        )
+        prompt = (
+            _PROMPT.read_text(encoding="utf-8")
+            .replace("{task}", task_name)
+            .replace("{obs_section}", obs_fragment.strip())
+        )
+        if info_mode is InfoMode.INFORMATIVE_DOCSTRING and (doc := _upstream_docstring(task_name)):
+            prompt += (
+                "\n\n## Upstream task documentation\n\n"
+                "The env library's own notes for this task (its generic obs/action wording may "
+                "differ from the regact contract above, which is authoritative):\n\n"
+                f"{doc}"
+            )
+        return prompt
+
+    def helper_templates(
+        self, task_name: str, *, info_mode: InfoMode = InfoMode.INFORMATIVE
+    ) -> list[TemplateFile]:
+        """Ship the encoding constants in informative modes; minimal mode hands out nothing
+        (the agent must discover the encodings by interaction)."""
+        if info_mode is InfoMode.MINIMAL:
+            return []
+        return [TemplateFile("code_library/minigrid_helper.py", _MINIGRID_HELPER)]
 
     def secret_modules(self) -> tuple[str, ...]:
         """Hide the ``minigrid`` engine from the agent + eval sandboxes.
@@ -162,6 +221,44 @@ class MiniGridProblem(BaseProblem):
 
     def config_kwargs(self) -> dict[str, Any]:
         return {"fully_obs": self._fully_obs}
+
+
+def _upstream_docstring(task_name: str) -> str | None:
+    """The env library's own task docstring (mission / rewards / termination), or ``None``.
+
+    Resolved via the gymnasium registry entry point WITHOUT constructing the env, and imported
+    lazily: this runs in the trusted orchestrator (which can import ``minigrid``), never in the
+    agent sandbox where it is hidden. The generic obs/action sections are dropped - they
+    describe the native gym interface and conflict with our regact-serialized contract.
+    """
+    try:
+        import importlib
+        import inspect
+
+        import gymnasium
+        import minigrid  # noqa: F401  (registers the MiniGrid ids)
+
+        entry = gymnasium.spec(task_name).entry_point
+        if not isinstance(entry, str) or ":" not in entry:
+            return None
+        module_name, class_name = entry.split(":", 1)
+        klass = getattr(importlib.import_module(module_name), class_name)
+        return _keep_doc_sections(inspect.cleandoc(klass.__doc__ or "")) or None
+    except Exception:
+        return None
+
+
+def _keep_doc_sections(doc: str) -> str:
+    """Keep only the ``## <header>`` sections whose header is in ``_DOCSTRING_KEEP``."""
+    kept: list[str] = []
+    keeping = False
+    for line in doc.splitlines():
+        header = line.strip()
+        if header.startswith("## "):
+            keeping = any(header[3:].strip().startswith(k) for k in _DOCSTRING_KEEP)
+        if keeping:
+            kept.append(line)
+    return "\n".join(kept).strip()
 
 
 register_problem("minigrid", lambda kwargs: MiniGridProblem(**kwargs))

@@ -189,7 +189,7 @@ def _bootstrap_workdir(
         env_base_url=conn.base_url,
         game_id=task_name,
         lifecycle=config.problem.lifecycle,
-        helper_templates=problem.helper_templates(task_name),
+        helper_templates=problem.helper_templates(task_name, info_mode=config.problem.info_mode),
     )
 
 

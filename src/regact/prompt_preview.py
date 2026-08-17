@@ -71,9 +71,11 @@ def show(
     info_mode: InfoMode,
     features: list[str],
     tool_protocol: str,
+    fully_obs: bool,
     task: str | None,
 ) -> None:
-    problem = build_problem(problem_name, {})
+    kwargs = {"fully_obs": fully_obs} if problem_name == "minigrid" else {}
+    problem = build_problem(problem_name, kwargs)
     task_name = task or problem.get_task_names()[0]
     lifecycle = _configured_lifecycle(problem_name)
     builder = PromptBuilder()
@@ -123,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=["native", "client_cli", "bash_block"],
         help="how the agent invokes tools (default: bash_block, the swegrid fenced-block style)",
     )
+    parser.add_argument(
+        "--fully-obs",
+        action="store_true",
+        help="minigrid: full-observation prompt (default off = egocentric partial view)",
+    )
     args = parser.parse_args(argv)
 
     logging.disable(logging.INFO)  # silence the game backend so the prompt reads clean
@@ -132,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         info_mode=InfoMode(args.info_mode),
         features=args.feature or [],
         tool_protocol=args.tool_protocol,
+        fully_obs=args.fully_obs,
         task=args.task,
     )
     return 0

@@ -68,6 +68,50 @@ def test_minigrid_build_prompt_minimal_hides_action_meaning() -> None:
     assert "turn left" not in prompt  # minimal does not spell out the actions
 
 
+def test_minigrid_obs_fragment_is_mode_specific() -> None:
+    """The two observation modes are genuinely different and must never both appear (agents
+    mistook full-obs for an egocentric view)."""
+    full = MiniGridProblem(fully_obs=True).build_prompt("d", info_mode=InfoMode.INFORMATIVE)
+    partial = MiniGridProblem(fully_obs=False).build_prompt("d", info_mode=InfoMode.INFORMATIVE)
+    assert "image[x][y]" in full and "egocentric" not in full  # full: world coords, fixed map
+    assert "egocentric" in partial and "image[3][6]" in partial  # partial: agent-centered view
+    assert "{obs_section}" not in full  # the placeholder was filled
+    # the exact encodings appear in both (the trap was guessing them)
+    for frag in (full, partial):
+        assert "5 key" in frag and "8 goal" in frag and "10 agent" in frag
+
+
+def test_minigrid_helper_shipped_only_outside_minimal() -> None:
+    p = MiniGridProblem()
+    shipped = [t.relpath for t in p.helper_templates("t", info_mode=InfoMode.INFORMATIVE)]
+    assert shipped == ["code_library/minigrid_helper.py"]
+    assert p.helper_templates("t", info_mode=InfoMode.MINIMAL) == []  # discover-it-yourself
+
+
+def test_minigrid_helper_constants_match_the_installed_package() -> None:
+    """The helper HARDCODES the encodings (minigrid is a secret module, so the agent can't
+    re-export them); this guards them against drifting from the real package."""
+    pytest.importorskip("minigrid")
+    from minigrid.core.constants import COLOR_TO_IDX, OBJECT_TO_IDX, STATE_TO_IDX
+
+    helper = {t.relpath: t.content for t in MiniGridProblem().helper_templates("t")}
+    ns: dict[str, object] = {}
+    exec(helper["code_library/minigrid_helper.py"], ns)  # trusted framework template
+    assert ns["OBJECT_TO_IDX"] == OBJECT_TO_IDX
+    assert ns["COLOR_TO_IDX"] == COLOR_TO_IDX
+    assert ns["STATE_TO_IDX"] == STATE_TO_IDX
+
+
+def test_minigrid_informative_docstring_appends_only_the_flavour_sections() -> None:
+    pytest.importorskip("minigrid")
+    p = MiniGridProblem(fully_obs=True)
+    plain = p.build_prompt("MiniGrid-DoorKey-8x8-v0", info_mode=InfoMode.INFORMATIVE)
+    doc = p.build_prompt("MiniGrid-DoorKey-8x8-v0", info_mode=InfoMode.INFORMATIVE_DOCSTRING)
+    assert "Upstream task documentation" in doc and len(doc) > len(plain)
+    assert "## Description" in doc and "## Mission Space" in doc  # kept flavour sections
+    assert "## Observation Encoding" not in doc  # conflicting native sections dropped
+
+
 def test_minigrid_obs_renderer_rejects_unsupported_mode() -> None:
     problem = MiniGridProblem()
     assert isinstance(problem.obs_renderer("t", mode=ObsMode.RAW), MiniGridRenderer)
