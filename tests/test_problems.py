@@ -39,6 +39,17 @@ def test_minigrid_config_kwargs_roundtrip() -> None:
     assert rebuilt.config_kwargs() == kwargs
 
 
+def test_minigrid_module_forces_headless_rendering() -> None:
+    """Importing the minigrid problem must set a headless SDL/mpl driver so pygame's tile
+    render never blocks on a missing display (the eval-video hang seen on an HPC node)."""
+    import os
+
+    import regact.problems.minigrid.problem  # noqa: F401 - imported for the module-load side effect
+
+    assert os.environ.get("SDL_VIDEODRIVER")  # set (dummy by default), never unset when headless
+    assert os.environ.get("MPLBACKEND")
+
+
 def test_minigrid_warmup_preimports_the_heavy_libs() -> None:
     """warmup() must actually import gym+minigrid so the first make_env (server-side) is fast -
     the lazy import is the EnvClient ReadTimeout risk on a shared HPC node."""

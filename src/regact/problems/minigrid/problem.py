@@ -9,6 +9,7 @@ in ``problems/prompts/minigrid.md``.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,16 @@ from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, register_problem
 from regact.problems.minigrid.tasks import ALL_MINIGRID_TASKS
 from regact.workspace.templates import TemplateFile
+
+# MiniGrid's tile renderer draws on a pygame Surface, and ``import minigrid`` pulls pygame in.
+# On a headless HPC node pygame's SDL video init blocks forever waiting for a display, so
+# ``render_frame`` (the eval video) hangs on the first frame -> the eval ReadTimeouts and the run
+# scores nothing. Force the headless drivers here (module load happens at build_problem, ahead of
+# the lazy minigrid/pygame import in make_env/warmup/render_frame). setdefault so an explicit
+# override wins, and the regact imports above never pull minigrid, so this still runs first.
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+os.environ.setdefault("MPLBACKEND", "Agg")
 
 _PROMPTS = Path(__file__).parents[1] / "prompts"
 _PROMPT = _PROMPTS / "minigrid.md"  # intro + mechanics + completion, with a {obs_section} hole
