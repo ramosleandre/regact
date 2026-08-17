@@ -10,9 +10,57 @@ import socket
 import sys
 
 import regact
-from regact.security.netbridge import LoopbackMirror
+from regact.security.netbridge import LoopbackMirror, _splice
 
 _SRC = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+
+
+class _RecordingWriter:
+    """Minimal StreamWriter stand-in: records writes + whether it was closed."""
+
+    def __init__(self) -> None:
+        self.data = b""
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.data += data
+
+    async def drain(self) -> None:
+        pass
+
+    def can_write_eof(self) -> bool:
+        return True
+
+    def write_eof(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_splice_tears_down_on_first_eof_not_both() -> None:
+    """Regression: a half-closed connection (one direction EOFs, the peer keeps its side open)
+    must NOT hang the relay. The old gather-both-EOF blocked the request pipe forever, leaked
+    the handler, and under bwrap --unshare-net starved every later connection (one env step,
+    then hang). The fix closes both endpoints on the first completion."""
+
+    async def check() -> None:
+        eofing = asyncio.StreamReader()  # this side sends its data then EOFs (client half-close)
+        eofing.feed_data(b"request")
+        eofing.feed_eof()
+        never_eof = asyncio.StreamReader()  # keep-alive peer: has data but never EOFs
+        never_eof.feed_data(b"response")
+        w_a, w_b = _RecordingWriter(), _RecordingWriter()
+
+        # Must COMPLETE (old code hangs here -> wait_for times out and the test fails).
+        await asyncio.wait_for(
+            _splice((eofing, w_a), (never_eof, w_b)),  # type: ignore[arg-type]
+            timeout=5,
+        )
+        assert w_a.closed and w_b.closed  # both endpoints reaped, no leak
+        assert w_b.data == b"request"  # the request direction still piped through first
+
+    asyncio.run(check())
 
 
 async def _echo_server() -> tuple[asyncio.AbstractServer, int]:

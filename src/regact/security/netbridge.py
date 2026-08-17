@@ -57,11 +57,29 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 
 
 async def _splice(a: Stream, b: Stream) -> None:
-    """Relay both directions until each hits EOF, then close both endpoints."""
-    await asyncio.gather(_pipe(a[0], b[1]), _pipe(b[0], a[1]))
-    for _, writer in (a, b):
-        with contextlib.suppress(OSError):
-            writer.close()
+    """Relay both directions; the moment EITHER direction ends (EOF/error), tear DOWN both.
+
+    Waiting for BOTH directions to EOF (the old ``gather`` behaviour) hangs on a half-closed
+    connection: an HTTP client that closes its write side but keeps its read side open (or a
+    keep-alive peer that never sends EOF) leaves the request-direction pipe blocked on
+    ``read()`` forever, so the handler never returns and the connection + fds leak. Under the
+    bwrap ``--unshare-net`` loopback bridge - the ONLY route to the env server - those leaks
+    starved every later connection: one env step, then every subsequent connect hung. Closing
+    both endpoints on the first completion forces the other pipe to unblock and reaps the fds.
+    """
+    tasks = (
+        asyncio.ensure_future(_pipe(a[0], b[1])),
+        asyncio.ensure_future(_pipe(b[0], a[1])),
+    )
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        for _, writer in (a, b):
+            with contextlib.suppress(OSError):
+                writer.close()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class LoopbackMirror:
