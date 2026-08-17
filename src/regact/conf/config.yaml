@@ -18,6 +18,8 @@ limits:
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit
   max_actions_per_env: null     # env.step cap per env instance, from its make (anti-runaway);
                                 # null = no cap
+  max_consecutive_no_tool_turns: 0  # >0 = end the loop after N consecutive no-tool turns
+                                # (doom-loop breaker for a degenerate model); 0 = off
 sandbox: true           # true = confine the agent (backend auto-detected: bwrap on Linux,
                         # seatbelt on macOS) + block egress except its LLM hosts; the run FAILS
                         # rather than proceed unconfined. false = off.

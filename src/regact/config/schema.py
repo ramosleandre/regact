@@ -71,6 +71,9 @@ class LimitsConfig:
     max_turns: int = 150  # agent turns per task before the loop gives up
     max_seconds_per_task: int | None = None  # wall-clock per task, from session start
     max_actions_per_env: int | None = None  # env.step cap per env instance (from its make)
+    # Doom-loop breaker: end the loop after N consecutive turns with no tool call (a degenerate
+    # model spinning garbage); 0 disables. Any tool call (framework/bash/native) resets the count.
+    max_consecutive_no_tool_turns: int = 0
 
 
 @dataclass

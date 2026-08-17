@@ -38,8 +38,9 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
-    if fields.get("max_turns") is not None:
-        fields["max_turns"] = int(fields["max_turns"])
+    for name in ("max_turns", "max_consecutive_no_tool_turns"):
+        if fields.get(name) is not None:
+            fields[name] = int(fields[name])
     for name in ("max_seconds_per_task", "max_actions_per_env"):
         if name in fields:
             fields[name] = _int_or_none(fields[name])

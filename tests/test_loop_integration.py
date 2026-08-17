@@ -200,6 +200,20 @@ async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     assert stack.experiment.submission_count == 0
 
 
+async def test_doom_loop_breaker_stops_a_no_tool_agent(tmp_path: Path) -> None:
+    """A degenerate agent that never calls a tool (e.g. a temp0 model emitting the same
+    unparseable garbage each turn) is cut off after max_consecutive_no_tool_turns, not left to
+    burn the full budget. (Off by default -> test_pipeline_is_stable_over_many_turns runs 200
+    no-tool turns to loop_limit, guarding the default.)"""
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=50, max_consecutive_no_tool_turns=3)
+    agent = ScriptedAgent([])  # every turn is a no-tool turn
+    reason = await stack.run(agent)
+
+    assert reason == "no_tool_progress"
+    assert len(agent.sent) == 3  # gave up at the breaker, not at max_turns=50
+
+
 async def test_pipeline_is_stable_over_many_turns(tmp_path: Path) -> None:
     """A long run must terminate cleanly on the turn limit, not crash or hang: the loop
     streams the transcript to disk and offloads the growing conversation to the agent,

@@ -82,7 +82,7 @@ class _LoopContext:
 class _TurnOutcome:
     """What one turn produced, so the loop can decide whether to continue."""
 
-    saw_tool_call: bool = False
+    saw_tool_call: bool = False  # agent emitted >=1 tool call (framework, bash, or native)
     error_category: ErrorCategory | None = None  # a backend error in the stream
     crashed: bool = False  # an unexpected exception escaped the turn
 
@@ -125,6 +125,7 @@ async def run_session(
     message = first_message
     turns = 0
     error_turns = 0  # consecutive turns that ended in a backend error
+    no_tool_turns = 0  # consecutive turns that produced no tool call (doom-loop breaker)
     watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
     try:
         while True:
@@ -167,6 +168,11 @@ async def run_session(
 
             error_turns = 0
             turns += 1
+            # Doom-loop breaker: a degenerate model that makes no tool call just burns walltime.
+            no_tool_turns = 0 if outcome.saw_tool_call else no_tool_turns + 1
+            if 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns:
+                reason = "no_tool_progress"
+                break
             message = _KEEP_ALIVE_MESSAGE
     finally:
         if watchdog is not None:
@@ -283,13 +289,13 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
 async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOutcome) -> None:
     """Route one event: execute framework tools, record backend errors, else observe."""
     if isinstance(event, ToolCall):
+        outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
         _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution
             result = await _execute_framework_tool(tool, event, ctx)
             ctx.transcript.write(result)
             await ctx.agent.inject(result.output)
-            outcome.saw_tool_call = True
     elif isinstance(event, ToolResult):
         _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)
     elif isinstance(event, AgentError):
