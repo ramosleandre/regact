@@ -30,9 +30,10 @@ instead of restarting it.
 
 ## Correct answer format
 
-This is an example of a well-formed answer:
+A well-formed answer is your reasoning as plain prose, then exactly ONE fenced bash block.
+Do not wrap it in any tag or envelope - just the prose, then the block. For example your
+whole answer would be:
 
-<correct_answer>
 From the last run I confirmed `obs.available_actions` is `[0..6]`, that action 2 moves
 forward and action 5 toggles a door, and that my controller reaches the key but never
 picks it up - the pickup action is 3, not 5. Next I will make the controller pick up
@@ -41,10 +42,10 @@ the key when it is adjacent, then re-test on the env.
 ```bash
 sed -i 's/return A_TOGGLE/return A_PICKUP/' code_library/doorkey_controller.py && python code_library/test_doorkey.py
 ```
-</correct_answer>
 
-Exactly one ```bash block per answer; the reasoning before it is your memory, the block
-is your action.
+The reasoning before it is your memory; the block is your action. Write only the prose and
+the one fenced block - no surrounding tag or envelope around them - and always end the block
+with its closing fence line, or it will not run.
 
 ## Typical commands
 
