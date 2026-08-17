@@ -1,5 +1,6 @@
 """Tests for Block 5: experiment state, submit/exit tools, workspace, prompt builder."""
 
+import re
 from pathlib import Path
 
 from regact.config.schema import Lifecycle
@@ -217,6 +218,18 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
     assert "<tool_call>" in hermes and "<function=Bash>" in hermes
     assert "framework/control.py SubmitSolution" in hermes
     assert "```bash" not in hermes  # not the fenced-block dialect
+
+    # glm dialect: GLM's native <tool_call>Bash<arg_key>command</arg_key><arg_value>...
+    # The example must PARSE under the same regex alancode's GLMFormat uses, or it re-teaches the
+    # exact imitation drift this format exists to fix.
+    glm = build("glm")
+    assert "framework/control.py SubmitSolution" in glm
+    glm_pat = re.compile(
+        r"<tool_call>(\w+)((?:<arg_key>.*?</arg_key><arg_value>.*?</arg_value>)+)</tool_call>",
+        re.DOTALL,
+    )
+    parsed = [m.group(1) for m in glm_pat.finditer(glm)]
+    assert parsed and all(name == "Bash" for name in parsed)  # every taught call parses as Bash
 
     native = build("client_cli")
     assert "## Framework tools" in native and "cat > code_library" not in native

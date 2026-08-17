@@ -23,9 +23,12 @@ from typing import Literal, get_args
 #   "hermes_xml" - same bash-only agent, but taught to emit its one command as a Qwen/hermes
 #                  `<tool_call><function=Bash><parameter=command>` call - so an RL-locked model
 #                  that emits its native markup regardless is met by a matching prompt + parser.
-# The bash_block-family dialects (bash_block, hermes_xml) differ ONLY in the markup the model
-# uses for its single bash command; per-served-model selection is `agent.args.tool_protocol`.
-ToolProtocol = Literal["native", "client_cli", "bash_block", "hermes_xml"]
+#   "glm"        - same, taught GLM's native `<tool_call>Bash<arg_key>command</arg_key>
+#                  <arg_value>...</arg_value></tool_call>` shape (GLM half-remembers the opener
+#                  but improvises the args under a foreign format; its real template stabilizes it).
+# The bash_block-family dialects (bash_block, hermes_xml, glm) differ ONLY in the markup used
+# for the single bash command; per-served-model selection is `agent.args.tool_protocol`.
+ToolProtocol = Literal["native", "client_cli", "bash_block", "hermes_xml", "glm"]
 TOOL_PROTOCOLS: tuple[str, ...] = get_args(ToolProtocol)
 
 

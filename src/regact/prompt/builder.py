@@ -33,6 +33,7 @@ _LIFECYCLE_MD = {
 _TERMINAL_MD = {
     "bash_block": _PROMPT_DIR / "bash_block_terminal.md",  # swegrid: fenced ```bash block
     "hermes_xml": _PROMPT_DIR / "hermes_xml_terminal.md",  # Qwen/hermes <tool_call> markup
+    "glm": _PROMPT_DIR / "glm_terminal.md",  # GLM <tool_call>Bash<arg_key>/<arg_value> markup
 }
 _FEATURES_INTRO = "# Features :\n\nYou are given the following features to help you."
 
