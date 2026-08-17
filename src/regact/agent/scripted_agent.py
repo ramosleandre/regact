@@ -65,7 +65,7 @@ class ScriptedAgent(CodeAgent):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="replace",
-            control_actions="native_tools",
+            tool_protocol="native",
             permission_hooks=False,
             streams_tool_calls=True,
             supports_inject=True,

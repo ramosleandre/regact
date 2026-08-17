@@ -17,7 +17,14 @@ import pytest
 from regact.agent.events import TextDelta, ToolCall, TurnComplete
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.loader import run_config_from_mapping
-from regact.config.schema import AgentConfig, AgentName, LimitsConfig, ProblemConfig, RunConfig
+from regact.config.schema import (
+    AgentConfig,
+    AgentName,
+    ControllerConfig,
+    LimitsConfig,
+    ProblemConfig,
+    RunConfig,
+)
 from regact.env.lifecycle import MultiInstancePolicy
 from regact.env.renderer import RawRenderer
 from regact.env.session import EnvSession
@@ -372,10 +379,8 @@ async def test_run_task_with_cwm_records_and_verifies(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake"),
-        features={
-            "controller": {"max_moves": 10},
-            "cwm": {"max_tested_transitions_per_verify": 50},
-        },
+        controller=ControllerConfig(max_moves=10),
+        features={"cwm": {"max_tested_transitions_per_verify": 50}},
         limits=LimitsConfig(max_turns=10),
     )
     agent = _WritingAgent(

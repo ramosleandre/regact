@@ -6,7 +6,8 @@
 defaults:
   - agent: scripted        # conf/agent/*        — who writes the code
   - problem: arc_agi       # conf/problem/*      — the environment (iterates its tasks)
-  - features: controller   # conf/features/*     — the agent-built capabilities
+  - controller: default    # conf/controller/*   - the always-on controller (eval knobs)
+  - features: none         # conf/features/*     - OPTIONAL extra capabilities (default: none)
   - _self_
   - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
 

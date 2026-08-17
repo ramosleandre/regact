@@ -1,14 +1,16 @@
 """The feature/extension model.
 
-A ``Feature`` is a self-contained capability the agent uses or builds. It bundles
-four parts: workdir templates, a prompt fragment, tools, and hooks — plus an
-optional server-side env wrapper. A run selects a set of features; the bootstrap,
-prompt builder, tool surface, env wrapping, and teardown assemble themselves from
-that set. New features add a file here and register a name; the core is
-untouched. Features are independent — there is no dependency graph;
-``controller`` is always present as the base. Each feature OWNS its knobs: the
-config maps ``{name: params}`` (``features.<name>.<knob>``) and the params are
-passed to the registered factory as kwargs.
+A ``Feature`` is a self-contained, OPTIONAL capability the agent uses or builds.
+It bundles four parts: workdir templates, a prompt fragment, tools, and hooks -
+plus an optional server-side env wrapper. A run selects a set of features; the
+bootstrap, prompt builder, tool surface, env wrapping, and teardown assemble
+themselves from that set. New features add a file here and register a name; the
+core is untouched. Features are independent - there is no dependency graph. The
+controller is NOT a feature: it is always-on core (see
+``regact.features.controller.Controller``), instantiated directly from
+``config.controller`` and applied alongside the features. Each feature OWNS its
+knobs: the config maps ``{name: params}`` (``features.<name>.<knob>``) and the
+params are passed to the registered factory as kwargs.
 """
 
 from __future__ import annotations
@@ -163,8 +165,8 @@ class Feature(ABC):
         return None
 
 
-# Concrete features register here (Block 6 adds ``controller``); the config names
-# features by string, so it never imports a feature class and there is no cycle.
+# Concrete OPTIONAL features register here; the config names features by string, so it
+# never imports a feature class and there is no cycle. (The controller is core, not here.)
 _REGISTRY: dict[str, Callable[..., Feature]] = {}
 
 
@@ -176,8 +178,9 @@ def register_feature(name: str, factory: Callable[..., Feature]) -> None:
 def build_features(features: Mapping[str, Mapping[str, Any] | None]) -> list[Feature]:
     """Resolve ``{name: params}`` to instances via the registry.
 
-    Each feature owns its own knobs (``features.controller.n_episodes=3`` on the
-    CLI), so run-level config never carries feature-specific fields.
+    Each feature owns its own knobs (``features.cwm.max_tested_transitions_per_verify=500``
+    on the CLI), so run-level config never carries feature-specific fields. The controller
+    is core, not here - it is built from ``config.controller`` by the orchestrator.
     """
     _load_builtins()
     try:
@@ -190,4 +193,4 @@ def build_features(features: Mapping[str, Mapping[str, Any] | None]) -> list[Fea
 
 def _load_builtins() -> None:
     """Import the built-in feature modules so they self-register on first use."""
-    from regact.features import controller, cwm  # noqa: F401
+    from regact.features import cwm  # noqa: F401

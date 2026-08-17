@@ -14,6 +14,7 @@ from typing import Any
 from regact.config.schema import (
     AgentConfig,
     AgentName,
+    ControllerConfig,
     InfoMode,
     Lifecycle,
     LimitsConfig,
@@ -57,12 +58,26 @@ def _sandbox_bool(value: Any) -> bool:
 
 
 def _features_from(raw: Any) -> dict[str, dict[str, Any]]:
-    """Normalize ``features`` to ``{name: params}``; a plain name list means no params."""
+    """Normalize the OPTIONAL ``features`` to ``{name: params}``; a plain name list means
+    no params. Absent = no extra features (the controller is always-on core, not here)."""
     if raw is None:
-        return {"controller": {}}
+        return {}
     if isinstance(raw, Mapping):
         return {str(name): dict(params or {}) for name, params in raw.items()}
     return {str(name): {} for name in raw}
+
+
+def _controller_from(raw: Any) -> ControllerConfig:
+    """Build ``ControllerConfig`` from the ``controller`` mapping (defaults if absent).
+
+    ``n_episodes``/``max_moves`` may arrive as strings via env interpolation; coerce them.
+    The booleans come through as real YAML/CLI bools, so they are passed through untouched.
+    """
+    fields: dict[str, Any] = dict(raw or {})
+    for name in ("n_episodes", "max_moves"):
+        if fields.get(name) is not None:
+            fields[name] = int(fields[name])
+    return ControllerConfig(**fields)
 
 
 def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
@@ -86,6 +101,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             seed=problem.get("seed"),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
+        controller=_controller_from(data.get("controller")),
         features=_features_from(data.get("features")),
         parallel_workers=int(data.get("parallel_workers", 1)),
         first_obs_in_prompt=bool(data.get("first_obs_in_prompt", False)),

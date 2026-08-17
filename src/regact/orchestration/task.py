@@ -29,6 +29,7 @@ from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, Single
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.features.base import Feature, FeatureContext, RunDeps, build_features
+from regact.features.controller import Controller
 from regact.obs.errors import LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
@@ -177,10 +178,12 @@ def _bootstrap_workdir(
     *,
     workdir: str,
     conn: EnvConnection,
+    controller: Controller,
     features: list[Feature],
 ) -> None:
     Workspace(workdir).bootstrap(
         features,
+        controller=controller,
         problem_name=problem.name,
         task_name=task_name,
         env_base_url=conn.base_url,
@@ -210,13 +213,15 @@ async def run_task(
             "sandbox=true but no sandbox backend is usable on this host; "
             "enable one (bwrap on Linux, seatbelt on macOS) or set sandbox=false"
         )
+    controller = Controller.from_config(config.controller)
     features = build_features(config.features)
-    if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and any(
-        feature.evaluates_on_env for feature in features
+    if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and (
+        controller.evaluates_on_env or any(feature.evaluates_on_env for feature in features)
     ):
         raise RuntimeError(
-            "single-instance problem with an evaluating feature: exploration and evaluation "
-            "share the same env, so scores would reflect the session, not an isolated policy"
+            "single-instance problem with an on-env evaluation (the always-on controller scores "
+            "by rolling episodes; an evaluating feature may too): exploration and evaluation share "
+            "the same env, so scores would reflect the session, not an isolated policy"
         )
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
@@ -235,7 +240,13 @@ async def run_task(
             RunLogger(logs_dir, task=task_name) as logger,
         ):
             _bootstrap_workdir(
-                config, problem, task_name, workdir=workdir, conn=conn, features=features
+                config,
+                problem,
+                task_name,
+                workdir=workdir,
+                conn=conn,
+                controller=controller,
+                features=features,
             )
 
             experiment = ExperimentState(
@@ -284,14 +295,16 @@ async def run_task(
                 seed=config.problem.seed,
             )
             deps.feature_metrics = lambda: _collect_feature_metrics(features, deps, logger)
-            tools: list[Tool] = [
-                LoggingTool(tool, logger) for feature in features for tool in feature.tools(deps)
-            ]
-            hooks = [hook for feature in features for hook in feature.hooks(deps)]
+            # Core controller first, then each optional feature: one flat tool/hook surface.
+            tool_specs = [*controller.tools(deps), *(t for f in features for t in f.tools(deps))]
+            tools: list[Tool] = [LoggingTool(tool, logger) for tool in tool_specs]
+            hooks = [*controller.hooks(deps), *(h for f in features for h in f.hooks(deps))]
 
             agent = agent or build_agent(config.agent)
             caps = agent.capabilities()
-            if caps.control_actions == "client_cli":
+            # A subprocess agent (bash_block/client_cli) reaches the framework tools over the
+            # workdir control CLI; only the in-process "native" backend takes them as loop tools.
+            if caps.tool_protocol in ("bash_block", "client_cli"):
                 server.bind_control(task_name, tools, cwd=workdir)
                 loop_tools: list[Tool] = []
             elif caps.executes_tools:
@@ -346,11 +359,11 @@ async def run_task(
                 problem,
                 task_name,
                 features,
+                controller=controller,
                 lifecycle=config.problem.lifecycle,
                 info_mode=config.problem.info_mode,
-                control_actions=agent.capabilities().control_actions,
+                tool_protocol=caps.tool_protocol,
                 tool_names=[tool.name for tool in tools],
-                bash_only=agent.capabilities().bash_only,
             )
             try:
                 await agent.start(

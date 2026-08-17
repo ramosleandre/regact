@@ -1,8 +1,8 @@
 """Integration: the whole pipeline on doubles (ScriptedAgent + FakeNativeEnv).
 
 No LLM, no real game. Builds the full stack — env server behind a TestClient, an
-ControllerExecutor, the ControllerFeature tools — drives ``run_session`` with a scripted
-agent, and checks the on-disk artifacts (transcript.jsonl, experiment_state.json,
+ControllerExecutor, the always-on controller's tools - drives ``run_session`` with a
+scripted agent, and checks the on-disk artifacts (transcript.jsonl, experiment_state.json,
 results.json) plus the error-path exits.
 """
 
@@ -22,7 +22,7 @@ from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.envclient.client import EnvClient
 from regact.features.base import RunDeps
-from regact.features.controller import ControllerFeature
+from regact.features.controller import Controller
 from regact.obs.errors import ErrorCategory
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
@@ -78,7 +78,7 @@ class _Stack:
                 solution_path=str(self.workdir / "solution.py"),
                 submissions_dir=str(self.workdir / "submissions"),
             )
-            feature = ControllerFeature(n_episodes=1, max_moves=10)
+            feature = Controller(n_episodes=1, max_moves=10)
             tools = feature.tools(deps)
             self.hooks = feature.hooks(deps)
         self.tools = tools

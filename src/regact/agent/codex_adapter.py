@@ -44,7 +44,7 @@ class CodexAgent(_CliAgent):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="replace",
-            control_actions="client_cli",
+            tool_protocol="client_cli",  # native bash/file tools; submit/exit via the workdir CLI
             permission_hooks=False,
             streams_tool_calls=True,
             supports_inject=False,

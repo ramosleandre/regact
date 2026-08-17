@@ -2,7 +2,7 @@
 
 A CLI agent (Claude/codex) can't receive native Python tools, so it invokes
 SubmitSolution / ExitTask over HTTP. This drives that path end-to-end: a real
-uvicorn server (on its own thread) with the ControllerFeature tools bound, hit
+uvicorn server (on its own thread) with the controller's tools bound, hit
 exactly like the workdir ``control.py`` would. Uses the real transport so the
 sync executor (run via to_thread) can reach the same server without deadlock.
 """
@@ -19,7 +19,7 @@ from regact.env.renderer import RawRenderer
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
 from regact.features.base import RunDeps
-from regact.features.controller import ControllerFeature
+from regact.features.controller import Controller
 from regact.orchestration.env_transport import serve_env
 from regact.session.state import ExperimentState
 from regact.testing.fakes import FakeNativeEnv
@@ -76,7 +76,7 @@ async def test_control_channel_runs_submit_and_exit(tmp_path: Path) -> None:
             solution_path=str(workdir / "solution.py"),
             submissions_dir=str(workdir / "submissions"),
         )
-        tools = ControllerFeature(n_episodes=1, max_moves=10).tools(deps)
+        tools = Controller(n_episodes=1, max_moves=10).tools(deps)
         server.bind_control("g", tools, cwd=str(workdir))
         url = f"{conn.base_url}/control/g/tool"
 
@@ -109,7 +109,7 @@ async def test_control_channel_submit_surfaces_controller_error(tmp_path: Path) 
             solution_path=str(workdir / "solution.py"),
             submissions_dir=str(workdir / "submissions"),
         )
-        tools = ControllerFeature(n_episodes=1, max_moves=10).tools(deps)
+        tools = Controller(n_episodes=1, max_moves=10).tools(deps)
         server.bind_control("g", tools, cwd=str(workdir))
         url = f"{conn.base_url}/control/g/tool"
         resp = httpx.post(url, json={"name": "SubmitSolution", "input": {}}, timeout=30.0)

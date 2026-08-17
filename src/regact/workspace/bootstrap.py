@@ -4,16 +4,21 @@ Lays out the agent's working directory. The common base is **agnostic**: the
 directory tree (``code_library/``, ``framework/``) and the
 env/lifecycle-specific ``framework/make_env.py``. Everything controller-specific
 (the ``solution.py`` stub, the example controller, the contract prompt) belongs
-to ``ControllerFeature`` and arrives as feature templates layered on top.
+to the always-on ``Controller`` and layers on top, followed by each optional
+feature's templates.
 """
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from regact.config.schema import Lifecycle
 from regact.features.base import Feature, FeatureContext
 from regact.workspace.templates import TemplateFile
+
+if TYPE_CHECKING:
+    from regact.features.controller import Controller
 
 # ``make_env`` connects to the env server the loop launched. The server URL and
 # game id are baked in at bootstrap so the workdir is self-contained. Under
@@ -110,6 +115,7 @@ class Workspace:
         self,
         features: list[Feature],
         *,
+        controller: Controller | None = None,
         problem_name: str,
         task_name: str,
         env_base_url: str,
@@ -117,7 +123,9 @@ class Workspace:
         lifecycle: Lifecycle,
         helper_templates: list[TemplateFile] | None = None,
     ) -> None:
-        """Create the agnostic base, then drop problem helpers + every feature's templates."""
+        """Create the agnostic base, then drop problem helpers, the always-on controller's
+        templates, and every optional feature's templates. ``controller`` is ``None`` only
+        when laying the bare base (e.g. tests); a real run always passes it."""
         os.makedirs(self.root, exist_ok=True)
         for sub in ("code_library", "framework"):
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
@@ -143,12 +151,15 @@ class Workspace:
             task_name=task_name,
             workdir=self.root,
         )
+        if controller is not None:
+            for file in controller.templates(ctx):
+                self._write(file.relpath, file.content)
         for feature in features:
             for file in feature.templates(ctx):
                 self._write(file.relpath, file.content)
 
     def solution_path(self) -> str:
-        """Absolute path to ``solution.py`` (written by ``ControllerFeature``)."""
+        """Absolute path to ``solution.py`` (written by the always-on ``Controller``)."""
         return os.path.abspath(os.path.join(self.root, "solution.py"))
 
     def _write(self, relpath: str, content: str) -> None:

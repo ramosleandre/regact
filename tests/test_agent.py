@@ -64,7 +64,7 @@ def test_scripted_agent_capabilities() -> None:
     caps = ScriptedAgent().capabilities()
     assert isinstance(caps, Capabilities)
     assert caps.system_prompt == "replace"
-    assert caps.control_actions == "native_tools"
+    assert caps.tool_protocol == "native"
 
 
 def test_build_agent_scripted() -> None:
@@ -133,5 +133,5 @@ def test_alan_capabilities_are_subprocess_shaped() -> None:
 
     caps = AlanSubprocessAgent().capabilities()
     assert caps.writes_native_transcript is True
-    assert caps.control_actions == "client_cli"  # tools over the workdir CLI
+    assert caps.tool_protocol == "bash_block"  # fenced-block loop, tools over the workdir CLI
     assert caps.executes_tools is False

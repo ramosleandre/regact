@@ -102,7 +102,7 @@ run_task_bench() {
         "problem.tasks=[${task}]" \
         problem.lifecycle=multi_instance \
         problem.seed="${SEED}" \
-        features.controller.n_episodes="${N_EPISODES}" \
+        controller.n_episodes="${N_EPISODES}" \
         limits.max_seconds_per_task="${WALLTIME_S}" \
         output_root="experiments/bench_${BENCH_DATE}" \
         experiment_name="${exp}" \

@@ -12,7 +12,7 @@ override any field on the CLI.
 make run ARGS="experiment=dev"
 
 # a real run
-make run ARGS="agent=alan problem=arc_agi 'problem.tasks=[ls20]' features.controller.n_episodes=3"
+make run ARGS="agent=alan problem=arc_agi 'problem.tasks=[ls20]' controller.n_episodes=3"
 
 # see the composed config without running it
 make run ARGS="agent=claude problem=arc_agi --cfg job"

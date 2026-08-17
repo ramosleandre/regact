@@ -1,12 +1,15 @@
-"""The minimal, always-on feature: writing a controller.
+"""The always-on controller: the core capability the agent always has.
 
-Owns everything controller-specific: it scaffolds ``base_controller.py``, an
-example controller, and the ``solution.py`` stub; explains the controller
-contract in the prompt; provides the ``SubmitSolution`` and ``ExitTask`` tools
-(wired with the run's executor + experiment); and ships a teardown hook that
-re-scores the final ``solution.py`` as the official result.
-``make_env.py`` is NOT here — it is env/lifecycle-specific, written by the
-workspace base.
+Not a feature - it is fully part of the framework and every run has it. Owns
+everything controller-specific: it scaffolds ``base_controller.py``, an example
+controller, and the ``solution.py`` stub; explains the controller contract in
+the prompt; provides the ``SubmitSolution`` and ``ExitTask`` tools (wired with
+the run's executor + experiment); and ships a teardown hook that re-scores the
+final ``solution.py`` as the official result. ``make_env.py`` is NOT here - it is
+env/lifecycle-specific, written by the workspace base. It reuses the generic
+``FeatureContext``/``RunDeps``/``Hook`` seams (shared orchestration types that
+live in ``features.base``), but is instantiated directly by the orchestrator from
+``config.controller``, never via the feature registry.
 """
 
 from __future__ import annotations
@@ -15,15 +18,14 @@ import logging
 import os
 from pathlib import Path
 
+from regact.config.schema import ControllerConfig
 from regact.controllers.executor import ControllerExecutor, SandboxedExecutor, write_result
 from regact.features.base import (
-    Feature,
     FeatureContext,
     Hook,
     HookPhase,
     RunDeps,
     TemplateFile,
-    register_feature,
 )
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EvalResult
@@ -208,15 +210,17 @@ class FinalizeControllerHook(Hook):
         return result
 
 
-class ControllerFeature(Feature):
-    """The base controller-writing capability.
+class Controller:
+    """The always-on controller-writing capability (core, not a feature).
 
-    Owns its evaluation knobs (they configure THIS feature's scoring, not the run):
-    ``n_episodes`` eval episodes per submission, ``max_moves`` env steps per rollout,
-    ``record_video`` for the eval videos, ``shadow_replay`` for the anti-cheat re-score.
+    Owns its evaluation knobs (they configure the controller's scoring): ``n_episodes``
+    eval episodes per submission, ``max_moves`` env steps per rollout, ``record_video``
+    for the eval videos, ``shadow_replay`` for the anti-cheat re-score. Built by the
+    orchestrator from :class:`ControllerConfig`; exposes the same ``templates`` /
+    ``prompt_fragment`` / ``tools`` / ``hooks`` seams a feature does, applied alongside
+    the optional features.
     """
 
-    name = "controller"
     evaluates_on_env = True  # SubmitSolution/finalize score by rolling episodes on the env
 
     def __init__(
@@ -231,6 +235,16 @@ class ControllerFeature(Feature):
         self._max_moves = int(max_moves)
         self._record_video = bool(record_video)
         self._shadow_replay = bool(shadow_replay)
+
+    @classmethod
+    def from_config(cls, config: ControllerConfig) -> Controller:
+        """Build the controller from its run-config section."""
+        return cls(
+            n_episodes=config.n_episodes,
+            max_moves=config.max_moves,
+            record_video=config.record_video,
+            shadow_replay=config.shadow_replay,
+        )
 
     def templates(self, ctx: FeatureContext) -> list[TemplateFile]:
         return [
@@ -272,6 +286,3 @@ class ControllerFeature(Feature):
                 shadow_replay=self._shadow_replay,
             )
         ]
-
-
-register_feature(ControllerFeature.name, ControllerFeature)

@@ -3,6 +3,7 @@
 from regact.config.schema import (
     AgentConfig,
     AgentName,
+    ControllerConfig,
     Lifecycle,
     ObsMode,
     ProblemConfig,
@@ -15,7 +16,9 @@ def test_run_config_defaults() -> None:
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="arc_agi"),
     )
-    assert cfg.features == {"controller": {}}
+    assert cfg.features == {}  # no optional features by default
+    assert cfg.controller == ControllerConfig()  # the always-on controller, default knobs
+    assert cfg.controller.shadow_replay is False  # programmatic default (Hydra profile sets True)
     assert cfg.parallel_workers == 1
     assert cfg.problem.tasks == []
     assert cfg.problem.lifecycle is Lifecycle.MULTI_INSTANCE
@@ -34,5 +37,5 @@ def test_mutable_defaults_are_not_shared() -> None:
     b = RunConfig(agent=AgentConfig(name=AgentName.ALAN), problem=ProblemConfig(name="y"))
     a.features["world_model"] = {}
     a.problem.tasks.append("g1")
-    assert b.features == {"controller": {}}
+    assert b.features == {}
     assert b.problem.tasks == []

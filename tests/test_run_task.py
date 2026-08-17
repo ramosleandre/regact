@@ -16,6 +16,7 @@ from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import (
     AgentConfig,
     AgentName,
+    ControllerConfig,
     Lifecycle,
     LimitsConfig,
     ProblemConfig,
@@ -88,7 +89,7 @@ def _config() -> RunConfig:
     return RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake", kwargs={"env_id": "fake-v0"}),
-        features={"controller": {"n_episodes": 2, "max_moves": 10}},
+        controller=ControllerConfig(n_episodes=2, max_moves=10),
         limits=LimitsConfig(max_turns=10),
     )
 
@@ -109,7 +110,7 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
 
     logs = tmp_path / "logs"
     workdir = tmp_path / "workdir"
-    # Workdir bootstrapped: agnostic base + controller-feature templates.
+    # Workdir bootstrapped: agnostic base + the always-on controller's templates.
     assert (workdir / "framework" / "make_env.py").exists()
     assert (workdir / "code_library" / "base_controller.py").exists()
     # Canonical artifacts written.
@@ -151,7 +152,9 @@ async def test_run_task_sandbox_true_fails_when_no_backend(
     assert not (tmp_path / "logs").exists()  # refused before writing any artifact
 
 
-async def test_run_task_refuses_single_instance_with_evaluating_feature(tmp_path: Path) -> None:
+async def test_run_task_refuses_single_instance_with_on_env_eval(tmp_path: Path) -> None:
+    # The always-on controller scores on the env, so single-instance is refused (its eval
+    # would share the exploration env).
     config = _config()
     config.problem.lifecycle = Lifecycle.SINGLE_INSTANCE
     with pytest.raises(RuntimeError, match="single-instance"):

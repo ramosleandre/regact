@@ -58,13 +58,14 @@ make agentcheck    # do the installed agent backends launch — bare and sandbox
 
 ## Run
 
-A run is composed from three config groups you pick by name, plus fields you override
+A run is composed from config groups you pick by name, plus fields you override
 on the CLI. The defaults live in [`src/regact/conf/config.yaml`](src/regact/conf/config.yaml):
 
 ```yaml
-agent:   scripted        # who writes the code   — scripted | claude | codex | alan
-problem: arc_agi         # the environment       — arc_agi | minigrid
-features: controller     # what the agent builds — controller | cwm
+agent:   scripted        # who writes the code   - scripted | claude | codex | alan
+problem: arc_agi         # the environment       - arc_agi | minigrid
+controller: default      # always-on: the agent writes + submits a policy (knobs: controller.*)
+features: none           # OPTIONAL extra capabilities - none | cwm
 sandbox: true            # confine the agent + block egress (false = off)
 limits:
   max_turns: 350             # agent turns per task
@@ -72,8 +73,8 @@ limits:
   max_actions_per_env: null  # env.step cap per env instance
 ```
 
-Each feature owns its own knobs (e.g. `features.controller.n_episodes`), so run-level
-config stays small. A few examples:
+The always-on controller's eval knobs live under `controller.*` (e.g. `controller.n_episodes`);
+each optional feature owns its knobs under `features.<name>.*`. A few examples:
 
 ```bash
 # fastest end-to-end, no LLM and no game (scripted agent, one game):
@@ -83,7 +84,7 @@ make run ARGS="experiment=dev"
 make run ARGS="agent=claude problem=minigrid"
 
 # ARC-AGI-3 with Alan, add the Code World Model feature, 3 eval episodes:
-make run ARGS="agent=alan problem=arc_agi features=cwm features.controller.n_episodes=3"
+make run ARGS="agent=alan problem=arc_agi features=cwm controller.n_episodes=3"
 ```
 
 See a config composed without running it: `make run ARGS="... --cfg job"`.

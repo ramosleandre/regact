@@ -1,0 +1,9 @@
+# @package _global_
+# The always-on controller: the agent writes a policy in solution.py and submits it. It is
+# core (part of the framework), NOT a feature - every run has it. These knobs configure its
+# EVALUATION. Override on the CLI as e.g. `controller.n_episodes=3`.
+controller:
+  n_episodes: 1        # eval episodes per submission (multi-instance: more = better stats)
+  max_moves: 2500      # max env.step per controller rollout (eval)
+  record_video: true   # record a video of each eval episode (per game's render_frame)
+  shadow_replay: true  # re-score by replaying actions on a trusted env (anti-cheat; ~2x eval cost)

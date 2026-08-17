@@ -15,10 +15,9 @@ defaults:
 
 # Experiment-specific fields only (not owned by any group):
 sandbox: true             # confine the agent + block egress except its LLM host
-features:
-  controller:
-    shadow_replay: true   # re-score by replaying the actions on a trusted env (~2x eval)
-    record_video: true
+controller:
+  shadow_replay: true     # re-score by replaying the actions on a trusted env (~2x eval)
+  record_video: true
 limits:
   max_turns: 350
   max_seconds_per_task: 3600   # 1h per game

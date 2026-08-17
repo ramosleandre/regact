@@ -66,8 +66,9 @@ is the canonical example.
 Then declare the sandbox seams so the OS sandbox can confine it:
 
 - `capabilities()` → a [`Capabilities`](../src/regact/agent/capabilities.py) (set
-  `control_actions="client_cli"` for a subprocess agent — framework tools reach it over
-  the workdir control CLI, not as in-process objects).
+  `tool_protocol="client_cli"` for a subprocess agent with native bash/file tools, or
+  `"bash_block"` for a bash-only fenced-block agent - either way framework tools reach it
+  over the workdir control CLI, not as in-process objects).
 - `host_read_paths()` / `host_rw_paths()` / `host_egress_hosts()` — the host dirs and hosts
   this backend needs (install dirs, an isolated config home, its LLM host). Use
   `executable_paths("<cli>")` to resolve the binary's dirs.
@@ -82,7 +83,8 @@ Then declare the sandbox seams so the OS sandbox can confine it:
 **3. Add a config group** `conf/agent/<name>.yaml` with `name: <x>` and any default
 `model` / `args`.
 
-> **`native_tools` vs `client_cli`.** Only an **in-process** agent can execute framework
-> tools as Python objects (`control_actions="native_tools"`, `executes_tools=True`). Every
-> subprocess/CLI agent uses `client_cli`: it invokes SubmitSolution/ExitTask over the
-> workdir's HTTP control channel. This keeps the loop provider-independent.
+> **`tool_protocol`.** Only an **in-process** agent uses `native` - framework tools as
+> Python objects (the scripted test backend). Every subprocess/CLI agent uses `client_cli`
+> (native bash/file tools) or `bash_block` (bash-only, fenced-block): it invokes
+> SubmitSolution/ExitTask over the workdir's HTTP control channel. This keeps the loop
+> provider-independent.

@@ -10,7 +10,7 @@ argv IS wrapped, so Alan gets the same confinement as the Claude/codex CLIs.
 One long-lived child, not one per turn: alancode keeps its session in memory, so
 the process persists for the run and turns are multiplexed over its stdin/stdout
 (newline-delimited JSON, the transcript's event shape). Framework tools reach the
-agent over the workdir control CLI (``control_actions == "client_cli"``), the same
+agent over the workdir control CLI (``tool_protocol == "bash_block"``), the same
 generic channel the other subprocess agents use — nothing about it is Alan-specific.
 
 The child is launched from an argv list (never a shell string), so there is no
@@ -157,13 +157,14 @@ class AlanSubprocessAgent(CodeAgent):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="replace",  # alancode takes a custom_system_prompt
-            control_actions="client_cli",  # tools over the workdir CLI, not native objects
+            # bash-only + framework tools over the workdir CLI; the model writes a fenced
+            # ```bash block per turn (needs alancode tool_call_format=bash_block to parse it).
+            tool_protocol="bash_block",
             permission_hooks=False,  # alancode's hooks are not reachable across the boundary
             streams_tool_calls=True,
             supports_inject=True,  # queued, delivered on the next turn
             writes_native_transcript=True,  # <workdir>/.alan
             executes_tools=False,  # framework tools run behind the control channel
-            bash_only=True,  # build_alan_agent enforces tools=[Bash]
         )
 
     def launch_probe_argv(self) -> list[str]:

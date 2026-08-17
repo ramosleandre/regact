@@ -30,7 +30,6 @@ def test_mapping_builds_typed_config_with_enums() -> None:
                 "info_mode": "minimal",
                 "kwargs": {"operation_mode": "offline"},
             },
-            "features": ["controller"],
             "parallel_workers": 4,
         }
     )
@@ -46,7 +45,9 @@ def test_mapping_defaults() -> None:
     config = run_config_from_mapping(
         {"agent": {"name": "scripted"}, "problem": {"name": "minigrid"}}
     )
-    assert config.features == {"controller": {}}
+    assert config.features == {}  # no optional features by default
+    assert config.controller.n_episodes == 1  # the always-on controller's defaults
+    assert config.controller.shadow_replay is False  # programmatic default (profile sets True)
     assert config.problem.lifecycle is Lifecycle.MULTI_INSTANCE
     assert config.problem.tasks == []
     assert config.first_obs_in_prompt is False  # the first message carries no obs by default
@@ -64,17 +65,18 @@ def test_mapping_carries_first_obs_in_prompt() -> None:
 
 
 def test_mapping_preserves_controller_eval_knobs() -> None:
-    """The controller's eval knobs (record_video/shadow_replay) live on the feature and
-    must survive the mapping (regression: as run-level flags they were once dropped, so
+    """The controller's eval knobs (record_video/shadow_replay) live on ``config.controller``
+    and must survive the mapping (regression: as run-level flags they were once dropped, so
     `shadow_replay: true` silently ran with the anti-cheat replay OFF)."""
     cfg = run_config_from_mapping(
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "arc_agi"},
-            "features": {"controller": {"record_video": False, "shadow_replay": True}},
+            "controller": {"record_video": False, "shadow_replay": True},
         }
     )
-    assert cfg.features["controller"] == {"record_video": False, "shadow_replay": True}
+    assert cfg.controller.record_video is False
+    assert cfg.controller.shadow_replay is True
 
 
 def test_mapping_parses_sandbox_bool() -> None:
@@ -105,18 +107,18 @@ def test_mapping_normalizes_features() -> None:
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "arc_agi"},
-            "features": {"controller": {"n_episodes": 3}},
+            "features": {"cwm": {"max_tested_transitions_per_verify": 3}},
         }
     )
-    assert cfg.features == {"controller": {"n_episodes": 3}}
+    assert cfg.features == {"cwm": {"max_tested_transitions_per_verify": 3}}
     legacy = run_config_from_mapping(
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "arc_agi"},
-            "features": ["controller"],
+            "features": ["cwm"],
         }
     )
-    assert legacy.features == {"controller": {}}
+    assert legacy.features == {"cwm": {}}
 
 
 def test_redacted_config_dict_masks_api_key() -> None:
@@ -177,15 +179,13 @@ def test_run_exp_hydra_composes_a_config() -> None:
     assert config.agent.name is AgentName.CLAUDE
     assert config.agent.args["permission_mode"] == "bypassPermissions"  # from the claude group
     assert config.agent.args["effort"] == "high"  # CLI override
-    # The features group carries each feature's own knobs.
-    assert config.features == {
-        "controller": {
-            "n_episodes": 1,
-            "max_moves": 2500,
-            "record_video": True,
-            "shadow_replay": True,
-        }
-    }
+    # No optional features by default; the always-on controller carries its knobs from the
+    # controller group (shadow_replay defaults ON here, distinct from the programmatic False).
+    assert config.features == {}
+    assert config.controller.n_episodes == 1
+    assert config.controller.max_moves == 2500
+    assert config.controller.record_video is True
+    assert config.controller.shadow_replay is True
 
 
 def test_minigrid_suite_groups_compose() -> None:
@@ -224,5 +224,5 @@ def test_experiment_profile_respects_cli_agent_override() -> None:
     config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
     assert config.agent.name is AgentName.CODEX  # the CLI choice wins, not the profile's
     assert "reasoning_effort" in config.agent.args  # codex's own args, no claude leftovers
-    # the profile's experiment fields still apply (feature-owned knob)
-    assert config.features["controller"]["shadow_replay"] is True
+    # the profile's experiment fields still apply (the controller's own knob)
+    assert config.controller.shadow_replay is True

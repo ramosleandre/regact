@@ -14,7 +14,7 @@ from regact.env.lifecycle import MultiInstancePolicy
 from regact.env.renderer import RawRenderer
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
-from regact.features.controller import ControllerFeature
+from regact.features.controller import Controller
 from regact.obs.errors import ErrorCategory
 from regact.orchestration.env_transport import serve_env
 from regact.testing.fakes import FakeNativeEnv
@@ -53,7 +53,8 @@ async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path) -> None:
     server = _server()
     async with serve_env(server, "g", in_process=False) as conn:
         Workspace(workdir).bootstrap(
-            [ControllerFeature()],
+            [],
+            controller=Controller(),
             problem_name="p",
             task_name="g",
             env_base_url=conn.base_url,
@@ -85,7 +86,8 @@ def test_sandboxed_executor_categorizes_env_handshake_failure(tmp_path: Path) ->
     reported as load_error and scored agent_solution, polluting the agent-solution stats."""
     workdir = str(tmp_path / "wd")
     Workspace(workdir).bootstrap(
-        [ControllerFeature()],
+        [],
+        controller=Controller(),
         problem_name="p",
         task_name="g",
         env_base_url="http://127.0.0.1:1",  # nothing listening -> make_env() connect fails
@@ -116,7 +118,8 @@ async def test_sandboxed_executor_records_video(tmp_path: Path) -> None:
     server = _server()
     async with serve_env(server, "g", in_process=False) as conn:
         Workspace(workdir).bootstrap(
-            [ControllerFeature()],
+            [],
+            controller=Controller(),
             problem_name="p",
             task_name="g",
             env_base_url=conn.base_url,
@@ -147,7 +150,8 @@ async def test_sandboxed_executor_shadow_replay_scores_on_trusted_env(tmp_path: 
     server = _server()
     async with serve_env(server, "g", in_process=False) as conn:
         Workspace(workdir).bootstrap(
-            [ControllerFeature()],
+            [],
+            controller=Controller(),
             problem_name="p",
             task_name="g",
             env_base_url=conn.base_url,

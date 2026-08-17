@@ -1,8 +1,9 @@
 """``python -m regact.prompt_preview`` — see exactly what the agent will be told.
 
 Prints the two things a run sends: the SYSTEM prompt (framework brief + the game's
-section + each feature's fragment + the control and lifecycle blocks) and the FIRST
-MESSAGE, which carries the first observation rendered as the agent will see it.
+section + the always-on controller + any optional feature's fragment + the control and
+lifecycle blocks) and the FIRST MESSAGE, which carries the first observation rendered as
+the agent will see it.
 
 Useful when tuning prompts or adding a game/feature: it assembles them through the
 real :class:`PromptBuilder`, so what you read is what the agent gets — no run, no LLM.
@@ -20,9 +21,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from regact.config.schema import InfoMode, Lifecycle, ObsMode
+from regact.config.schema import ControllerConfig, InfoMode, Lifecycle, ObsMode
 from regact.env.wrapped_env import WrappedEnv
 from regact.features.base import build_features
+from regact.features.controller import Controller
 from regact.problems.base import BaseProblem, build_problem
 from regact.prompt.builder import PromptBuilder
 
@@ -63,7 +65,13 @@ def _render_obs(problem: BaseProblem, obs: Any, mode: str) -> str:
 
 
 def show(
-    problem_name: str, *, obs_mode: str, info_mode: InfoMode, features: list[str], task: str | None
+    problem_name: str,
+    *,
+    obs_mode: str,
+    info_mode: InfoMode,
+    features: list[str],
+    tool_protocol: str,
+    task: str | None,
 ) -> None:
     problem = build_problem(problem_name, {})
     task_name = task or problem.get_task_names()[0]
@@ -72,7 +80,7 @@ def show(
 
     bar = "=" * 90
     print(f"\n{bar}\n{problem_name}  task={task_name}  lifecycle={lifecycle.value}  obs={obs_mode}")
-    print(f"features={features}  info_mode={info_mode.value}\n{bar}")
+    print(f"features={features}  tool_protocol={tool_protocol}  info_mode={info_mode.value}\n{bar}")
 
     print("\n##### SYSTEM PROMPT #####\n")
     print(
@@ -80,9 +88,10 @@ def show(
             problem,
             task_name,
             build_features({name: {} for name in features}),
+            controller=Controller.from_config(ControllerConfig()),
             lifecycle=lifecycle,
             info_mode=info_mode,
-            control_actions="client_cli",
+            tool_protocol=tool_protocol,  # type: ignore[arg-type]
             tool_names=["SubmitSolution", "ExitTask"],
         )
     )
@@ -103,7 +112,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", default=None, help="default: the problem's first task")
     parser.add_argument("--obs", default="text", choices=["text", "raw"])
     parser.add_argument("--info-mode", default="informative", choices=[m.value for m in InfoMode])
-    parser.add_argument("--feature", action="append", help="repeatable; default: controller")
+    parser.add_argument(
+        "--feature",
+        action="append",
+        help="optional feature to add (repeatable); the controller is always-on core",
+    )
+    parser.add_argument(
+        "--tool-protocol",
+        default="bash_block",
+        choices=["native", "client_cli", "bash_block"],
+        help="how the agent invokes tools (default: bash_block, the swegrid fenced-block style)",
+    )
     args = parser.parse_args(argv)
 
     logging.disable(logging.INFO)  # silence the game backend so the prompt reads clean
@@ -111,7 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         args.problem,
         obs_mode=args.obs,
         info_mode=InfoMode(args.info_mode),
-        features=args.feature or ["controller"],
+        features=args.feature or [],
+        tool_protocol=args.tool_protocol,
         task=args.task,
     )
     return 0

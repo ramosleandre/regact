@@ -112,8 +112,8 @@ def test_workspace_bootstrap_multi(tmp_path: Path) -> None:
         lifecycle=Lifecycle.MULTI_INSTANCE,
     )
     root = Path(ws.root)
-    # The agnostic base is only the tree + make_env.py; solution.py is the
-    # ControllerFeature's template, not part of the base.
+    # The agnostic base is only the tree + make_env.py; solution.py is the always-on
+    # controller's template (no controller passed here), not part of the base.
     assert not (root / "solution.py").exists()
     assert (root / "code_library").is_dir()
     assert (root / "code_library" / "__init__.py").exists()  # importable package
@@ -182,7 +182,7 @@ def test_prompt_builder_system_carries_everything_static() -> None:
         "lvl1",
         [_StubFeature()],
         lifecycle=Lifecycle.MULTI_INSTANCE,
-        control_actions="client_cli",
+        tool_protocol="client_cli",
         tool_names=["SubmitSolution", "ExitTask"],
     )
     assert "make_env" in system  # role
@@ -191,28 +191,27 @@ def test_prompt_builder_system_carries_everything_static() -> None:
     assert "framework/control.py SubmitSolution" in system  # client_cli control block
 
 
-def test_prompt_builder_bash_only_merges_shell_examples_into_control_block() -> None:
-    """A bash-only agent gets shell idioms + submit/exit folded into one terminal section;
-    a native-tool agent gets the plain Framework tools block instead."""
+def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() -> None:
+    """A bash_block agent gets the fenced-block terminal fragment (shell idioms + submit/exit
+    folded in); a client_cli agent gets the plain Framework tools block instead."""
     builder = PromptBuilder()
 
-    def build(**extra: object) -> str:
+    def build(tool_protocol: str) -> str:
         return builder.build_system_prompt(
             _StubProblem(),  # type: ignore[arg-type]
             "lvl1",
             [_StubFeature()],
             lifecycle=Lifecycle.MULTI_INSTANCE,
-            control_actions="client_cli",
+            tool_protocol=tool_protocol,  # type: ignore[arg-type]
             tool_names=["SubmitSolution", "ExitTask"],
-            **extra,  # type: ignore[arg-type]
         )
 
-    bash = build(bash_only=True)
+    bash = build("bash_block")
     assert "Working in the terminal" in bash and "cat > code_library" in bash
     assert "framework/control.py SubmitSolution" in bash  # submit/exit folded in
     assert "## Framework tools" not in bash  # merged away
 
-    native = build()
+    native = build("client_cli")
     assert "## Framework tools" in native and "cat > code_library" not in native
 
 
@@ -234,8 +233,10 @@ def test_prompt_builder_drops_empty_feature_fragments() -> None:
 def test_first_message_is_the_observation_or_a_start() -> None:
     builder = PromptBuilder()
     msg = builder.build_first_message()
-    # the generic first message is agnostic: it points to the features, names no controller
-    assert "feature" in msg.lower()
+    # the generic first message is agnostic: a thin "begin" that defers the how to the
+    # system prompt - it names no controller, no solution.py, no features.
+    assert "task" in msg.lower()
     assert "controller" not in msg.lower() and "solution.py" not in msg
+    assert "feature" not in msg.lower()
     framed = builder.build_first_message("OBS_GRID_HERE")
     assert "OBS_GRID_HERE" in framed and "first observation" in framed.lower()

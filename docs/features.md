@@ -1,51 +1,58 @@
 # Features
 
-A **feature** is what the agent builds and how it's scored. A feature bundles four things:
-workdir **templates** (scaffolding), a **prompt fragment**, **tools** the agent can call,
-and teardown **hooks**. regact ships two:
+The **controller** is always-on core: every run has the agent write a pure
+`act(obs) -> action` policy in `solution.py` and submit it (`SubmitSolution` / `ExitTask`),
+scored by rolling episodes on the env. It is **not** a feature - see
+[Controller](#controller) below.
+
+A **feature** is an OPTIONAL capability layered on top of the controller. It bundles four
+things: workdir **templates** (scaffolding), a **prompt fragment**, **tools** the agent can
+call, and teardown **hooks**. regact ships one:
 
 | `features=` | What it does | Scores on env? |
 |---|---|---|
-| `controller` | the agent writes a pure `act(obs) -> action` policy and submits it | yes |
+| `none` | no extra feature (the default) | - |
 | `cwm` | Code World Model: records env transitions + an agent-run `verify.py` coherence check | no |
+
+## Controller
+
+The controller is configured under `controller.*` (group
+[`conf/controller/`](../src/regact/conf/controller/)), not as a feature. Its knobs:
+`n_episodes`, `max_moves`, `record_video`, `shadow_replay`.
+
+```bash
+# the always-on controller with 3 eval episodes, no video
+make run ARGS="controller.n_episodes=3 controller.record_video=false"
+```
 
 ## Use a feature
 
-Each feature **owns its own knobs**, so run-level config stays small. Override a knob with
-its dotted path:
+Each feature **owns its own knobs**, so run-level config stays small. Select a feature by
+name and override a knob with its dotted path:
 
 ```bash
-# controller with 3 eval episodes, no video
-make run ARGS="features=controller features.controller.n_episodes=3 features.controller.record_video=false"
-
-# the Code World Model feature
-make run ARGS="features=cwm"
+# add the Code World Model feature on top of the always-on controller
+make run ARGS="features=cwm features.cwm.max_tested_transitions_per_verify=500"
 ```
 
 The config groups in [`conf/features/`](../src/regact/conf/features/):
 
-- **`controller.yaml`** — `n_episodes`, `max_moves`, `record_video`, `shadow_replay`.
+- **`none.yaml`** - no feature (the default).
 - **`cwm.yaml`** — `max_tested_transitions_per_verify`,
   `max_printed_incoherence_transitions_per_verify`.
 
-### Composing features
-
-The `features=` groups are independent — `features=cwm` gives you **only** cwm (no
-controller, so no SubmitSolution/ExitTask; such a run ends on a limit). To stack them,
-list both — on the CLI or in a profile:
-
-```bash
-make run ARGS="+features.controller={} +features.cwm={}"
-```
-
-The `features:` list order is also the order env wrappers are applied (first = innermost).
+A feature is additive: `features=cwm` keeps the always-on controller (SubmitSolution/ExitTask)
+and adds cwm on top. The `features:` mapping order is also the order env wrappers are applied
+(first = innermost).
 
 ## Add a feature
 
-A feature implements the [`Feature`](../src/regact/features/base.py) ABC.
-[`controller.py`](../src/regact/features/controller.py) and
-[`cwm.py`](../src/regact/features/cwm.py) are the two examples — the first adds tools +
-a scoring hook, the second adds an env wrapper.
+A feature implements the [`Feature`](../src/regact/features/base.py) ABC;
+[`cwm.py`](../src/regact/features/cwm.py) is the worked example (templates + a prompt
+fragment + an env wrapper). The always-on controller lives in
+[`controller.py`](../src/regact/features/controller.py) - it uses the same
+`templates`/`prompt_fragment`/`tools`/`hooks` seams but is core, built from `config.controller`,
+not registered as a feature.
 
 **1. Subclass `Feature`**, set `name`, and take your knobs as **constructor kwargs**:
 

@@ -26,9 +26,9 @@ def test_build_agent_resolves_claude_and_codex() -> None:
 
 
 def test_capabilities_mark_client_cli() -> None:
-    assert ClaudeAgent().capabilities().control_actions == "client_cli"
+    assert ClaudeAgent().capabilities().tool_protocol == "client_cli"
     assert ClaudeAgent().capabilities().system_prompt == "append"
-    assert CodexAgent().capabilities().control_actions == "client_cli"
+    assert CodexAgent().capabilities().tool_protocol == "client_cli"
 
 
 def test_host_paths_are_per_agent_and_ambient_config_stays_out() -> None:

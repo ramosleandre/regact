@@ -19,11 +19,17 @@ class Capabilities:
     #   "replace" — we own the whole prompt (Alan custom_system_prompt)
     #   "append"  — we add to the backend's base prompt (Claude --append-system-prompt)
     system_prompt: Literal["replace", "append"]
-    # How framework actions (submit/exit) reach the agent:
-    #   "native_tools" — in-process Python Tool objects (only an in-process agent, i.e. Alan)
-    #   "client_cli"   — the agent calls them via the workdir client CLI over HTTP
-    #                    (any subprocess CLI agent, e.g. Claude Code)
-    control_actions: Literal["native_tools", "client_cli"]
+    # How the agent invokes tools. Selects BOTH the prompt's tool-invocation fragment AND how
+    # framework actions (submit/exit) are wired, so no agent is hardcoded anywhere:
+    #   "native"     - in-process Python Tool objects (only the scripted test backend); the loop
+    #                  runs the framework tools and the prompt says to call them directly.
+    #   "client_cli" - a subprocess CLI agent with native file/bash tools (Claude, Codex) that
+    #                  reaches the framework tools via the workdir control CLI
+    #                  (`python framework/control.py <Tool>`); the prompt lists those commands.
+    #   "bash_block" - a bash-only agent (Alan, Mini-SWE-Agent style) that writes ONE fenced
+    #                  ```bash block per turn (alancode's BashBlockFormat extracts + runs it);
+    #                  the prompt teaches that convention + shell idioms + the control commands.
+    tool_protocol: Literal["native", "client_cli", "bash_block"]
     permission_hooks: bool  # supports PreToolUse hooks (path confinement, etc.)
     streams_tool_calls: bool  # surfaces ToolCall events in its stream
     supports_inject: bool  # accepts mid-turn injected messages
@@ -32,6 +38,3 @@ class Capabilities:
     # run them (it would double-submit); it only observes. False (default): the loop runs the
     # framework tools when it sees the agent's ToolCall (the scripted test backend relies on this).
     executes_tools: bool = False
-    # The agent is restricted to a single Bash tool (Alan, Mini-SWE-Agent style), so the prompt
-    # teaches shell idioms for file ops. False: the agent has native file tools (Claude, Codex).
-    bash_only: bool = False

@@ -9,7 +9,7 @@ Subprocesses are launched with ``asyncio.create_subprocess_exec`` (argv list, no
 shell) — never a shell string — so there is no command-injection surface.
 
 Framework tools (submit/exit) are NOT passed natively to these agents — their
-``control_actions`` is ``client_cli``, so the agent reaches them via a workdir CLI
+``tool_protocol`` is ``client_cli``, so the agent reaches them via a workdir CLI
 (the control channel, wired separately). Here we only spawn + normalize the stream.
 """
 

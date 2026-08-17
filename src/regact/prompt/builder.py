@@ -18,6 +18,7 @@ from regact.config.schema import InfoMode, Lifecycle
 from regact.features.base import Feature, FeatureContext
 
 if TYPE_CHECKING:
+    from regact.features.controller import Controller
     from regact.problems.base import BaseProblem
 
 _PROMPT_DIR = Path(__file__).parent
@@ -26,7 +27,10 @@ _LIFECYCLE_MD = {
     Lifecycle.SINGLE_INSTANCE: _PROMPT_DIR / "lifecycle_single.md",
     Lifecycle.MULTI_INSTANCE: _PROMPT_DIR / "lifecycle_multi.md",
 }
-_BASH_TERMINAL_MD = _PROMPT_DIR / "bash_terminal.md"  # bash-only agents: shell idioms + submit/exit
+# One fragment per tool_protocol (native reads none - it just calls the tools directly).
+_TERMINAL_MD = {
+    "bash_block": _PROMPT_DIR / "bash_block_terminal.md",  # swegrid: fenced-block loop + idioms
+}
 _FEATURES_INTRO = "# Features :\n\nYou are given the following features to help you."
 
 
@@ -39,36 +43,41 @@ class PromptBuilder:
         task_name: str,
         features: list[Feature],
         *,
+        controller: Controller | None = None,
         lifecycle: Lifecycle,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
-        control_actions: Literal["native_tools", "client_cli"] = "native_tools",
+        tool_protocol: Literal["native", "client_cli", "bash_block"] = "native",
         tool_names: list[str] | None = None,
-        bash_only: bool = False,
     ) -> str:
-        """The full static brief: framework role + game + features + control + lifecycle.
+        """The full static brief: framework role + game + controller + features + control +
+        lifecycle.
 
-        Stable across a run's turns (cache-friendly); the dynamic observation is sent
-        separately as the first message.
+        The always-on controller's fragment is a core section (its own working approach);
+        the OPTIONAL features get the generic "# Features" intro. Stable across a run's turns
+        (cache-friendly); the dynamic observation is sent separately as the first message.
         """
         ctx = FeatureContext(problem_name=problem.name, task_name=task_name, workdir="")
         sections = [
             _SYSTEM_MD.read_text(encoding="utf-8"),
             problem.build_prompt(task_name, info_mode=info_mode),
         ]
+        if controller is not None and (core := controller.prompt_fragment(ctx)):
+            sections.append(core)  # the controller is core, not under "# Features"
         fragments = [frag for f in features if (frag := f.prompt_fragment(ctx))]
         if fragments:  # generic intro, then each feature describes its own deliverable
             sections.append(_FEATURES_INTRO)
             sections += fragments
-        sections.append(
-            _control_channel_block(control_actions, tool_names or [], bash_only=bash_only)
-        )
+        sections.append(_control_channel_block(tool_protocol, tool_names or []))
         sections.append(_LIFECYCLE_MD[lifecycle].read_text(encoding="utf-8"))
         return "\n\n".join(s.strip() for s in sections if s and s.strip())
 
     def build_first_message(self, rendered_obs: str | None = None) -> str:
         """The first user message: the first observation (for reference) + a generic, agnostic
-        start. What to build with it is the features' business, stated in the system prompt."""
-        start = "Use the features described above to make progress; keep going until you win."
+        start. The how (controller, tools, approach) all lives in the system prompt."""
+        start = (
+            "Begin working on the task described in your instructions above. "
+            "Keep going until you solve the game."
+        )
         if rendered_obs:
             header = f"This is the first observation of the game, for reference. {start}"
             return f"{header}\n\n{rendered_obs}"
@@ -76,24 +85,23 @@ class PromptBuilder:
 
 
 def _control_channel_block(
-    control_actions: Literal["native_tools", "client_cli"],
+    tool_protocol: Literal["native", "client_cli", "bash_block"],
     tool_names: list[str],
-    *,
-    bash_only: bool = False,
 ) -> str:
-    """How to invoke framework tools - depends on the agent, not the feature.
+    """How the agent invokes tools - selected by the agent's ``tool_protocol``, never by a
+    feature or a concrete agent name.
 
-    Generic: lists the tool NAMES (from the run's tools) and the invocation the backend
-    supports; it never imports a tool or a feature type. For a bash-only agent it also
-    teaches the shell idioms for file ops and folds submit/exit into that one section.
+    Generic: lists the tool NAMES (from the run's tools) and the invocation the protocol
+    supports; it never imports a tool or a feature type. ``bash_block`` reads its whole
+    terminal fragment (fenced-block loop + shell idioms) and folds submit/exit into it.
     """
     if not tool_names:
         return ""
-    if control_actions == "client_cli":
-        if bash_only:
-            commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
-            terminal = _BASH_TERMINAL_MD.read_text(encoding="utf-8")
-            return terminal.replace("{control_commands}", commands).strip()
+    if tool_protocol == "bash_block":
+        commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
+        terminal = _TERMINAL_MD["bash_block"].read_text(encoding="utf-8")
+        return terminal.replace("{control_commands}", commands).strip()
+    if tool_protocol == "client_cli":
         lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
         return (
             "## Framework tools\n\n"

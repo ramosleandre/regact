@@ -6,8 +6,9 @@ from regact.env.lifecycle import MultiInstancePolicy
 from regact.env.renderer import RawRenderer
 from regact.env.session import EnvSession
 from regact.env.wrapper import EnvWrapper
-from regact.features.base import FeatureContext, build_features
+from regact.features.base import Feature, FeatureContext, Hook, RunDeps, TemplateFile
 from regact.testing.fakes import FakeNativeEnv
+from regact.tools.base import Tool
 
 
 class _Tag(EnvWrapper):
@@ -67,7 +68,24 @@ def test_every_multi_instance_build_is_wrapped() -> None:
     assert calls == ["wrap", "wrap"]
 
 
+class _Bare(Feature):
+    """A feature that overrides nothing optional - to assert the base defaults."""
+
+    name = "bare"
+
+    def templates(self, ctx: FeatureContext) -> list[TemplateFile]:
+        return []
+
+    def prompt_fragment(self, ctx: FeatureContext) -> str | None:
+        return None
+
+    def tools(self, deps: RunDeps) -> list[Tool]:
+        return []
+
+    def hooks(self, deps: RunDeps) -> list[Hook]:
+        return []
+
+
 def test_feature_env_wrapper_defaults_to_none() -> None:
     ctx = FeatureContext(problem_name="p", task_name="t", workdir="w")
-    (controller,) = build_features({"controller": {}})
-    assert controller.env_wrapper(ctx) is None
+    assert _Bare().env_wrapper(ctx) is None

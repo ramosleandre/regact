@@ -42,9 +42,8 @@ problem:
   kwargs:
     operation_mode: ${oc.env:ARC_OPERATION_MODE,offline}
     environments_dir: ${oc.env:ARC_ENVIRONMENTS_DIR,environnement}
-features:
-  controller:
-    max_moves: 2500              # max env.step per controller rollout (eval)
+controller:
+  max_moves: 2500                # max env.step per controller rollout (eval)
 # One agent instance per game. Sequential by default; the notebook may pass
 # --parallel N to run N games concurrently against the one shared vLLM endpoint.
 parallel_workers: 1

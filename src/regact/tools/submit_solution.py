@@ -3,7 +3,7 @@
 One tool for both regimes. It hands the agent's ``solution.py`` to the
 ``ControllerExecutor``; its behaviour (N episodes vs level boundary) follows
 the run's lifecycle. There is no second "SubmitSolutionCompetition" class.
-Provided by ``ControllerFeature``. The executor lands in Block 6; it is referenced
+Provided by the always-on ``Controller``. The executor lands in Block 6; it is referenced
 by its contract (``run(...) -> EvalResult``) and imported only for typing.
 """
 

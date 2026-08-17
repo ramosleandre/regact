@@ -81,7 +81,7 @@ def test_capabilities_route_tools_through_the_control_channel() -> None:
     """Out-of-process, framework tools cannot be native Python objects: they must go
     over the workdir control CLI, and the loop must not also run them."""
     caps = AlanSubprocessAgent().capabilities()
-    assert caps.control_actions == "client_cli"
+    assert caps.tool_protocol == "bash_block"
     assert caps.executes_tools is False
     assert caps.system_prompt == "replace"
 

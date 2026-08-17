@@ -11,7 +11,7 @@ event ``type``, and the runner's own control frames use a leading underscore
 (``_ready`` / ``_turn_end`` / ``_fatal``), which no event type uses.
 
 Framework tools are deliberately NOT registered natively here. A subprocess agent
-reaches them over the workdir control CLI (``control_actions == "client_cli"``),
+reaches them over the workdir control CLI (``tool_protocol`` is ``bash_block``/``client_cli``),
 so this sandboxed child never holds a Python handle to the orchestrator's tools.
 """
 

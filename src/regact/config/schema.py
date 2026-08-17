@@ -71,14 +71,31 @@ class LimitsConfig:
 
 
 @dataclass
+class ControllerConfig:
+    """Eval knobs for the always-on controller (the agent writes a policy and submits it).
+
+    The controller is core, not a feature, so its settings live here rather than under
+    ``features.<name>``. They configure the controller's *evaluation*: how many episodes
+    each submission is scored over, the per-rollout step cap, whether to record a video,
+    and whether to shadow-replay (anti-cheat re-score on a trusted env).
+    """
+
+    n_episodes: int = 1  # eval episodes per submission (multi-instance: more = better stats)
+    max_moves: int = 2500  # max env.step per controller rollout (eval)
+    record_video: bool = True  # record a video of each eval episode (per game's render_frame)
+    shadow_replay: bool = False  # re-score by replaying actions on a trusted env (anti-cheat)
+
+
+@dataclass
 class RunConfig:
     """The full description of one experiment (one or many tasks)."""
 
     agent: AgentConfig
     problem: ProblemConfig
-    # Tasks live under ``problem.tasks``; features own their own knobs (``features.<name>``),
-    # including the controller's eval knobs (n_episodes, max_moves, record_video, shadow_replay).
-    features: dict[str, dict[str, Any]] = field(default_factory=lambda: {"controller": {}})
+    # The controller is always-on core (its eval knobs live on ``controller``). ``features``
+    # holds only OPTIONAL extra capabilities (e.g. cwm), each owning its knobs (``features.<name>``)
+    controller: ControllerConfig = field(default_factory=ControllerConfig)
+    features: dict[str, dict[str, Any]] = field(default_factory=dict)
     parallel_workers: int = 1  # 1 = sequential
     first_obs_in_prompt: bool = False  # render the first observation into the first message
     limits: LimitsConfig = field(default_factory=LimitsConfig)

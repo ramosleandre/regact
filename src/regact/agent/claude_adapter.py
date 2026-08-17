@@ -105,7 +105,7 @@ class ClaudeAgent(_CliAgent):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="append",  # --append-system-prompt
-            control_actions="client_cli",  # reaches submit/exit via the workdir CLI
+            tool_protocol="client_cli",  # native bash/file tools; submit/exit via the workdir CLI
             permission_hooks=True,  # .claude/settings.json deny-list + permission mode
             streams_tool_calls=True,
             supports_inject=False,  # per-turn resume; injection is prepended next turn
