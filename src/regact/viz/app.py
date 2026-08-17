@@ -40,10 +40,15 @@ def build_app(experiment_dir: str) -> FastAPI:
             )
         return {"experiment": root.name, "games": out}
 
-    @app.get("/api/game/{name}")
-    def game(name: str) -> dict[str, Any]:
+    def _require_game(name: str) -> None:
+        # ``name`` is a query param (a run's path relative to the root, possibly nested for a
+        # sweep). Validating against list_games both 404s the unknown and blocks path traversal.
         if name not in reader.list_games(experiment_dir):
             raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
+
+    @app.get("/api/game")
+    def game(name: str) -> dict[str, Any]:
+        _require_game(name)
         view = reader.load_game(experiment_dir, name)
         return {
             "name": name,
@@ -54,10 +59,9 @@ def build_app(experiment_dir: str) -> FastAPI:
             "metrics": game_metrics(view),
         }
 
-    @app.get("/api/game/{name}/artifacts")
+    @app.get("/api/game/artifacts")
     def artifacts(name: str) -> dict[str, Any]:
-        if name not in reader.list_games(experiment_dir):
-            raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
+        _require_game(name)
         view = reader.load_game(experiment_dir, name)
         return {
             "files": [
@@ -67,18 +71,19 @@ def build_app(experiment_dir: str) -> FastAPI:
             "submissions": [dataclasses.asdict(s) for s in view.submissions],
         }
 
-    @app.get("/api/game/{name}/logs")
+    @app.get("/api/game/logs")
     def logs(name: str) -> dict[str, Any]:
-        if name not in reader.list_games(experiment_dir):
-            raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
+        _require_game(name)
         return reader.load_logs(experiment_dir, name)
 
-    @app.get("/video/{game}/{submission}/{filename}")
+    @app.get("/video")
     def video(game: str, submission: str, filename: str) -> FileResponse:
+        # game/submission/filename are all query params (game may be a nested sweep path).
         if not filename.endswith(".mp4"):
             raise HTTPException(status_code=400, detail="only .mp4")
-        path = root / game / "workdir" / "submissions" / submission / filename
-        if not path.is_file():
+        _require_game(game)
+        path = (root / game / "workdir" / "submissions" / submission / filename).resolve()
+        if not path.is_relative_to(root.resolve()) or not path.is_file():
             raise HTTPException(status_code=404, detail="video not found")
         return FileResponse(
             path, media_type="video/mp4", headers={"Cache-Control": "no-store"}

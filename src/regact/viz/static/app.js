@@ -33,7 +33,7 @@ async function api(path) {
 
 const _cache = {};               // game name -> detail payload (shared across tabs)
 async function gameDetail(name) {
-  if (!_cache[name]) _cache[name] = await api("/api/game/" + encodeURIComponent(name));
+  if (!_cache[name]) _cache[name] = await api("/api/game?name=" + encodeURIComponent(name));
   return _cache[name];
 }
 
@@ -260,7 +260,7 @@ function toolBlock(tool) {
 
 // ---------------------------------------------------------------- artifacts tab
 async function renderArtifacts(name) {
-  const d = await api("/api/game/" + encodeURIComponent(name) + "/artifacts");
+  const d = await api("/api/game/artifacts?name=" + encodeURIComponent(name));
   const wrap = h("div", "split");
   const list = h("div", "filelist");
   const view = h("div", "fileview", h("div", "muted", "select a file"));
@@ -288,7 +288,7 @@ async function renderArtifacts(name) {
     c.append(h("div", "muted", `${aggLine(a)} · n=${a.n_episodes ?? "—"}`));
     for (const v of s.videos || []) {
       const vid = h("video"); vid.controls = true; vid.preload = "metadata";
-      vid.src = `/video/${encodeURIComponent(name)}/${encodeURIComponent(s.name)}/${encodeURIComponent(v)}`;
+      vid.src = `/video?game=${encodeURIComponent(name)}&submission=${encodeURIComponent(s.name)}&filename=${encodeURIComponent(v)}`;
       c.append(vid);
     }
     subs.append(c);
@@ -298,7 +298,7 @@ async function renderArtifacts(name) {
 
 // ---------------------------------------------------------------- logs tab
 async function renderLogs(name) {
-  const d = await api("/api/game/" + encodeURIComponent(name) + "/logs");
+  const d = await api("/api/game/logs?name=" + encodeURIComponent(name));
   const wrap = h("div");
   wrap.append(h("h2", null, "Events"));
   const errs = d.events.filter((e) => e.level === "ERROR" || e.error_category);

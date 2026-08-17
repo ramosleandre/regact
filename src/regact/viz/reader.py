@@ -12,6 +12,7 @@ reads naturally, and pair each ``ToolResult`` to its ``ToolCall`` by id.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -91,12 +92,44 @@ class ArtifactFile:
 _MAX_ARTIFACT_BYTES = 200_000
 
 
+_MAX_GAME_DEPTH = 8  # bound the walk; a sweep nests model/stamp/task = ~3 levels
+
+
 def list_games(experiment_dir: str) -> list[str]:
-    """Subdirectory names that look like game runs (have a logs/ dir)."""
+    """Every run dir under the experiment root, as a path RELATIVE to the root.
+
+    A run is a dir containing ``logs/``. Recursive so ONE viz serves a whole sweep
+    (model x task x seed = many nested runs), not just a single flat run: the id is the
+    relative path (e.g. ``Coder-480B_seed0/2026-08-15_.../MiniGrid-DoorKey-8x8-v0``).
+    A dir that IS a run is not descended into; the walk is depth-bounded; and a run is
+    deduped by realpath so a ``latest`` symlink is not listed alongside its timestamp dir.
+    A flat single-run dir yields the same one-element list as before (relpath == name).
+    """
     root = Path(experiment_dir)
     if not root.is_dir():
         return []
-    return sorted(d.name for d in root.iterdir() if (d / "logs").is_dir())
+    games: list[str] = []
+    seen: set[str] = set()
+
+    def walk(d: Path, depth: int) -> None:
+        if depth > _MAX_GAME_DEPTH:
+            return
+        try:
+            subdirs = sorted(p for p in d.iterdir() if p.is_dir())
+        except OSError:
+            return
+        for sub in subdirs:
+            if (sub / "logs").is_dir():
+                real = os.path.realpath(sub)
+                if real in seen:  # a `latest` symlink resolving to an already-listed run
+                    continue
+                seen.add(real)
+                games.append(str(sub.relative_to(root)))  # a run: record it, do not descend
+            else:
+                walk(sub, depth + 1)
+
+    walk(root, 0)
+    return sorted(games)
 
 
 def load_game(experiment_dir: str, game: str) -> GameView:

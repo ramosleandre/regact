@@ -45,6 +45,25 @@ def test_list_games(tmp_path: Path) -> None:
     assert list_games(exp) == ["ls20"]
 
 
+def test_list_games_recurses_a_sweep_and_dedupes_latest_symlink(tmp_path: Path) -> None:
+    """One viz over a whole sweep: nested run dirs are listed by their relative path, a run
+    is not descended into, and a `latest` symlink resolving to a timestamp dir is not listed
+    twice."""
+    import os
+
+    root = tmp_path / "sweep"
+    runs = ["modelA_seed0/2026-08-15_a/DoorKey", "modelB_seed0/2026-08-15_b/DoorKey"]
+    for r in runs:
+        (root / r / "logs").mkdir(parents=True)
+    os.symlink(root / "modelA_seed0" / "2026-08-15_a", root / "modelA_seed0" / "latest")
+
+    games = list_games(str(root))
+    assert games == sorted(runs)  # nested relpaths, and the `latest` symlink deduped away
+    # a run dir is not descended into: a stray logs/ nested INSIDE a run is not a second game
+    (root / runs[0] / "workdir" / "logs").mkdir(parents=True)
+    assert list_games(str(root)) == sorted(runs)
+
+
 def test_transcript_folds_into_turns(tmp_path: Path) -> None:
     game = load_game(_make_experiment(tmp_path), "ls20")
     assert len(game.turns) == 2
