@@ -146,6 +146,20 @@ class MiniGridProblem(BaseProblem):
             )
         return _PROMPT.read_text(encoding="utf-8").replace("{task}", task_name)
 
+    def secret_modules(self) -> tuple[str, ...]:
+        """Hide the ``minigrid`` engine from the agent + eval sandboxes.
+
+        MiniGrid is pip-installed in the framework venv, so without this the sandbox (which
+        binds the interpreter prefix so Python can run) would expose it - and a nasty agent
+        could ``import minigrid; gymnasium.make(<task>)`` to RECONSTRUCT the exact env in-process,
+        bypassing the HTTP-only boundary entirely (read layouts, solve offline, replay). Denying
+        read on the package dir makes ``import minigrid`` fail, which also breaks
+        ``gymnasium.make("MiniGrid-*")`` (the id only registers once ``minigrid`` is imported).
+        The env is reached only over HTTP, so nothing legitimate in the sandbox needs it:
+        ``render_frame`` runs on the trusted parent side, and the eval child never imports it.
+        """
+        return ("minigrid",)
+
     def config_kwargs(self) -> dict[str, Any]:
         return {"fully_obs": self._fully_obs}
 

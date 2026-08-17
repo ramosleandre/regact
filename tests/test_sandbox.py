@@ -155,6 +155,41 @@ def test_deny_read_carves_game_packages_out_of_the_allowed_venv() -> None:
     assert "--tmpfs /usr" in " ".join(bw)
 
 
+@pytest.mark.skipif(
+    detect() is not SandboxRuntime.BWRAP, reason="minigrid deny-read e2e needs a real bwrap host"
+)
+def test_minigrid_engine_is_unreadable_under_the_sandbox(tmp_path: Path) -> None:
+    """End-to-end: with ``minigrid`` in deny_read (as MiniGridProblem.secret_modules() sets), an
+    agent under the sandbox cannot read its encodings, env-class docs, or gymnasium.make() the env
+    - closing the reconstruct-the-env-in-process exploit at the OS level, not just via prose. A
+    generic dep (gymnasium) still imports, so the venv is not broadly broken.
+    """
+    pytest.importorskip("minigrid")
+    import regact
+    from regact.orchestration.task import _secret_module_paths
+    from regact.problems.minigrid.problem import MiniGridProblem
+
+    src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+    deny = _secret_module_paths(MiniGridProblem().secret_modules())
+    assert deny, "minigrid installed but its path did not resolve"
+
+    def blocked(code: str) -> bool:
+        argv = wrap_argv(
+            SandboxRuntime.BWRAP,
+            [sys.executable, "-c", code],
+            workdir=str(tmp_path),
+            allow_read=[src],
+            deny_read=deny,
+        )
+        return subprocess.run(argv, capture_output=True, text=True, timeout=60).returncode != 0
+
+    assert blocked("from minigrid.core.constants import OBJECT_TO_IDX")  # encodings hidden
+    assert blocked("from minigrid.envs import DoorKeyEnv")  # task rules (docstrings) hidden
+    make = "import minigrid, gymnasium; gymnasium.make('MiniGrid-DoorKey-8x8-v0')"
+    assert blocked(make)  # cannot reconstruct the env in-process
+    assert not blocked("import gymnasium")  # a generic dependency is still importable
+
+
 def test_detect_returns_a_known_runtime() -> None:
     assert detect() in set(SandboxRuntime)
 

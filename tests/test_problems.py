@@ -39,6 +39,13 @@ def test_minigrid_config_kwargs_roundtrip() -> None:
     assert rebuilt.config_kwargs() == kwargs
 
 
+def test_minigrid_hides_the_engine_from_the_sandbox() -> None:
+    """MiniGrid must be a secret module (like ARC's arcengine): otherwise an agent could
+    ``import minigrid; gymnasium.make(<task>)`` to reconstruct the exact env in-process and
+    bypass the HTTP-only boundary. The end-to-end deny-read proof is in test_sandbox.py."""
+    assert MiniGridProblem().secret_modules() == ("minigrid",)
+
+
 def test_minigrid_catalogue_matches_gameagents_sizes() -> None:
     assert len(ALL_MINIGRID_TASKS) == 72
     assert len(LITE_MINIGRID_TASKS) == 20
