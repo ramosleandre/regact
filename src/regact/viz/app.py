@@ -35,9 +35,7 @@ def build_app(experiment_dir: str) -> FastAPI:
         out = []
         for name in reader.list_games(experiment_dir):
             game = reader.load_game(experiment_dir, name)
-            out.append(
-                {"name": name, "state": game.state, "metrics": game_metrics(game)}
-            )
+            out.append({"name": name, "state": game.state, "metrics": game_metrics(game)})
         return {"experiment": root.name, "games": out}
 
     def _require_game(name: str) -> None:
@@ -64,10 +62,7 @@ def build_app(experiment_dir: str) -> FastAPI:
         _require_game(name)
         view = reader.load_game(experiment_dir, name)
         return {
-            "files": [
-                dataclasses.asdict(a)
-                for a in reader.list_artifacts(experiment_dir, name)
-            ],
+            "files": [dataclasses.asdict(a) for a in reader.list_artifacts(experiment_dir, name)],
             "submissions": [dataclasses.asdict(s) for s in view.submissions],
         }
 
@@ -85,9 +80,7 @@ def build_app(experiment_dir: str) -> FastAPI:
         path = (root / game / "workdir" / "submissions" / submission / filename).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file():
             raise HTTPException(status_code=404, detail="video not found")
-        return FileResponse(
-            path, media_type="video/mp4", headers={"Cache-Control": "no-store"}
-        )
+        return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
     return app
@@ -95,21 +88,15 @@ def build_app(experiment_dir: str) -> FastAPI:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="regact.viz")
-    parser.add_argument(
-        "--experiment", required=True, help="Path to an experiment dir."
-    )
+    parser.add_argument("--experiment", required=True, help="Path to an experiment dir.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8030)
     args = parser.parse_args(argv)
 
     import uvicorn
 
-    print(
-        f"regact viz → http://{args.host}:{args.port}  (experiment: {args.experiment})"
-    )
-    uvicorn.run(
-        build_app(args.experiment), host=args.host, port=args.port, log_level="warning"
-    )
+    print(f"regact viz → http://{args.host}:{args.port}  (experiment: {args.experiment})")
+    uvicorn.run(build_app(args.experiment), host=args.host, port=args.port, log_level="warning")
     return 0
 
 

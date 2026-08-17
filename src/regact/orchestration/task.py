@@ -305,7 +305,11 @@ async def run_task(
 
             mirror: LoopbackMirror | None = None
             env_port = _loopback_port(conn.base_url)
-            if net_isolation and not in_process and resolve(requested_runtime) is SandboxRuntime.BWRAP:  # noqa: E501
+            if (
+                net_isolation
+                and not in_process
+                and resolve(requested_runtime) is SandboxRuntime.BWRAP
+            ):
                 mirror = LoopbackMirror()
 
             eval_ports = [port for port in (env_port,) if port]

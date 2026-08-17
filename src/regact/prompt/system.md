@@ -43,7 +43,7 @@ An `Obs` has:
 
 ```python
 env = make_env()
-obs = env.current()          # the current state, without spending an action
+obs = env.current()  # the current state, without spending an action
 obs = env.step(obs.available_actions[0])
 print(obs.reward, obs.is_done)
 ```

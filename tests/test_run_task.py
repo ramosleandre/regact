@@ -154,12 +154,8 @@ def test_network_isolation_knob() -> None:
 
     assert _network_isolation(cfg(sandbox=True)) is True  # default: isolate under sandbox
     assert _network_isolation(cfg(sandbox=False)) is False  # no sandbox -> nothing to isolate
-    assert (
-        _network_isolation(cfg(sandbox=True, sandbox_opts={"network_isolation": False})) is False
-    )
-    assert (
-        _network_isolation(cfg(sandbox=True, sandbox_opts={"network_isolation": True})) is True
-    )
+    assert _network_isolation(cfg(sandbox=True, sandbox_opts={"network_isolation": False})) is False
+    assert _network_isolation(cfg(sandbox=True, sandbox_opts={"network_isolation": True})) is True
 
 
 async def test_run_task_sandbox_true_fails_when_no_backend(
