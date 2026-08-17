@@ -139,6 +139,29 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
     assert any(e["event"] == "hook_executed" for e in events)
 
 
+def test_network_isolation_knob() -> None:
+    """`sandbox_opts.network_isolation=false` keeps the fs sandbox but drops the net namespace;
+    it is meaningless without sandbox. (The interim for an offline node while the loopback bridge
+    is debugged.)"""
+    from regact.orchestration.task import _network_isolation
+
+    def cfg(**over: Any) -> RunConfig:
+        base: dict[str, Any] = {
+            "agent": AgentConfig(name=AgentName.ALAN),
+            "problem": ProblemConfig(name="minigrid"),
+        }
+        return RunConfig(**{**base, **over})
+
+    assert _network_isolation(cfg(sandbox=True)) is True  # default: isolate under sandbox
+    assert _network_isolation(cfg(sandbox=False)) is False  # no sandbox -> nothing to isolate
+    assert (
+        _network_isolation(cfg(sandbox=True, sandbox_opts={"network_isolation": False})) is False
+    )
+    assert (
+        _network_isolation(cfg(sandbox=True, sandbox_opts={"network_isolation": True})) is True
+    )
+
+
 async def test_run_task_sandbox_true_fails_when_no_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -119,6 +119,19 @@ def _requested_runtime(config: RunConfig) -> SandboxRuntime:
     return SandboxRuntime(backend) if backend else SandboxRuntime.AUTO
 
 
+def _network_isolation(config: RunConfig) -> bool:
+    """Whether to isolate the agent's network: a fresh net namespace (deny_egress ->
+    ``--unshare-net``) + the loopback netbridge + the egress proxy. On by default under sandbox.
+
+    ``sandbox_opts.network_isolation=false`` turns it OFF: the FILESYSTEM anti-cheat
+    (``deny_read`` on the game engine + ``regact.problems``) stays, but the agent shares the host
+    net namespace and reaches the env server on ``127.0.0.1`` directly (no bridge). SAFE ONLY
+    where egress is impossible or acceptable (e.g. an offline HPC compute node) - it removes the
+    egress block, so on a routable host the agent could exfiltrate or fetch answers.
+    """
+    return config.sandbox and bool(config.sandbox_opts.get("network_isolation", True))
+
+
 def _collect_feature_metrics(
     features: list[Feature], deps: RunDeps, logger: RunLogger
 ) -> dict[str, Any]:
@@ -282,9 +295,17 @@ async def run_task(
             if os.path.isdir(problems_dir):
                 deny_read = [*deny_read, problems_dir]
 
+            # Network isolation (a fresh net namespace + the loopback netbridge + the egress
+            # proxy) is on by default under sandbox. ``sandbox_opts.network_isolation=false``
+            # keeps the FILESYSTEM anti-cheat (deny_read: minigrid/problems) but drops the
+            # network namespace, so the agent reaches the env server on host 127.0.0.1 directly
+            # (no netbridge). SAFE ONLY where egress is impossible/acceptable (an offline HPC
+            # node): it removes the egress block, so a routable node could exfiltrate/fetch.
+            net_isolation = _network_isolation(config)
+
             mirror: LoopbackMirror | None = None
             env_port = _loopback_port(conn.base_url)
-            if not in_process and resolve(requested_runtime) is SandboxRuntime.BWRAP:
+            if net_isolation and not in_process and resolve(requested_runtime) is SandboxRuntime.BWRAP:  # noqa: E501
                 mirror = LoopbackMirror()
 
             eval_ports = [port for port in (env_port,) if port]
@@ -299,7 +320,7 @@ async def run_task(
                         requested_runtime,
                         workdir=workdir,
                         allow_read=[src_dir],
-                        deny_egress=True,
+                        deny_egress=net_isolation,
                         deny_read=deny_read,
                         allow_rw=_mirror_sockets(mirror, eval_ports),
                     ),
@@ -346,7 +367,7 @@ async def run_task(
             agent_env = {"PYTHONPATH": os.pathsep.join([workdir, src_dir]), "TMPDIR": agent_tmp}
             egress: EgressProxy | None = None
             egress_hosts = agent.host_egress_hosts()
-            if config.sandbox and egress_hosts:
+            if net_isolation and egress_hosts:
                 egress = EgressProxy(egress_hosts)
                 proxy_url = f"http://127.0.0.1:{await egress.start()}"
                 agent_env |= {
@@ -370,7 +391,7 @@ async def run_task(
                     requested_runtime,
                     workdir=workdir,
                     allow_read=[src_dir, *agent.host_read_paths()],
-                    deny_egress=config.sandbox,
+                    deny_egress=net_isolation,
                     deny_read=deny_read,
                     allow_write_prefixes=agent.host_write_prefixes(),
                     allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
