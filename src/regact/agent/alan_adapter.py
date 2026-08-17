@@ -24,6 +24,12 @@ from regact.agent.events import (
 )
 from regact.obs.errors import ErrorCategory
 
+# Cap a truncation-recovery completion (alancode escalates the output budget to this on a
+# length-truncation). alancode's own default is 64000, window-clamped - ~85min on a 12 tok/s
+# model; 12000 caps it to ~17min, plenty to finish a cut-off turn. Override via
+# ``agent.args.escalated_max_tokens``.
+_DEFAULT_ESCALATED_MAX_TOKENS = 12000
+
 
 def _usage_dict(usage: Any) -> dict[str, Any] | None:
     """Coerce a native usage record into a plain JSON-able dict (``None`` if opaque)."""
@@ -67,7 +73,7 @@ def build_alan_agent(
     extra: dict[str, Any] = {}
     if args.get("context_window") is not None:
         extra["context_window"] = int(args["context_window"])  # env interp can yield a str
-    return AlanCodeAgent(
+    agent = AlanCodeAgent(
         backend=args.get("backend"),  # e.g. "scripted" (+ model=remote → HTTP-driven provider)
         model=model,
         base_url=base_url,
@@ -84,6 +90,15 @@ def build_alan_agent(
         tool_call_format=args.get("tool_call_format"),
         **extra,
     )
+    # escalated_max_tokens is a SETTINGS key, not a constructor kwarg: an unknown ctor kwarg
+    # becomes a backend kwarg and flows to the LLM transport as an API param, silently missing
+    # settings. Apply it via the public settings API after construction (queries read live).
+    escalated = args.get("escalated_max_tokens")
+    value = int(escalated) if escalated is not None else _DEFAULT_ESCALATED_MAX_TOKENS
+    err = agent.update_session_setting("escalated_max_tokens", value)
+    if err is not None:
+        raise RuntimeError(f"alancode rejected escalated_max_tokens={value}: {err}")
+    return agent
 
 
 def map_alan_events(native: Any) -> list[AgentEvent]:

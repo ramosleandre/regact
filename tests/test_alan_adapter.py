@@ -200,6 +200,10 @@ def _fake_alancode(monkeypatch, builtins):
         def __init__(self, **kwargs) -> None:
             captured.update(kwargs)
 
+        def update_session_setting(self, key, value):
+            captured.setdefault("settings", {})[key] = value
+            return None  # error-or-None; None = accepted
+
     fake = types.ModuleType("alancode")
     fake.AlanCodeAgent = FakeAgent
     registry = types.ModuleType("alancode.tools.registry")
@@ -244,3 +248,26 @@ def test_build_alan_agent_restricts_to_bash_only(monkeypatch) -> None:
         args={},
     )
     assert captured["tools"] == [bash]  # only Bash reaches the agent
+
+
+def test_build_alan_agent_sets_escalated_max_tokens(monkeypatch) -> None:
+    """escalated_max_tokens rides the SETTINGS API (not a ctor kwarg, which would leak to the
+    LLM transport). Default applies; agent.args overrides it (string-coerced)."""
+    captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
+    build_alan_agent(
+        cwd=".", model="m", base_url=None, api_key=None, system_prompt=None, extra_tools=[], args={}
+    )
+    assert captured["settings"]["escalated_max_tokens"] == 12000  # default
+    assert "escalated_max_tokens" not in captured  # NOT a constructor kwarg
+
+    captured2 = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
+    build_alan_agent(
+        cwd=".",
+        model="m",
+        base_url=None,
+        api_key=None,
+        system_prompt=None,
+        extra_tools=[],
+        args={"escalated_max_tokens": "9999"},
+    )
+    assert captured2["settings"]["escalated_max_tokens"] == 9999  # override, coerced to int
