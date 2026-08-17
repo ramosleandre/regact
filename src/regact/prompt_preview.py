@@ -21,6 +21,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from regact.agent.capabilities import TOOL_PROTOCOLS
 from regact.config.schema import ControllerConfig, InfoMode, Lifecycle, ObsMode
 from regact.env.wrapped_env import WrappedEnv
 from regact.features.base import build_features
@@ -122,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tool-protocol",
         default="bash_block",
-        choices=["native", "client_cli", "bash_block"],
+        choices=list(TOOL_PROTOCOLS),
         help="how the agent invokes tools (default: bash_block, the swegrid fenced-block style)",
     )
     parser.add_argument(

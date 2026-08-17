@@ -8,7 +8,25 @@ data-driven.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
+
+# How the agent invokes tools. Selects BOTH the prompt's tool-invocation fragment AND how
+# framework actions (submit/exit) are wired, so no agent is hardcoded anywhere:
+#   "native"     - in-process Python Tool objects (only the scripted test backend); the loop
+#                  runs the framework tools and the prompt says to call them directly.
+#   "client_cli" - a subprocess CLI agent with native file/bash tools (Claude, Codex) that
+#                  reaches the framework tools via the workdir control CLI
+#                  (`python framework/control.py <Tool>`); the prompt lists those commands.
+#   "bash_block" - a bash-only agent (Alan, Mini-SWE-Agent style) that writes ONE fenced
+#                  ```bash block per turn (alancode's BashBlockFormat extracts + runs it);
+#                  the prompt teaches that convention + shell idioms + the control commands.
+#   "hermes_xml" - same bash-only agent, but taught to emit its one command as a Qwen/hermes
+#                  `<tool_call><function=Bash><parameter=command>` call - so an RL-locked model
+#                  that emits its native markup regardless is met by a matching prompt + parser.
+# The bash_block-family dialects (bash_block, hermes_xml) differ ONLY in the markup the model
+# uses for its single bash command; per-served-model selection is `agent.args.tool_protocol`.
+ToolProtocol = Literal["native", "client_cli", "bash_block", "hermes_xml"]
+TOOL_PROTOCOLS: tuple[str, ...] = get_args(ToolProtocol)
 
 
 @dataclass(frozen=True)
@@ -19,17 +37,7 @@ class Capabilities:
     #   "replace" — we own the whole prompt (Alan custom_system_prompt)
     #   "append"  — we add to the backend's base prompt (Claude --append-system-prompt)
     system_prompt: Literal["replace", "append"]
-    # How the agent invokes tools. Selects BOTH the prompt's tool-invocation fragment AND how
-    # framework actions (submit/exit) are wired, so no agent is hardcoded anywhere:
-    #   "native"     - in-process Python Tool objects (only the scripted test backend); the loop
-    #                  runs the framework tools and the prompt says to call them directly.
-    #   "client_cli" - a subprocess CLI agent with native file/bash tools (Claude, Codex) that
-    #                  reaches the framework tools via the workdir control CLI
-    #                  (`python framework/control.py <Tool>`); the prompt lists those commands.
-    #   "bash_block" - a bash-only agent (Alan, Mini-SWE-Agent style) that writes ONE fenced
-    #                  ```bash block per turn (alancode's BashBlockFormat extracts + runs it);
-    #                  the prompt teaches that convention + shell idioms + the control commands.
-    tool_protocol: Literal["native", "client_cli", "bash_block"]
+    tool_protocol: ToolProtocol
     permission_hooks: bool  # supports PreToolUse hooks (path confinement, etc.)
     streams_tool_calls: bool  # surfaces ToolCall events in its stream
     supports_inject: bool  # accepts mid-turn injected messages

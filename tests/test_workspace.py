@@ -211,6 +211,13 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
     assert "framework/control.py SubmitSolution" in bash  # submit/exit folded in
     assert "## Framework tools" not in bash  # merged away
 
+    # A bash-only dialect: hermes_xml teaches the same one-command-per-turn loop with the
+    # Qwen/hermes <tool_call> markup instead of a fenced block; submit/exit fold in the same way.
+    hermes = build("hermes_xml")
+    assert "<tool_call>" in hermes and "<function=Bash>" in hermes
+    assert "framework/control.py SubmitSolution" in hermes
+    assert "```bash" not in hermes  # not the fenced-block dialect
+
     native = build("client_cli")
     assert "## Framework tools" in native and "cat > code_library" not in native
 

@@ -12,8 +12,9 @@ carries only the dynamic first observation. To change wording, edit the markdown
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
+from regact.agent.capabilities import ToolProtocol
 from regact.config.schema import InfoMode, Lifecycle
 from regact.features.base import Feature, FeatureContext
 
@@ -27,9 +28,11 @@ _LIFECYCLE_MD = {
     Lifecycle.SINGLE_INSTANCE: _PROMPT_DIR / "lifecycle_single.md",
     Lifecycle.MULTI_INSTANCE: _PROMPT_DIR / "lifecycle_multi.md",
 }
-# One fragment per tool_protocol (native reads none - it just calls the tools directly).
+# One fragment per bash-only dialect (native/client_cli read none - see _control_channel_block).
+# Each teaches the same one-command-per-turn loop; they differ only in the tool-call markup.
 _TERMINAL_MD = {
-    "bash_block": _PROMPT_DIR / "bash_block_terminal.md",  # swegrid: fenced-block loop + idioms
+    "bash_block": _PROMPT_DIR / "bash_block_terminal.md",  # swegrid: fenced ```bash block
+    "hermes_xml": _PROMPT_DIR / "hermes_xml_terminal.md",  # Qwen/hermes <tool_call> markup
 }
 _FEATURES_INTRO = "# Features :\n\nYou are given the following features to help you."
 
@@ -46,7 +49,7 @@ class PromptBuilder:
         controller: Controller | None = None,
         lifecycle: Lifecycle,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
-        tool_protocol: Literal["native", "client_cli", "bash_block"] = "native",
+        tool_protocol: ToolProtocol = "native",
         tool_names: list[str] | None = None,
     ) -> str:
         """The full static brief: framework role + game + controller + features + control +
@@ -85,21 +88,22 @@ class PromptBuilder:
 
 
 def _control_channel_block(
-    tool_protocol: Literal["native", "client_cli", "bash_block"],
+    tool_protocol: ToolProtocol,
     tool_names: list[str],
 ) -> str:
     """How the agent invokes tools - selected by the agent's ``tool_protocol``, never by a
     feature or a concrete agent name.
 
     Generic: lists the tool NAMES (from the run's tools) and the invocation the protocol
-    supports; it never imports a tool or a feature type. ``bash_block`` reads its whole
-    terminal fragment (fenced-block loop + shell idioms) and folds submit/exit into it.
+    supports; it never imports a tool or a feature type. A bash-only dialect (bash_block,
+    hermes_xml) reads its whole terminal fragment (one-command-per-turn loop + shell idioms)
+    and folds submit/exit in; the framework actions are the same shell commands in either.
     """
     if not tool_names:
         return ""
-    if tool_protocol == "bash_block":
+    if tool_protocol in _TERMINAL_MD:
         commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
-        terminal = _TERMINAL_MD["bash_block"].read_text(encoding="utf-8")
+        terminal = _TERMINAL_MD[tool_protocol].read_text(encoding="utf-8")
         return terminal.replace("{control_commands}", commands).strip()
     if tool_protocol == "client_cli":
         lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)

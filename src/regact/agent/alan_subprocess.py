@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 
 from regact.agent.alan_runner import FATAL, READY, TURN_END
 from regact.agent.base import CodeAgent
-from regact.agent.capabilities import Capabilities
+from regact.agent.capabilities import TOOL_PROTOCOLS, Capabilities
 from regact.agent.events import AgentError, AgentEvent
 from regact.obs.errors import ErrorCategory
 from regact.obs.transcript import event_from_json
@@ -155,11 +155,16 @@ class AlanSubprocessAgent(CodeAgent):
         self._proc = None
 
     def capabilities(self) -> Capabilities:
+        # Prompt dialect, config-driven: default bash_block, override per served model via
+        # ``agent.args.tool_protocol`` (must match alancode's tool_call_format parser). See
+        # ToolProtocol for the dialects.
+        protocol = self._args.get("tool_protocol", "bash_block")
+        if protocol not in TOOL_PROTOCOLS:
+            raise ValueError(f"unknown agent.args.tool_protocol={protocol!r}; expected one of "
+                             f"{TOOL_PROTOCOLS}")
         return Capabilities(
             system_prompt="replace",  # alancode takes a custom_system_prompt
-            # bash-only + framework tools over the workdir CLI; the model writes a fenced
-            # ```bash block per turn (needs alancode tool_call_format=bash_block to parse it).
-            tool_protocol="bash_block",
+            tool_protocol=protocol,
             permission_hooks=False,  # alancode's hooks are not reachable across the boundary
             streams_tool_calls=True,
             supports_inject=True,  # queued, delivered on the next turn

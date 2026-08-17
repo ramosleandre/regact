@@ -86,6 +86,18 @@ def test_capabilities_route_tools_through_the_control_channel() -> None:
     assert caps.system_prompt == "replace"
 
 
+def test_tool_protocol_is_selectable_per_model_via_args() -> None:
+    """The prompt dialect is un-hardcoded: `agent.args.tool_protocol` picks the markup a served
+    model is taught (default bash_block), so an RL-locked model meets a matching prompt+parser.
+    An unknown value fails loud rather than silently mis-prompting a whole bench run."""
+    assert AlanSubprocessAgent({"tool_protocol": "hermes_xml"}).capabilities().tool_protocol == (
+        "hermes_xml"
+    )
+    assert AlanSubprocessAgent({}).capabilities().tool_protocol == "bash_block"  # unchanged default
+    with pytest.raises(ValueError, match="tool_protocol"):
+        AlanSubprocessAgent({"tool_protocol": "nope"}).capabilities()
+
+
 def test_fatal_frame_becomes_an_agent_error() -> None:
     """A backend fault in the child surfaces as a normalized error, not a lost turn."""
     event = AlanSubprocessAgent._to_event({"type": FATAL, "message": "no model"})
