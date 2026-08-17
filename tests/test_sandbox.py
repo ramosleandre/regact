@@ -190,6 +190,33 @@ def test_minigrid_engine_is_unreadable_under_the_sandbox(tmp_path: Path) -> None
     assert not blocked("import gymnasium")  # a generic dependency is still importable
 
 
+@pytest.mark.skipif(
+    detect() is not SandboxRuntime.BWRAP, reason="regact.problems deny-read e2e needs bwrap"
+)
+def test_regact_problems_hidden_while_the_rest_of_regact_imports(tmp_path: Path) -> None:
+    """The agent needs regact.envclient/controllers to run, but never regact.problems (the
+    game wrappers, which leak the game + obs format). deny_read on that one subpackage hides
+    it while the rest of regact - on allow_read - stays importable. (task.py wires this.)"""
+    import regact
+
+    src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+    problems = os.path.realpath(os.path.join(src, "regact", "problems"))
+
+    def rc(code: str) -> int:
+        argv = wrap_argv(
+            SandboxRuntime.BWRAP,
+            [sys.executable, "-c", code],
+            workdir=str(tmp_path),
+            allow_read=[src],
+            deny_read=[problems],
+        )
+        return subprocess.run(argv, capture_output=True, text=True, timeout=60).returncode
+
+    assert rc("from regact.envclient.client import EnvClient") == 0  # agent still runs
+    assert rc("from regact.controllers.executor import run_episodes_raw") == 0  # eval still runs
+    assert rc("import regact.problems.minigrid.problem") != 0  # the game wrapper is hidden
+
+
 def test_detect_returns_a_known_runtime() -> None:
     assert detect() in set(SandboxRuntime)
 

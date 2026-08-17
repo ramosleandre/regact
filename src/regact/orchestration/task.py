@@ -256,6 +256,13 @@ async def run_task(
             )
             src_dir = _regact_src_dir()
             deny_read = _secret_module_paths(problem.secret_modules())
+            # Hide regact's OWN problem wrappers from the sandbox. The agent needs
+            # ``regact.envclient``/``regact.controllers`` to run, but never ``regact.problems``
+            # (the game-side logic + obs format); reading it leaks the game. src_dir is on
+            # allow_read so the rest of regact stays importable; this carves just the games out.
+            problems_dir = os.path.realpath(os.path.join(src_dir, "regact", "problems"))
+            if os.path.isdir(problems_dir):
+                deny_read = [*deny_read, problems_dir]
 
             mirror: LoopbackMirror | None = None
             env_port = _loopback_port(conn.base_url)
