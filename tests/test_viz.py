@@ -60,6 +60,28 @@ def test_transcript_folds_into_turns(tmp_path: Path) -> None:
     assert first.thinkings == ["let me probe"] and first.texts == ["Exploring."]
 
 
+def test_result_pairs_across_a_turn_boundary(tmp_path: Path) -> None:
+    # Per-completion pattern (the alan adapter closes every completion with a
+    # TurnComplete): a ToolResult arrives AFTER its call's turn was flushed, and must
+    # still pair to that call (persistent id map). Each completion is its own turn.
+    transcript = [
+        {"type": "ToolCall", "id": "a", "name": "Bash", "input": {"command": "ls"}},
+        {"type": "TurnComplete", "usage": {"output_tokens": 3}},
+        {"type": "ToolResult", "id": "a", "output": "files", "is_error": False},
+        {"type": "ToolCall", "id": "b", "name": "Bash", "input": {"command": "cat x"}},
+        {"type": "TurnComplete", "usage": {"output_tokens": 4}},
+        {"type": "ToolResult", "id": "b", "output": "boom", "is_error": True},
+    ]
+    game = tmp_path / "exp" / "g"
+    (game / "logs").mkdir(parents=True)
+    (game / "logs" / "experiment_state.json").write_text("{}")
+    (game / "logs" / "transcript.jsonl").write_text("\n".join(json.dumps(e) for e in transcript))
+    view = load_game(str(tmp_path / "exp"), "g")
+    assert len(view.turns) == 2  # one turn per completion, not one giant turn
+    assert view.turns[0].tools[0].result == "files"  # paired across the flush boundary
+    assert view.turns[1].tools[0].result == "boom" and view.turns[1].tools[0].is_error
+
+
 def test_metrics_proxies(tmp_path: Path) -> None:
     m = game_metrics(load_game(_make_experiment(tmp_path), "ls20"))
     assert m["n_turns"] == 2

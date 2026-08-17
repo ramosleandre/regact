@@ -195,11 +195,13 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
     by_id: dict[str, ToolCallView] = {}
 
     def flush() -> None:
-        nonlocal current, by_id
+        nonlocal current
         if current.items or current.usage or current.error:
             turns.append(current)
         current = TurnView()
-        by_id = {}
+        # by_id is NOT reset: the alan adapter emits a TurnComplete per completion, so a
+        # ToolResult can arrive a turn after its ToolCall and must still pair to it (ids
+        # are unique per call, so a persistent map cannot mis-pair).
 
     for event in events:
         kind = event.get("type")

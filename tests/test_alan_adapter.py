@@ -110,9 +110,12 @@ def test_terminal_message_derives_turn_complete() -> None:
     assert turn.usage == {"input_tokens": 10, "output_tokens": 2}
 
 
-def test_message_with_tool_call_has_no_turn_complete() -> None:
+def test_message_with_tool_call_ends_with_turn_complete() -> None:
+    # Every completion is a turn boundary (one completion = one viz turn), so a tool-call
+    # message also closes with a TurnComplete carrying that completion's usage.
     msg = AssistantMessage([TextBlock("running"), ToolUseBlock("i", "Bash", {})])
-    assert not any(isinstance(e, TurnComplete) for e in map_alan_events(msg))
+    events = map_alan_events(msg)
+    assert [type(e).__name__ for e in events] == ["TextDelta", "ToolCall", "TurnComplete"]
 
 
 def test_assistant_thinking_only() -> None:
@@ -161,13 +164,14 @@ def test_full_turn_event_order() -> None:
     assert [type(e).__name__ for e in events] == [
         "TextDelta",
         "ToolCall",
+        "TurnComplete",  # the tool-call completion closes its own turn
         "ToolResult",
         "TextDelta",
         "TurnComplete",
     ]
     assert events[0].text == "I'll run X"  # once, not once per delta plus once assembled
-    assert events[2].id == "t1" and events[2].output == "ok"
-    assert events[4].final_text == "Done"
+    assert events[3].id == "t1" and events[3].output == "ok"
+    assert events[5].final_text == "Done"
 
 
 def test_legacy_single_blocks_still_map() -> None:

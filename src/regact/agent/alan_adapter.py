@@ -95,8 +95,8 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
       re-carried verbatim by the assembled message — dropped here so text and
       thinking appear exactly once;
     - assembled ``AssistantMessage`` (a ``.content`` list of TextBlock/ThinkingBlock/
-      ToolUseBlock) — unpacked into its events; when it carries no tool call the
-      query loop ends there, so a ``TurnComplete`` is derived from it;
+      ToolUseBlock) - unpacked into its events and closed with a ``TurnComplete`` that
+      marks the completion boundary (one completion = one turn) and carries its usage;
     - ``UserMessage`` — tool results come back as a ``.content`` list holding
       ``ToolResultBlock`` items, unpacked into ``ToolResult`` events; plain-string
       user messages are model-facing context and map to nothing.
@@ -120,7 +120,6 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
         if getattr(native, "hide_in_api", False):
             return []
         texts: list[str] = []
-        has_tool_call = False
         for block in getattr(native, "content", []) or []:
             bkind = type(block).__name__
             if bkind == "TextBlock":
@@ -133,7 +132,6 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
                     ThinkingDelta(text=getattr(block, "thinking", getattr(block, "text", "")))
                 )
             elif bkind == "ToolUseBlock":
-                has_tool_call = True
                 events.append(
                     ToolCall(
                         id=getattr(block, "id", ""),
@@ -141,13 +139,17 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
                         input=getattr(block, "input", {}) or {},
                     )
                 )
-        if not has_tool_call:
-            events.append(
-                TurnComplete(
-                    final_text="".join(texts),
-                    usage=_usage_dict(getattr(native, "usage", None)),
-                )
+        # One completion = one turn: close every assembled message with a TurnComplete
+        # (carrying its own usage), so the viewer groups per completion and per-turn usage
+        # is accurate. A bash-only agent calls a tool every turn, so gating this on
+        # "no tool call" (the old behaviour) emitted almost none and the viewer collapsed
+        # the whole run into a single "turn".
+        events.append(
+            TurnComplete(
+                final_text="".join(texts),
+                usage=_usage_dict(getattr(native, "usage", None)),
             )
+        )
         return events
     if kind == "UserMessage":
         content = getattr(native, "content", None)
