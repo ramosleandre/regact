@@ -82,6 +82,9 @@ done
 export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
 EXTRA_ARGS=("agent.args.context_window=${CONTEXT_WINDOW}")
 [ -n "${TOOL_CALL_FORMAT}" ] && EXTRA_ARGS+=("+agent.args.tool_call_format=${TOOL_CALL_FORMAT}")
+# Per-run hydra overrides forwarded from the sbatch (max_output_tokens, escalated_max_tokens,
+# tool_protocol, sandbox_opts.*, limits.*); space-separated, word-split into the arg array.
+[ -n "${EXTRA_HYDRA:-}" ] && EXTRA_ARGS+=(${EXTRA_HYDRA})
 
 IFS=',' read -ra TASKS <<< "${TASK_NAMES}"
 WORK_DIR="$(mktemp -d)"  # per-task exit codes + unique Hydra run dirs (outside experiments/)
