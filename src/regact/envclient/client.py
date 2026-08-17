@@ -32,7 +32,13 @@ class EnvClient:
         # contention a single env call can exceed a short budget. Overridable via
         # REGACT_ENV_CLIENT_TIMEOUT_S.
         timeout = float(os.getenv("REGACT_ENV_CLIENT_TIMEOUT_S", "120"))
-        return cls(httpx.Client(base_url=base_url, timeout=timeout), game_id)
+        # No HTTP keep-alive pool: a pooled connection reused across the bwrap ``--unshare-net``
+        # loopback bridge hangs once the (slow) model idles long enough for the env server to
+        # close the idle connection - httpx then reuses the dead pooled socket. A fresh connection
+        # per request is the multi-connection path the bridge handles cleanly; localhost setup cost
+        # is negligible against a model turn. (Direct, non-bridged runs are unaffected either way.)
+        limits = httpx.Limits(max_keepalive_connections=0)
+        return cls(httpx.Client(base_url=base_url, timeout=timeout, limits=limits), game_id)
 
     def reset(self, *, seed: int | None = None) -> Obs:
         return self._apply(self._post("reset", {"seed": seed}))
