@@ -32,6 +32,18 @@ ToolProtocol = Literal["native", "client_cli", "bash_block", "hermes_xml", "glm"
 TOOL_PROTOCOLS: tuple[str, ...] = get_args(ToolProtocol)
 
 
+def uses_control_cli(protocol: ToolProtocol) -> bool:
+    """Whether framework tools (SubmitSolution/ExitTask) reach the agent over the workdir control
+    CLI (``framework/control.py`` -> the env server's ``/control`` route) instead of as in-process
+    loop tools. Every protocol EXCEPT the in-process ``native`` backend does. This is the single
+    source of truth two layers must share: the prompt fragment (``builder``) that tells the model
+    HOW to call a framework tool, and the control-channel BINDING (``task.py`` -> ``bind_control``)
+    that makes that call answerable. If they disagree, an agent is taught to hit a channel that was
+    never bound and every submit/exit 503s - the seam bug that hid glm/hermes_xml behind the
+    final-eval. Adding a new dialect updates ``ToolProtocol`` only; both layers follow from here."""
+    return protocol != "native"
+
+
 @dataclass(frozen=True)
 class Capabilities:
     """Static description of one backend's surface."""

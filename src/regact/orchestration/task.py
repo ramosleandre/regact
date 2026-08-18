@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent, build_agent
+from regact.agent.capabilities import uses_control_cli
 from regact.config.schema import (
     AgentName,
     Lifecycle,
@@ -352,9 +353,11 @@ async def run_task(
 
             agent = agent or build_agent(config.agent)
             caps = agent.capabilities()
-            # A subprocess agent (bash_block/client_cli) reaches the framework tools over the
-            # workdir control CLI; only the in-process "native" backend takes them as loop tools.
-            if caps.tool_protocol in ("bash_block", "client_cli"):
+            # Every non-native protocol reaches the framework tools over the workdir control CLI, so
+            # the channel MUST be bound for it (uses_control_cli is the shared predicate the prompt
+            # builder keys off too - see its docstring). Only the in-process "native" backend takes
+            # the tools as loop tools directly.
+            if uses_control_cli(caps.tool_protocol):
                 server.bind_control(task_name, tools, cwd=workdir)
                 loop_tools: list[Tool] = []
             elif caps.executes_tools:

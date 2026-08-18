@@ -235,6 +235,19 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
     assert "## Framework tools" in native and "cat > code_library" not in native
 
 
+def test_control_cli_prompt_and_binding_agree_for_every_protocol() -> None:
+    """The seam invariant behind the glm 503 bug: a protocol whose PROMPT teaches the workdir
+    control CLI must be exactly one task.py BINDS the channel for - both key off uses_control_cli.
+    Guards every protocol so a new dialect cannot re-teach a channel that was never bound."""
+    from regact.agent.capabilities import TOOL_PROTOCOLS, uses_control_cli
+    from regact.prompt.builder import _control_channel_block
+
+    for protocol in TOOL_PROTOCOLS:
+        block = _control_channel_block(protocol, ["SubmitSolution", "ExitTask"])  # type: ignore[arg-type]
+        teaches_control_cli = "framework/control.py" in block
+        assert teaches_control_cli == uses_control_cli(protocol), protocol  # prompt == binding
+
+
 def test_prompt_builder_drops_empty_feature_fragments() -> None:
     class _Silent(_StubFeature):
         def prompt_fragment(self, ctx: FeatureContext) -> str | None:

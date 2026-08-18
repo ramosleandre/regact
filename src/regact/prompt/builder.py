@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from regact.agent.capabilities import ToolProtocol
+from regact.agent.capabilities import ToolProtocol, uses_control_cli
 from regact.config.schema import InfoMode, Lifecycle
 from regact.features.base import Feature, FeatureContext
 
@@ -102,16 +102,20 @@ def _control_channel_block(
     """
     if not tool_names:
         return ""
-    if tool_protocol in _TERMINAL_MD:
+    # native: in-process loop tools, so the model calls them directly. Every other protocol reaches
+    # them over the workdir control CLI - the SAME split task.py binds on via uses_control_cli (a
+    # channel taught here but not bound there is the seam bug).
+    if not uses_control_cli(tool_protocol):
+        return f"## Framework tools\n\nCall the framework tools directly: {', '.join(tool_names)}."
+    if tool_protocol in _TERMINAL_MD:  # bash-only dialect: fold submit/exit into its fragment
         commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
         terminal = _TERMINAL_MD[tool_protocol].read_text(encoding="utf-8")
         return terminal.replace("{control_commands}", commands).strip()
-    if tool_protocol == "client_cli":
-        lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
-        return (
-            "## Framework tools\n\n"
-            "Run a framework tool from your working directory; each prints its result "
-            "(e.g. your score) to stdout:\n\n"
-            f"{lines}"
-        )
-    return f"## Framework tools\n\nCall the framework tools directly: {', '.join(tool_names)}."
+    # client_cli (Claude/codex): a plain list of the control commands
+    lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
+    return (
+        "## Framework tools\n\n"
+        "Run a framework tool from your working directory; each prints its result "
+        "(e.g. your score) to stdout:\n\n"
+        f"{lines}"
+    )
