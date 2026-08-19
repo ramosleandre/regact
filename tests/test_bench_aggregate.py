@@ -59,6 +59,57 @@ def test_classify_controller_missing_and_unparsable(tmp_path: Path) -> None:
     assert bench_aggregate._classify_controller(no_act) == "unparsable"
 
 
+def test_classify_controller_follows_factored_code_library(tmp_path: Path) -> None:
+    """A thin ``solution.py`` subclass of an agent-written ``code_library`` controller is
+    classified by the real ``act`` in that module - not reported ``unparsable``."""
+    lib = tmp_path / "code_library"
+    lib.mkdir()
+    (lib / "__init__.py").write_text("")
+    (lib / "smart_controller.py").write_text(
+        "class SmartController:\n"
+        "    def act(self, obs):\n"
+        "        for a in obs.available_actions:\n"  # a loop over the obs = reasoned
+        "            return a\n"
+    )
+    sol = tmp_path / "solution.py"
+    sol.write_text(
+        "from code_library.smart_controller import SmartController\n"
+        "class Controller(SmartController):\n    pass\n"
+        "def get_controller():\n    return Controller()\n"
+    )
+    assert bench_aggregate._classify_controller(sol) == "reasoned"
+
+
+def test_classify_controller_follows_transitive_base_and_relative_import(tmp_path: Path) -> None:
+    """The follow chains through a middle module and handles a relative import."""
+    lib = tmp_path / "code_library"
+    lib.mkdir()
+    (lib / "__init__.py").write_text("")
+    (lib / "base_controller.py").write_text(
+        "class BaseController:\n    def act(self, obs):\n        return 1\n"  # constant = trivial
+    )
+    (lib / "smart_controller.py").write_text(
+        "from .base_controller import BaseController\n"
+        "class SmartController(BaseController):\n    pass\n"
+    )
+    sol = tmp_path / "solution.py"
+    sol.write_text(
+        "from code_library.smart_controller import SmartController\n"
+        "class Controller(SmartController):\n    pass\n"
+    )
+    assert bench_aggregate._classify_controller(sol) == "trivial"
+
+
+def test_classify_controller_thin_subclass_without_modules_is_unparsable(tmp_path: Path) -> None:
+    """No local ``act`` and the imported module isn't present -> graceful ``unparsable``."""
+    sol = tmp_path / "solution.py"
+    sol.write_text(
+        "from code_library.smart_controller import SmartController\n"
+        "class Controller(SmartController):\n    pass\n"
+    )
+    assert bench_aggregate._classify_controller(sol) == "unparsable"
+
+
 def _mk_run(task_dir: Path, *, model: str, success: float) -> None:
     """A minimal on-disk run dir: config.json + logs/ + a submitted solution + final result."""
     task_dir.mkdir(parents=True)

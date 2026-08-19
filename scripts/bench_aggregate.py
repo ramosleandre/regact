@@ -80,6 +80,82 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     return list(latest.values())
 
 
+_RANK = {"stub": 0, "trivial": 1, "reasoned": 2}
+
+
+def _classify_act(act: ast.FunctionDef) -> str:
+    """``reasoned`` vs ``trivial`` for a found ``act`` body (the leaf judgement)."""
+    body = [s for s in act.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
+    # Any control flow or bound state is reasoning about the situation.
+    if any(isinstance(n, (ast.If, ast.For, ast.While, ast.Assign, ast.AugAssign)) for n in body):
+        return "reasoned"
+    # A single return: reasoned only if it reads the obs beyond the action list.
+    reads = {
+        n.attr
+        for n in ast.walk(act)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "obs"
+    }
+    return "reasoned" if reads - {"available_actions"} else "trivial"
+
+
+def _resolve_local_module(module: str | None, level: int, current_dir: Path, root: Path) -> Path | None:
+    """The workdir file an import names, or None if it isn't a local module.
+
+    Absolute ``code_library.smart_controller`` -> ``<root>/code_library/smart_controller.py``;
+    relative ``.base_controller`` -> alongside the importing file.
+    """
+    if level:
+        base = current_dir
+        for _ in range(level - 1):
+            base = base.parent
+        parts = module.split(".") if module else []
+        return base.joinpath(*parts).with_suffix(".py") if parts else None
+    if not module:
+        return None
+    return root.joinpath(*module.split(".")).with_suffix(".py")
+
+
+def _classify_source(source: str, current_dir: Path, root: Path, seen: set[Path], depth: int) -> str:
+    """Classify the ``act`` a controller ultimately runs, following subclassing into
+    agent-written local modules when ``solution.py`` is only a thin subclass."""
+    if "raise NotImplementedError" in source:
+        return "stub"
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "unparsable"
+    act = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "act"), None
+    )
+    if act is not None:
+        return _classify_act(act)
+    if depth <= 0:
+        return "unparsable"
+    # No local ``act``: follow each class's base into the local module that defines it.
+    imports = {
+        (alias.asname or alias.name): (node.module, node.level)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    best: str | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for base in (b for b in node.bases if isinstance(b, ast.Name)):
+            info = imports.get(base.id)
+            if info is None:
+                continue
+            path = _resolve_local_module(info[0], info[1], current_dir, root)
+            if path is None or path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            found = _classify_source(path.read_text(encoding="utf-8"), path.parent, root, seen, depth - 1)
+            if best is None or _RANK.get(found, -1) > _RANK.get(best, -1):
+                best = found
+    return best if best is not None else "unparsable"
+
+
 def _classify_controller(solution_path: Path) -> str:
     """Classify the submitted controller by what its ``act`` actually does.
 
@@ -93,33 +169,19 @@ def _classify_controller(solution_path: Path) -> str:
     - ``reasoned``: anything that inspects the obs (``obs.frame``/``obs.info``,
       branching, loops, kept state) to choose the action;
     - ``missing`` / ``unparsable`` when the file is absent or not valid Python.
+
+    When ``solution.py`` is a thin subclass of an agent-written ``code_library/``
+    module (a common pattern for the more sophisticated agents), the real ``act``
+    lives in that module - so the base-class import is followed to classify it,
+    rather than reporting ``unparsable``. The follow needs the sibling modules
+    present (the full workdir); a lone solution.py falls back to ``unparsable``.
     """
     try:
         source = solution_path.read_text(encoding="utf-8")
     except OSError:
         return "missing"
-    if "raise NotImplementedError" in source:
-        return "stub"
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return "unparsable"
-    act = next(
-        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "act"), None
-    )
-    if act is None:
-        return "unparsable"
-    body = [s for s in act.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
-    # Any control flow or bound state is reasoning about the situation.
-    if any(isinstance(n, (ast.If, ast.For, ast.While, ast.Assign, ast.AugAssign)) for n in body):
-        return "reasoned"
-    # A single return: reasoned only if it reads the obs beyond the action list.
-    reads = {
-        n.attr
-        for n in ast.walk(act)
-        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "obs"
-    }
-    return "reasoned" if reads - {"available_actions"} else "trivial"
+    root = solution_path.parent
+    return _classify_source(source, root, root, {solution_path}, depth=5)
 
 
 def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
