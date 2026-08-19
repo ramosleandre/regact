@@ -417,6 +417,9 @@ async def run_task(
                 info_mode=config.problem.info_mode,
                 tool_protocol=caps.tool_protocol,
                 tool_names=[tool.name for tool in tools],
+                # Opt-in tier-2 verbalization hint (empty_response A/B); bench sets the env.
+                verbalize_state=os.environ.get("REGACT_VERBALIZE_STATE", "").strip()
+                not in ("", "0", "false", "False"),
             )
             try:
                 await agent.start(

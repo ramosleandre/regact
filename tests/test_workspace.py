@@ -192,6 +192,28 @@ def test_prompt_builder_system_carries_everything_static() -> None:
     assert "framework/control.py SubmitSolution" in system  # client_cli control block
 
 
+def test_prompt_builder_verbalize_state_is_opt_in() -> None:
+    """The tier-2 verbalization hint (empty_response A/B) is absent by default and appended
+    only when verbalize_state=True."""
+    builder = PromptBuilder()
+
+    def build(verbalize: bool) -> str:
+        return builder.build_system_prompt(
+            _StubProblem(),  # type: ignore[arg-type]
+            "lvl1",
+            [_StubFeature()],
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+            tool_protocol="client_cli",
+            tool_names=["SubmitSolution", "ExitTask"],
+            verbalize_state=verbalize,
+        )
+
+    assert "Keep your working state visible" not in build(False)  # off by default
+    on = build(True)
+    assert "Keep your working state visible" in on
+    assert "carried over between turns" in on
+
+
 def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() -> None:
     """A bash_block agent gets the fenced-block terminal fragment (shell idioms + submit/exit
     folded in); a client_cli agent gets the plain Framework tools block instead."""
