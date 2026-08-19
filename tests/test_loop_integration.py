@@ -149,6 +149,20 @@ async def test_teardown_finalizes_when_agent_exits_without_resubmitting(tmp_path
     assert final["aggregate"]["success_rate"] == 1.0
 
 
+async def test_exit_mid_turn_stops_before_later_calls(tmp_path: Path) -> None:
+    """ExitTask fired MID-turn ends the run at once. alancode runs its whole loop inside one send(),
+    so a later call in the SAME turn (a SubmitSolution after ExitTask) must NOT run - the loop can't
+    wait for the next send to honor the exit. Guards the ARC hang (28min post-ExitTask)."""
+    stack = _Stack(tmp_path)
+    agent = ScriptedAgent(
+        [[ToolCall("c1", "ExitTask", {}), ToolCall("c2", "SubmitSolution", {}), TurnComplete()]]
+    )
+    reason = await stack.run(agent)
+
+    assert reason == "agent_exit"
+    assert stack.experiment.submission_count == 0  # the post-ExitTask submit did NOT run
+
+
 async def test_graceful_stop_still_finalizes(tmp_path: Path) -> None:
     """A stop signal (Ctrl+C) ends the run but still runs teardown — unlike a crash."""
     stack = _Stack(tmp_path)

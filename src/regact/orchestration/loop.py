@@ -274,6 +274,14 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
             _save_state(ctx)  # live: duration + cheat counter update during a long turn
             if outcome.error_category is not None:
                 break  # backend error: stop consuming this turn
+            if ctx.experiment.exit_requested:
+                # ExitTask fired MID-turn: alancode runs its whole loop inside one send(), so the
+                # between-sends _decide_stop would not see the exit until the agent ends the turn
+                # itself - which it may never do before walltime (an ARC run spun 28min post-exit).
+                # abort() ends the send cleanly (backend synthesizes error results, transcript stays
+                # valid); the loop's next _decide_stop returns agent_exit.
+                await ctx.agent.abort()
+                break
     except Exception as exc:  # an unexpected fault in a tool or the adapter
         ctx.logger.log(
             LogComponent.LOOP,
