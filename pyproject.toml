@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 minigrid = ["gymnasium>=0.29", "minigrid>=2.3"]
-arc = ["arc-agi"]
+arc = ["arc-agi>=0.9.9"]  # <0.9 (e.g. Adastra's 0.0.7) lacks arc_agi.OperationMode
 # alancode is installed editable from the sibling repo, e.g.
 #   pip install alancode (wait for it to be published on PyPI) or
 #   pip install -e ../alancode (for local development)
