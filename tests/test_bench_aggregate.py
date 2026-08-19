@@ -80,6 +80,25 @@ def test_classify_controller_follows_factored_code_library(tmp_path: Path) -> No
     assert bench_aggregate._classify_controller(sol) == "reasoned"
 
 
+def test_classify_controller_follows_factory_instantiation(tmp_path: Path) -> None:
+    """No subclass at all - solution.py's get_controller returns a controller imported
+    from an agent-written module. The import is still followed to the real act."""
+    lib = tmp_path / "code_library"
+    lib.mkdir()
+    (lib / "__init__.py").write_text("")
+    (lib / "nav_controller.py").write_text(
+        "class NavController:\n"
+        "    def act(self, obs):\n"
+        "        if obs.frame[0] == 5:\n            return 2\n        return 1\n"
+    )
+    sol = tmp_path / "solution.py"
+    sol.write_text(
+        "from code_library.nav_controller import NavController\n"
+        "def get_controller():\n    return NavController()\n"
+    )
+    assert bench_aggregate._classify_controller(sol) == "reasoned"
+
+
 def test_classify_controller_follows_transitive_base_and_relative_import(tmp_path: Path) -> None:
     """The follow chains through a middle module and handles a relative import."""
     lib = tmp_path / "code_library"

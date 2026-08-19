@@ -131,28 +131,22 @@ def _classify_source(source: str, current_dir: Path, root: Path, seen: set[Path]
         return _classify_act(act)
     if depth <= 0:
         return "unparsable"
-    # No local ``act``: follow each class's base into the local module that defines it.
-    imports = {
-        (alias.asname or alias.name): (node.module, node.level)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        for alias in node.names
-    }
+    # No local ``act``: the real controller lives in an agent-written module that
+    # solution.py either subclasses or instantiates in get_controller. code_library/
+    # is seeded empty, so every locally-importable module is the agent's - follow
+    # each into the workdir and take the strongest ``act`` found (scaffold files have
+    # no ``act`` and contribute nothing).
     best: str | None = None
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
+        if not isinstance(node, ast.ImportFrom):
             continue
-        for base in (b for b in node.bases if isinstance(b, ast.Name)):
-            info = imports.get(base.id)
-            if info is None:
-                continue
-            path = _resolve_local_module(info[0], info[1], current_dir, root)
-            if path is None or path in seen or not path.is_file():
-                continue
-            seen.add(path)
-            found = _classify_source(path.read_text(encoding="utf-8"), path.parent, root, seen, depth - 1)
-            if best is None or _RANK.get(found, -1) > _RANK.get(best, -1):
-                best = found
+        path = _resolve_local_module(node.module, node.level, current_dir, root)
+        if path is None or path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        found = _classify_source(path.read_text(encoding="utf-8"), path.parent, root, seen, depth - 1)
+        if best is None or _RANK.get(found, -1) > _RANK.get(best, -1):
+            best = found
     return best if best is not None else "unparsable"
 
 
