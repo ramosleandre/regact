@@ -40,14 +40,30 @@ _FEATURES_INTRO = "# Features :\n\nYou are given the following features to help 
 # Tier-2 of the empty_response fix (opt-in, for the A/B vs the in-loop nudge alone):
 # silent thinkers lose state because their hidden reasoning is stripped between turns,
 # degenerate to empty answers, and get killed. Teaching up-front verbalization makes
-# them persist state in the visible answer. Gated by ``verbalize_state``.
-_VERBALIZE_MD = (
-    "# Keep your working state visible\n\n"
-    "Your private reasoning is NOT carried over between turns - only your visible answer "
-    "text and your tool calls persist. So begin each turn with one short sentence naming "
-    "your current plan and what you just learned, then make your tool call. If you reason "
-    "silently and act without writing that sentence, you lose track of your own progress."
-)
+# them persist state in the visible answer. Selectable variants (``verbalize_variant``)
+# so the strategy-sweep can A/B their strength: ``v1`` = forceful prose demand,
+# ``v2`` = a mandated THOUGHTS: structure. Both open with the same header so a test /
+# the sweep can detect that the hint is present.
+_VERBALIZE_HEADER = "# Keep your working state visible"
+_VERBALIZE_VARIANTS = {
+    "v1": (
+        f"{_VERBALIZE_HEADER}\n\n"
+        "Your private reasoning is NOT carried over between turns - only your visible answer "
+        "text and your tool calls persist. So you MUST externalize it: before every tool call, "
+        "write two or three plain sentences stating what you just observed, your current plan, "
+        "and why this next action. Never act on silent reasoning alone - the harness discards it "
+        "and you will lose track of your own progress across turns."
+    ),
+    "v2": (
+        f"{_VERBALIZE_HEADER}\n\n"
+        "Your private reasoning is NOT carried over between turns - only your visible answer "
+        "persists. So every turn's answer MUST follow this exact structure:\n"
+        "1. a line `THOUGHTS: <one sentence summarizing your current state and plan>`\n"
+        "2. then your single tool call.\n"
+        "An answer with no THOUGHTS line, or with only a tool call, is invalid - always write "
+        "THOUGHTS first so your state survives into the next turn."
+    ),
+}
 
 
 class PromptBuilder:
@@ -64,7 +80,7 @@ class PromptBuilder:
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         tool_protocol: ToolProtocol = "native",
         tool_names: list[str] | None = None,
-        verbalize_state: bool = False,
+        verbalize_variant: str = "off",
     ) -> str:
         """The full static brief: framework role + game + controller + features + control +
         lifecycle.
@@ -86,8 +102,8 @@ class PromptBuilder:
             sections += fragments
         sections.append(_control_channel_block(tool_protocol, tool_names or []))
         sections.append(_LIFECYCLE_MD[lifecycle].read_text(encoding="utf-8"))
-        if verbalize_state:
-            sections.append(_VERBALIZE_MD)
+        if (hint := _VERBALIZE_VARIANTS.get(verbalize_variant)) is not None:
+            sections.append(hint)
         return "\n\n".join(s.strip() for s in sections if s and s.strip())
 
     def build_first_message(self, rendered_obs: str | None = None) -> str:
