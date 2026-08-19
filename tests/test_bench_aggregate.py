@@ -129,6 +129,24 @@ def test_classify_controller_thin_subclass_without_modules_is_unparsable(tmp_pat
     assert bench_aggregate._classify_controller(sol) == "unparsable"
 
 
+@pytest.mark.parametrize(
+    ("success_rate", "exit_reason", "expected"),
+    [
+        (1.0, "agent_exit", "solve"),
+        (0.6, "agent_exit", "solve"),
+        (0.4, "agent_exit", "genuine-fail"),  # a clean low score is real data
+        (0.0, "agent_exit", "genuine-fail"),
+        (0.0, "agent_api", "harness-killed"),  # empty_response wall - unreliable
+        (None, "agent_api", "harness-killed"),  # killed before a final too
+        (0.0, "walltime_limit", "walltime"),
+        (None, None, "no-final"),  # still running / killed before teardown
+        (None, "loop_crash", "loop_crash"),  # any other terminal state passes through
+    ],
+)
+def test_classify_outcome(success_rate, exit_reason, expected) -> None:
+    assert bench_aggregate._classify_outcome(success_rate, exit_reason) == expected
+
+
 def _mk_run(task_dir: Path, *, model: str, success: float) -> None:
     """A minimal on-disk run dir: config.json + logs/ + a submitted solution + final result."""
     task_dir.mkdir(parents=True)

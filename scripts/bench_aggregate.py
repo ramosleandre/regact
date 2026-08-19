@@ -178,6 +178,38 @@ def _classify_controller(solution_path: Path) -> str:
     return _classify_source(source, root, root, {solution_path}, depth=5)
 
 
+_SOLVE_THRESHOLD = 0.6
+
+
+def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> str:
+    """Whether a cell's score is a trustworthy capability signal.
+
+    The 0.0s are not equal: a model that ended cleanly and genuinely failed is real
+    data, but one the harness killed mid-run (the empty_response reasoning-only-turn
+    bug -> exit ``agent_api``) or that ran out of walltime tells us nothing about
+    capability. Separating them stops the reasoning-model bias (the over-thinkers are
+    the ones killed) from being misread as incapacity.
+
+    - ``solve``: scored at/above the solve threshold - reliable;
+    - ``genuine-fail``: a clean ``agent_exit`` with a sub-threshold score - reliable;
+    - ``harness-killed``: exited ``agent_api`` (the pre-nudge empty_response wall) - UNRELIABLE;
+    - ``walltime``: hit the job walltime before finishing - UNRELIABLE;
+    - ``no-final``: no scored result (still running, or killed before teardown);
+    - the raw exit reason for any other terminal state.
+    """
+    if success_rate is not None and success_rate >= _SOLVE_THRESHOLD:
+        return "solve"
+    if exit_reason == "agent_api":
+        return "harness-killed"
+    if exit_reason == "walltime_limit":
+        return "walltime"
+    if exit_reason == "agent_exit":
+        return "genuine-fail" if success_rate is not None else "no-final"
+    if exit_reason:  # any other terminal state (loop_crash, interrupted, ...)
+        return str(exit_reason)
+    return "no-final"  # no exit reason recorded: still running / killed before teardown
+
+
 def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
     agent = config.get("agent", {})
     model = str(agent.get("model") or "?").removeprefix("openai/")
@@ -202,6 +234,7 @@ def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]
         "model": model,
         "seed": (config.get("problem") or {}).get("seed"),
         "controller": _classify_controller(task_dir / "workdir" / "solution.py"),
+        "outcome": _classify_outcome(aggregate.get("success_rate"), state.get("exit_reason")),
         "success_rate": aggregate.get("success_rate"),
         "n_episodes": aggregate.get("n_episodes"),
         "mean_levels_completed": aggregate.get("mean_levels_completed"),
@@ -248,9 +281,16 @@ def controller_pivot_markdown(rows: list[dict[str, Any]]) -> str:
     return _pivot(rows, "controller")
 
 
+def outcome_pivot_markdown(rows: list[dict[str, Any]]) -> str:
+    """Outcome pivot: whether each cell's score is trustworthy (solve/genuine-fail)
+    or must be discounted (harness-killed/walltime/no-final). Separates the
+    empty_response harness bias from real incapacity - see :func:`_classify_outcome`."""
+    return _pivot(rows, "outcome")
+
+
 _DETAIL_COLUMNS = [
-    "task", "model", "seed", "controller", "success_rate", "exit_reason", "submissions",
-    "tool_calls", "turns", "error_retries", "duration_s", "env_moves", "stamp",
+    "task", "model", "seed", "controller", "outcome", "success_rate", "exit_reason",
+    "submissions", "tool_calls", "turns", "error_retries", "duration_s", "env_moves", "stamp",
 ]
 
 
@@ -281,7 +321,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# Benchmark aggregate: {args.bench_root} ({len(rows)} runs)\n")
     counts = collections.Counter(row["controller"] for row in rows)
     print("Controller states: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
-    print("## Controller written (task x model)\n")
+    outcomes = collections.Counter(row["outcome"] for row in rows)
+    print("Outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())) + "\n")
+    print("## Outcome - is the score trustworthy? (task x model)\n")
+    print("`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response) and "
+          "`walltime` must be discounted / re-run.\n")
+    print(outcome_pivot_markdown(rows))
+    print("\n## Controller written (task x model)\n")
     print(controller_pivot_markdown(rows))
     print("\n## Final success rate (task x model)\n")
     print(pivot_markdown(rows))
