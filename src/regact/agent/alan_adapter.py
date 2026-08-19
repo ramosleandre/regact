@@ -47,6 +47,13 @@ def _result_text(content: Any) -> str:
     return str(content)
 
 
+def _as_bool(value: Any) -> bool:
+    """Coerce a config/env value to bool (Hydra/env pass e.g. the string ``"true"``)."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 def build_alan_agent(
     *,
     cwd: str,
@@ -98,6 +105,18 @@ def build_alan_agent(
     err = agent.update_session_setting("escalated_max_tokens", value)
     if err is not None:
         raise RuntimeError(f"alancode rejected escalated_max_tokens={value}: {err}")
+
+    # Optional empty_response-sweep settings: applied ONLY when the bench sets them, so a
+    # default run still works on an older alancode. Settings (not ctor kwargs) - an unknown
+    # ctor kwarg would silently become an LLM API param (see escalated_max_tokens above); a
+    # rejected setting raises loudly, which is right (a requested sweep arm must not run wrong).
+    for name, cast in (("empty_response_retries", int), ("persist_thinking", _as_bool)):
+        raw = args.get(name)
+        if raw is None:
+            continue
+        err = agent.update_session_setting(name, cast(raw))
+        if err is not None:
+            raise RuntimeError(f"alancode rejected {name}={raw!r}: {err}")
     return agent
 
 

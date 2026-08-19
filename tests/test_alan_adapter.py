@@ -271,3 +271,27 @@ def test_build_alan_agent_sets_escalated_max_tokens(monkeypatch) -> None:
         args={"escalated_max_tokens": "9999"},
     )
     assert captured2["settings"]["escalated_max_tokens"] == 9999  # override, coerced to int
+
+
+def test_build_alan_agent_forwards_sweep_settings(monkeypatch) -> None:
+    """The empty_response-sweep knobs (persist_thinking, empty_response_retries) ride the
+    SETTINGS API - not ctor kwargs, which would leak to the LLM transport - and 'true' coerces
+    to bool."""
+    captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
+    build_alan_agent(
+        cwd=".", model="m", base_url=None, api_key=None, system_prompt=None, extra_tools=[],
+        args={"persist_thinking": "true", "empty_response_retries": "3"},
+    )
+    assert captured["settings"]["persist_thinking"] is True  # string coerced
+    assert captured["settings"]["empty_response_retries"] == 3  # int coerced
+    assert "persist_thinking" not in captured  # NOT a constructor kwarg
+
+
+def test_build_alan_agent_omits_unset_sweep_settings(monkeypatch) -> None:
+    """Unset knobs apply NOTHING, so a default run works on an alancode without them."""
+    captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
+    build_alan_agent(
+        cwd=".", model="m", base_url=None, api_key=None, system_prompt=None, extra_tools=[], args={}
+    )
+    assert "persist_thinking" not in captured["settings"]
+    assert "empty_response_retries" not in captured["settings"]
