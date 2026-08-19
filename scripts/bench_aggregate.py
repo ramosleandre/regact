@@ -52,23 +52,32 @@ def _count_lines(path: Path, *predicates: tuple[str, str]) -> dict[str, int]:
 
 
 def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
-    """One row per (experiment, stamp, task) run dir found under ``root``."""
+    """One row per (experiment, stamp, task) run dir found under ``root``.
+
+    A run dir is any directory that holds a ``config.json`` next to a ``logs/`` or
+    ``workdir/``; they are found at any depth via rglob, so both a flat
+    ``root/exp/stamp/task`` and a model-grouped ``root/model/exp/stamp/task``
+    layout work. Without ``all_stamps``, only the latest stamp per
+    (experiment, task) is kept - the newest rerun wins.
+    """
     rows: list[dict[str, Any]] = []
-    for exp_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        stamps = sorted(
-            p for p in exp_dir.iterdir() if p.is_dir() and not p.is_symlink()
-        )
-        if not stamps:
+    for config_path in sorted(root.rglob("config.json")):
+        task_dir = config_path.parent
+        if not ((task_dir / "logs").is_dir() or (task_dir / "workdir").is_dir()):
+            continue  # a stray config.json, not a run dir
+        config = _read_json(config_path)
+        if config is None:
             continue
-        if not all_stamps:
-            stamps = stamps[-1:]
-        for stamp in stamps:
-            for task_dir in sorted(p for p in stamp.iterdir() if p.is_dir()):
-                config = _read_json(task_dir / "config.json")
-                if config is None:
-                    continue
-                rows.append(_run_row(exp_dir.name, stamp.name, task_dir, config))
-    return rows
+        stamp = task_dir.parent
+        rows.append(_run_row(stamp.parent.name, stamp.name, task_dir, config))
+    if all_stamps:
+        return rows
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (row["experiment"], row["task"])
+        if key not in latest or row["stamp"] > latest[key]["stamp"]:
+            latest[key] = row
+    return list(latest.values())
 
 
 def _classify_controller(solution_path: Path) -> str:
