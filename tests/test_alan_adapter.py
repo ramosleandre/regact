@@ -279,7 +279,12 @@ def test_build_alan_agent_forwards_sweep_settings(monkeypatch) -> None:
     to bool."""
     captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
     build_alan_agent(
-        cwd=".", model="m", base_url=None, api_key=None, system_prompt=None, extra_tools=[],
+        cwd=".",
+        model="m",
+        base_url=None,
+        api_key=None,
+        system_prompt=None,
+        extra_tools=[],
         args={"persist_thinking": "true", "empty_response_retries": "3"},
     )
     assert captured["settings"]["persist_thinking"] is True  # string coerced

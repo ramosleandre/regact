@@ -160,8 +160,9 @@ class AlanSubprocessAgent(CodeAgent):
         # ToolProtocol for the dialects.
         protocol = self._args.get("tool_protocol", "bash_block")
         if protocol not in TOOL_PROTOCOLS:
-            raise ValueError(f"unknown agent.args.tool_protocol={protocol!r}; expected one of "
-                             f"{TOOL_PROTOCOLS}")
+            raise ValueError(
+                f"unknown agent.args.tool_protocol={protocol!r}; expected one of {TOOL_PROTOCOLS}"
+            )
         return Capabilities(
             system_prompt="replace",  # alancode takes a custom_system_prompt
             tool_protocol=protocol,
