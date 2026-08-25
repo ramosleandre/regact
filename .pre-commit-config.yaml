@@ -1,9 +1,17 @@
 # Ruff handles lint + format pre-commit. mypy runs in CI / `make typecheck`
 # (it needs the package installed, which doesn't fit a fast pre-commit hook).
+# rev is pinned to the ruff CI installs (constraints.txt: ruff==0.15.17) so the
+# hook and the CI `Format check` gate never disagree. Activate once per clone with
+# `pre-commit install` (a bare config file does nothing until the git hook exists).
+# `files:` scopes the hooks to src/ + tests/ - exactly what CI lints/formats
+# (`ruff check src tests`). Without it pre-commit would also hit vendored ARC data
+# under environnement/ and scratch scripts CI never checks, blocking every commit.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.15.17
     hooks:
       - id: ruff
         args: [--fix]
+        files: ^(src|tests)/
       - id: ruff-format
+        files: ^(src|tests)/
