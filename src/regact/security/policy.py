@@ -23,6 +23,16 @@ class SecurityPolicy:
 
 _GAME_MODULES = ("arc_agi", "arcengine", "gymnasium", "minigrid")
 _ESCAPE_MODULES = ("importlib", "ctypes")  # extend as new vectors appear
+# Framework internals the agent never needs: scoring + anti-cheat (controllers), the sandbox itself
+# (security), the grading prompt. F1 makes these absent from the agent's namespace; flagging a
+# REFERENCE to them surfaces snoop intent in the viz. (envclient is allowed, so it is not listed.)
+_FRAMEWORK_INTERNAL_PATHS = (
+    "regact/controllers",
+    "regact/security",
+    "regact/prompt",
+    "regact/features",
+    "regact/orchestration",
+)
 
 
 def default_policy(*, extra_imports: Iterable[str] = ()) -> SecurityPolicy:
@@ -40,6 +50,12 @@ def default_policy(*, extra_imports: Iterable[str] = ()) -> SecurityPolicy:
             }
         ),
         forbidden_path_substrings=frozenset(
-            {"environnement", "environment_files", "arcengine/", "arc_agi/"}
+            {
+                "environnement",
+                "environment_files",
+                "arcengine/",
+                "arc_agi/",
+                *_FRAMEWORK_INTERNAL_PATHS,
+            }
         ),
     )

@@ -26,6 +26,12 @@ def test_camera_flags_forbidden_paths_and_imports() -> None:
     assert flag_tool_call("Bash", {"command": "python -c 'import arc_agi'"}, policy)
     # a direct read of the game engine/data source (the in-venv packages) is flagged:
     assert flag_tool_call("shell", {"command": "sed -n 1,9p /x/arcengine/base_game.py"}, policy)
+    # snooping the framework internals (scoring / sandbox / prompt) is flagged, even though F1
+    # already makes them absent from the agent's namespace - the flag surfaces the intent:
+    assert flag_tool_call("Bash", {"command": "cat src/regact/controllers/executor.py"}, policy)
+    assert flag_tool_call("Read", {"file_path": "/a/regact/security/runtime.py"}, policy)
+    # ...but the env client the agent legitimately imports is NOT flagged:
+    assert flag_tool_call("Bash", {"command": "cat src/regact/envclient/client.py"}, policy) == []
     assert flag_tool_call("Bash", {"command": "ls code_library"}, policy) == []
     # precise identifiers only — these benign cases must NOT be flagged (no false positives):
     assert flag_tool_call("Bash", {"command": "ls .. && cd ../foo"}, policy) == []
