@@ -375,20 +375,33 @@ class ArcAgiProblem(BaseProblem):
 
     def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
         info = final_obs.info or {}
+        completed = info.get("levels_completed", 0)
+        total = info.get("win_levels", 0)
         return {
             "success": info.get("state") == "WIN",
             "steps": steps,
-            "levels_completed": info.get("levels_completed", 0),
-            "win_levels": info.get("win_levels", 0),
+            "levels_completed": completed,
+            "win_levels": total,
+            # Graded score for this episode: the fraction of the game's levels it cleared (0..1).
+            "level_fraction": (completed / total) if total else 0.0,
         }
 
     def aggregate_episode_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
         if not episodes:
-            return {"n_episodes": 0, "success_rate": 0.0, "mean_levels_completed": 0.0}
+            return {
+                "n_episodes": 0,
+                "success_rate": 0.0,
+                "win_rate": 0.0,
+                "mean_levels_completed": 0.0,
+            }
         n = len(episodes)
         return {
             "n_episodes": n,
-            "success_rate": sum(bool(e.get("success")) for e in episodes) / n,
+            # success_rate is the mean PROPORTION of levels cleared (graded), not the all-or-nothing
+            # win: 3/6 levels scores 0.5, so partial progress is visible. win_rate keeps the binary
+            # full-win signal (fraction of episodes that cleared every level).
+            "success_rate": sum(e.get("level_fraction", 0.0) for e in episodes) / n,
+            "win_rate": sum(bool(e.get("success")) for e in episodes) / n,
             "mean_levels_completed": sum(e.get("levels_completed", 0) for e in episodes) / n,
         }
 
