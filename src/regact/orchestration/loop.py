@@ -203,6 +203,9 @@ async def _run_teardown_hooks(hooks: list[Hook], reason: str, ctx: _LoopContext)
     for hook in hooks:
         if hook.phase is not HookPhase.TEARDOWN:
             continue
+        ctx.logger.log(
+            LogComponent.EVAL, "INFO", "hook_start", phase="teardown", hook=type(hook).__name__
+        )
         try:
             await hook.run()
         except Exception as exc:

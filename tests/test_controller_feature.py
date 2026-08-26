@@ -5,6 +5,7 @@ builds its own ControllerExecutor from it. So these wire a real client over a
 TestClient + FakeNativeEnv - no LLM, no real game.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -124,6 +125,27 @@ async def test_finalize_hook_skips_when_no_solution(tmp_path: Path) -> None:
     result = await Controller(n_episodes=2, max_moves=100).hooks(deps)[0].run()
     assert result is None
     assert not (tmp_path / "submissions" / "final").exists()
+
+
+async def test_finalize_hook_offloads_eval_to_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the blocking eval MUST be offloaded via ``asyncio.to_thread``. Run inline on
+    the event loop it would starve the netbridge loopback relay, and the sandboxed eval's env
+    calls would ReadTimeout instead of scoring (SubmitSolution already offloads; finalize must
+    too)."""
+    (tmp_path / "solution.py").write_text(_FORWARD)
+    deps = _deps(tmp_path)
+    offloaded: list[object] = []
+    real_to_thread = asyncio.to_thread
+
+    async def _spy(func: object, /, *args: object, **kwargs: object) -> object:
+        offloaded.append(func)
+        return await real_to_thread(func, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(asyncio, "to_thread", _spy)
+    await Controller(n_episodes=1, max_moves=50).hooks(deps)[0].run()
+    assert offloaded, "finalize eval must be offloaded via asyncio.to_thread, not run inline"
 
 
 async def test_default_solution_scores_without_editing(tmp_path: Path) -> None:

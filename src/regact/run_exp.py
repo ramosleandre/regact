@@ -23,9 +23,7 @@ from regact.orchestration.experiment import run_experiment
 def main(cfg: DictConfig) -> None:
     raw: Any = OmegaConf.to_container(cfg, resolve=True)
     config = run_config_from_mapping(raw)
-    reasons = asyncio.run(run_experiment(config))
-    for task, reason in reasons.items():
-        print(f"{task}: {reason}")
+    asyncio.run(run_experiment(config))  # progress + summary go to the console (see obs.console)
 
 
 if __name__ == "__main__":

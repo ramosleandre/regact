@@ -269,7 +269,7 @@ async def run_task(
     async with serve_env(server, task_name, in_process=in_process) as conn:
         with (
             TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
-            RunLogger(logs_dir, task=task_name) as logger,
+            RunLogger(logs_dir, task=task_name, console=True) as logger,
         ):
             _bootstrap_workdir(
                 config,

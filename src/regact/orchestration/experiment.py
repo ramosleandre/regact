@@ -9,9 +9,11 @@ the task list, and runs :func:`run_task` per task through the :class:`Scheduler`
 from __future__ import annotations
 
 import os
+from collections import Counter
 from datetime import datetime
 
 from regact.config.schema import RunConfig
+from regact.obs.console import configure_console_logging, console
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.orchestration.scheduler import Scheduler
 from regact.orchestration.signals import install_stop_signal
@@ -66,12 +68,18 @@ def _link_latest(run_dir: str) -> None:
 
 async def run_experiment(config: RunConfig, *, output_root: str | None = None) -> dict[str, str]:
     """Run every task of the configured problem; return ``{task_name: exit_reason}``."""
+    configure_console_logging()  # silence third-party INFO noise (httpx, uvicorn) on the terminal
     problem = build_problem(config.problem.name, config.problem.kwargs)
     task_names = _resolve_task_names(config, problem.get_task_names())
     root = resolve_run_dir(config, output_root=output_root)
     os.makedirs(root, exist_ok=True)
     _link_latest(root)
 
+    workers = max(1, config.parallel_workers)
+    console(
+        f"{config.agent.name} · {config.problem.name} · {len(task_names)} task(s) · "
+        f"sandbox={config.sandbox} · workers={workers}"
+    )
     with install_stop_signal() as stop:
 
         async def unit(task_name: str) -> str:
@@ -79,4 +87,7 @@ async def run_experiment(config: RunConfig, *, output_root: str | None = None) -
             return await run_task(config, problem, task_name, output_dir=out_dir, stop=stop)
 
         reasons = await Scheduler(config).run(unit, task_names)
-    return {task: str(reason) for task, reason in zip(task_names, reasons, strict=True)}
+    result = {task: str(reason) for task, reason in zip(task_names, reasons, strict=True)}
+    tally = ", ".join(f"{n}x {reason}" for reason, n in Counter(result.values()).items())
+    console(f"complete: {len(result)} task(s) - {tally}")
+    return result

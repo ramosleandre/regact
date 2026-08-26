@@ -1,6 +1,23 @@
-# Claude Code CLI (subscription auth by default).
+# Claude Code CLI backend
 name: claude
-model: opus            # e.g. "opus" / "sonnet" / "claude-opus-4-8"
+
+# --model passed to the CLI: "opus" | "sonnet" | a full id like "claude-opus-4-8".
+model: opus
+
 args:
-  permission_mode: bypassPermissions   # headless: no interactive prompts (deny-list still applies)
-  effort: high                       # low | medium | high | xhigh | max
+  # --permission-mode. bypassPermissions = fully headless (no interactive prompts);
+  # the workdir .claude/settings.json deny-list still confines the agent's file reads.
+  permission_mode: bypassPermissions
+
+  # --effort, the reasoning budget: low | medium | high | xhigh | max.
+  effort: high
+
+  # Caps the CLI's internal thinking budget (MAX_THINKING_TOKENS env var).
+  # null = unset (the CLI's own default budget); an int caps it.
+  max_thinking_tokens: null
+
+  # Isolated config dir: regact copies only .credentials.json in and sets
+  # CLAUDE_CONFIG_DIR here, so the benchmarked agent never sees (or pollutes) your
+  # ~/.claude - global CLAUDE.md, settings, hooks, history, skills, memory. Happens
+  # automatically on a file-based login; this forces it (would drop macOS Keychain auth).
+  claude_home: ~/.regact/claude-home

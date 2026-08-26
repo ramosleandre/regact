@@ -4,6 +4,7 @@ perso_dev/
 preview/
 context/
 contexte/
+scripts/local/bench_regact.sh
 # debug/
 
 # Python

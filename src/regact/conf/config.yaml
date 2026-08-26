@@ -10,6 +10,9 @@ defaults:
   - features: none         # conf/features/*     - OPTIONAL extra capabilities (default: none)
   - _self_
   - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
+  # Prevent Hydra logging
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
 
 parallel_workers: 1     # concurrent tasks; 1 = sequential
 first_obs_in_prompt: false  # true = render the first observation into the first message
@@ -26,3 +29,9 @@ sandbox: true           # true = confine the agent (backend auto-detected: bwrap
                         # Force a backend with +sandbox_opts.backend=<seatbelt|bwrap>.
 output_root: experiments
 experiment_name: dev
+
+# Prevent Hydra `outputs` subdir creation
+hydra:
+  output_subdir: null
+  run:
+    dir: .

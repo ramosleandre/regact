@@ -14,6 +14,7 @@ live in ``features.base``), but is instantiated directly by the orchestrator fro
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -184,7 +185,13 @@ class FinalizeControllerHook(Hook):
         if not os.path.exists(deps.solution_path):
             return None  # nothing was ever written; nothing to finalize
         try:
-            result = _make_executor(deps, shadow_replay=self._shadow_replay).run(
+            # Offload the blocking eval to a thread, exactly as SubmitSolution does: the
+            # netbridge loopback relay runs on THIS event loop, so a synchronous
+            # subprocess.run here would starve it and the sandboxed eval's env calls would
+            # time out (ReadTimeout) instead of scoring.
+            executor = _make_executor(deps, shadow_replay=self._shadow_replay)
+            result = await asyncio.to_thread(
+                executor.run,
                 task_name=deps.experiment.task_name,
                 solution_path=deps.solution_path,
                 output_path=os.path.join(deps.submissions_dir, "final", "results.json"),
