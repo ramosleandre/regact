@@ -25,7 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-minigrid = ["gymnasium>=0.29", "minigrid>=2.3"]
+# networkx + imageio (imageio is a core dep above) are what minigrid[wfc] needs for the
+# WFC procedural envs; the pattern PNGs they read are vendored under problems/minigrid/.
+minigrid = ["gymnasium>=0.29", "minigrid>=2.3", "networkx>=3.0"]
 arc = ["arc-agi>=0.9.9"]  # <0.9 (e.g. Adastra's 0.0.7) lacks arc_agi.OperationMode
 # alancode is installed editable from the sibling repo, e.g.
 #   pip install alancode (wait for it to be published on PyPI) or
@@ -44,7 +46,7 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/regact"]
 # Ship prompt/template markdown alongside the package (read at runtime).
-artifacts = ["**/*.md", "**/*.yaml"]
+artifacts = ["**/*.md", "**/*.yaml", "**/*.png"]  # *.png = vendored WFC pattern images
 
 # Editable installs add src/ to sys.path (simple .pth), so adding/moving modules
 # never requires a reinstall.

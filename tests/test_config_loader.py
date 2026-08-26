@@ -200,13 +200,19 @@ def test_minigrid_suite_groups_compose() -> None:
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         lite_raw = compose(config_name="config", overrides=["problem=minigrid_lite"])
         full_raw = compose(config_name="config", overrides=["problem=minigrid_full"])
+        eight_raw = compose(config_name="config", overrides=["problem=minigrid_8tasks"])
 
     lite = run_config_from_mapping(OmegaConf.to_container(lite_raw, resolve=True))
     full = run_config_from_mapping(OmegaConf.to_container(full_raw, resolve=True))
+    eight = run_config_from_mapping(OmegaConf.to_container(eight_raw, resolve=True))
     assert lite.problem.tasks == list(LITE_MINIGRID_TASKS)
-    assert full.problem.tasks == []
-    # Empty means the problem's complete catalogue.
-    assert len(ALL_MINIGRID_TASKS) == 72
+    assert full.problem.tasks == []  # empty means the problem's complete catalogue
+    # The 8-task suite is hand-tuned, so don't couple to its exact contents; just assert it
+    # selects a non-empty set of REAL catalogue entries and wires up the new WFC presets.
+    assert eight.problem.tasks
+    assert set(eight.problem.tasks) <= set(ALL_MINIGRID_TASKS)
+    assert any("WFC" in task for task in eight.problem.tasks)
+    assert len(ALL_MINIGRID_TASKS) == 78
 
 
 def test_experiment_profile_respects_cli_agent_override() -> None:

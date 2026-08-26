@@ -1,0 +1,18 @@
+# The 8-task MiniGrid benchmark suite: one representative per capability, the largest/hardest
+# variant of each. Select with `problem=minigrid_8tasks` and leave `problem.tasks` unset.
+name: minigrid
+tasks:
+  - MiniGrid-Empty-16x16-v0          # simplest (navigation)
+  - MiniGrid-FourRooms-v0            # navigation + exploration
+  - MiniGrid-DoorKey-8x8-v0          # object manipulation
+  - MiniGrid-MemoryS17Random-v0      # memory
+  - MiniGrid-LockedRoom-v0           # nav/exploration + manipulation
+  - MiniGrid-ObstructedMaze-Full-v1  # nav/exploration + manipulation (hardest)
+  - MiniGrid-WFC-MazeSimple-v0       # exploration (WFC procedural, ~0.4s/reset)
+  - MiniGrid-WFC-RoomsFabric-v0      # exploration (WFC procedural, ~0.7s/reset)
+lifecycle: multi_instance
+obs_mode: raw
+info_mode: informative
+seed: null              # null = the env's own default seeding
+kwargs:
+  fully_obs: true

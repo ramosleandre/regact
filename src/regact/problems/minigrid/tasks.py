@@ -80,6 +80,17 @@ ALL_MINIGRID_TASKS: tuple[str, ...] = (
     "MiniGrid-LockedRoom-v0",
     "MiniGrid-ObstructedMaze-Full-v0",
     "MiniGrid-ObstructedMaze-Full-v1",
+    # WFC (Wave Function Collapse) procedural envs - the 6 presets minigrid registers by
+    # default. They need the minigrid[wfc] extra (networkx) and read a sample-pattern PNG at
+    # reset; regact vendors those patterns (problems/minigrid/wfc_patterns) since the wheel
+    # ships none. Standard MiniGrid obs/actions/render otherwise. The 11 WFC_PRESETS_SLOW are
+    # intentionally omitted (not registered by default; some take ~90s/reset to generate).
+    "MiniGrid-WFC-MazeSimple-v0",
+    "MiniGrid-WFC-DungeonMazeScaled-v0",
+    "MiniGrid-WFC-RoomsFabric-v0",
+    "MiniGrid-WFC-ObstaclesBlackdots-v0",
+    "MiniGrid-WFC-ObstaclesAngular-v0",
+    "MiniGrid-WFC-ObstaclesHogs3-v0",
 )
 
 # Exact GameAgents lite selection, expressed as Gym IDs instead of its short aliases.

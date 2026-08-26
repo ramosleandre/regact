@@ -36,6 +36,7 @@ _PROMPT = _PROMPTS / "minigrid.md"  # intro + mechanics + completion, with a {ob
 _PROMPT_FULL = _PROMPTS / "minigrid_full.md"  # fully-observable grid fragment
 _PROMPT_PARTIAL = _PROMPTS / "minigrid_partial.md"  # egocentric partial-view fragment
 _TILE_SIZE = 24  # px per cell in the video render
+_WFC_PATTERNS = Path(__file__).parent / "wfc_patterns"  # vendored WFC sample-pattern PNGs
 
 # Upstream env docstrings mix task flavour (mission/rewards) with a NATIVE obs/action
 # description that conflicts with our regact-serialized contract; keep only the flavour.
@@ -123,6 +124,8 @@ class MiniGridProblem(BaseProblem):
 
         if task_name not in ALL_MINIGRID_TASKS:
             raise ValueError(f"unknown MiniGrid task {task_name!r}")
+        if "WFC" in task_name:
+            _ensure_wfc_patterns()  # repoint the preset at our vendored pattern before make()
         env = gymnasium.make(task_name)
         if self._fully_obs:
             from minigrid.wrappers import FullyObsWrapper
@@ -222,6 +225,8 @@ class MiniGridProblem(BaseProblem):
         import gymnasium  # noqa: F401
         import minigrid  # noqa: F401
 
+        _ensure_wfc_patterns()  # cheap + idempotent; no-op when WFC deps/patterns are absent
+
     def secret_modules(self) -> tuple[str, ...]:
         """Hide the ``minigrid`` engine from the agent + eval sandboxes.
 
@@ -238,6 +243,24 @@ class MiniGridProblem(BaseProblem):
 
     def config_kwargs(self) -> dict[str, Any]:
         return {"fully_obs": self._fully_obs}
+
+
+def _ensure_wfc_patterns() -> None:
+    """Repoint the WFC presets at regact's vendored sample-pattern images.
+
+    minigrid ships the WFC preset configs but NOT their pattern PNGs (``envs/wfc/patterns/*.png``),
+    so a WFC reset would ``FileNotFoundError``. We vendor those images and set each preset's
+    (mutable) ``pattern_path`` to the vendored copy. Best-effort + idempotent: touches only presets
+    whose pattern we vendored, and never raises if the WFC config is unavailable.
+    """
+    try:
+        from minigrid.envs.wfc.config import WFC_PRESETS
+    except Exception:
+        return
+    for cfg in WFC_PRESETS.values():
+        vendored = _WFC_PATTERNS / cfg.pattern_path.name
+        if vendored.exists():
+            cfg.pattern_path = vendored
 
 
 def _upstream_docstring(task_name: str) -> str | None:

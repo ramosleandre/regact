@@ -68,7 +68,9 @@ def test_minigrid_hides_the_engine_from_the_sandbox() -> None:
 
 
 def test_minigrid_catalogue_matches_gameagents_sizes() -> None:
-    assert len(ALL_MINIGRID_TASKS) == 72
+    wfc = [t for t in ALL_MINIGRID_TASKS if "WFC" in t]
+    assert len(wfc) == 6  # the 6 default WFC presets
+    assert len(ALL_MINIGRID_TASKS) == 78  # 72 GameAgents tasks + 6 WFC
     assert len(LITE_MINIGRID_TASKS) == 20
     assert len(set(ALL_MINIGRID_TASKS)) == len(ALL_MINIGRID_TASKS)
     assert len(set(LITE_MINIGRID_TASKS)) == len(LITE_MINIGRID_TASKS)
@@ -190,6 +192,7 @@ def test_minigrid_make_env_drives_a_step() -> None:
 def test_all_catalogued_minigrid_tasks_can_reset() -> None:
     """Every catalogue entry must exist upstream and pass Regact's env shim."""
     pytest.importorskip("minigrid")
+    pytest.importorskip("networkx")  # the WFC entries need it (and vendored patterns) to reset
     problem = MiniGridProblem()
     for task_name in ALL_MINIGRID_TASKS:
         native = problem.make_env(task_name)
@@ -224,3 +227,19 @@ def test_minigrid_render_frame_makes_rgb() -> None:
     img = problem.render_frame(Obs(frame=jsonify(native_obs)))
     assert img is not None and img.ndim == 3 and img.shape[2] == 3
     assert problem.render_frame(Obs(frame=[[1, 2]])) is None  # not a MiniGrid obs dict
+
+
+def test_minigrid_wfc_env_resets_like_a_standard_env() -> None:
+    """A WFC procedural env behaves like a standard MiniGrid env: same obs keys / actions /
+    steppable. Exercises the vendored-pattern repoint (the wheel ships no pattern PNGs)."""
+    pytest.importorskip("minigrid")
+    pytest.importorskip("networkx")
+    problem = MiniGridProblem(fully_obs=True)
+    native = problem.make_env("MiniGrid-WFC-MazeSimple-v0")
+    try:
+        obs, info = native.reset(seed=0)
+        assert {"image", "direction", "mission"} <= set(obs)
+        assert info["available_actions"]
+        native.step(0)  # a WFC env drives a step through the shim like any other
+    finally:
+        native.close()
