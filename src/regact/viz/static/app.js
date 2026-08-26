@@ -38,25 +38,54 @@ async function gameDetail(name) {
 }
 
 // ---------------------------------------------------------------- dashboard
+let _gamesCache = null;
+async function gamesData() {           // /api/games is shared by the dashboard + both graph views
+  if (!_gamesCache) _gamesCache = await api("/api/games");
+  return _gamesCache;
+}
+
+// Top-level panels: the game grid ("Experiments") and the cross-experiment "Graphs".
+function panelNav(active) {
+  const nav = h("div", "panelnav");
+  for (const [slug, label] of [["", "Experiments"], ["graphs", "Graphs"]]) {
+    const a = h("a", "panel" + (slug === active ? " on" : ""), label);
+    a.href = "#" + slug;
+    nav.append(a);
+  }
+  return nav;
+}
+
+function gameCard(g) {
+  const m = g.metrics;
+  const stamp = g.name.split("/").slice(-2, -1)[0] || "";  // the run's timestamp dir (tells reruns apart)
+  const card = h("div", "card click", h("h3", null, g.task || g.name));
+  card.append(h("div", "muted",
+    `${stamp} · ${m.n_turns} iters · ${m.n_tool_calls} tools · ${m.n_submissions} submits`));
+  card.append(h("div", null, statusBadge(m), " ",
+    h("span", "badge", aggLine(m.final_aggregate)), " ",
+    h("span", "badge", dur(m.duration_s)), " ",
+    h("span", "badge", `out ${fmt(m.tokens.output)} tok`)));
+  card.onclick = () => { location.hash = "game/" + encodeURIComponent(g.name); };
+  return card;
+}
+
 async function renderDashboard() {
   crumb.textContent = "";
-  const data = await api("/api/games");
+  const data = await gamesData();
   crumb.textContent = `${data.experiment} · ${data.games.length} game(s)`;
   if (data.games.length === 1) { location.hash = "game/" + encodeURIComponent(data.games[0].name); return; }
-  const grid = h("div", "grid");
+  const byExp = new Map();          // one section per experiment, its task cards beneath
   for (const g of data.games) {
-    const m = g.metrics;
-    const card = h("div", "card click", h("h3", null, g.name));
-    card.append(h("div", "muted",
-      `${g.state.problem_name || "?"} · ${m.n_turns} iters · ${m.n_tool_calls} tools · ${m.n_submissions} submits`));
-    card.append(h("div", null, statusBadge(m), " ",
-      h("span", "badge", aggLine(m.final_aggregate)), " ",
-      h("span", "badge", dur(m.duration_s)), " ",
-      h("span", "badge", `out ${fmt(m.tokens.output)} tok`)));
-    card.onclick = () => { location.hash = "game/" + encodeURIComponent(g.name); };
-    grid.append(card);
+    if (!byExp.has(g.experiment)) byExp.set(g.experiment, []);
+    byExp.get(g.experiment).push(g);
   }
-  clear(app); app.append(grid);
+  clear(app); app.append(panelNav(""));
+  for (const [exp, games] of byExp) {
+    app.append(h("h2", "expsection", expLeaf(exp), h("span", "muted", ` · ${games.length} run(s)`)));
+    const grid = h("div", "grid");
+    for (const g of games) grid.append(gameCard(g));
+    app.append(grid);
+  }
 }
 
 function statusOf(m) {
@@ -68,8 +97,321 @@ function statusBadge(m) {
   return h("span", "badge " + cls, statusOf(m));
 }
 
+// ---------------------------------------------------------------- graphs (cross-run)
+// Per-task metrics aggregated across every run of a task, grouped-bar per experiment. Framework
+// metrics (below) exist for every run; problem-specific ones (mean_steps/reward, ARC levels/rhae…)
+// are auto-discovered from each run's final_aggregate so the panel stays game-agnostic.
+const _THEME = { good: "#4ec9a4", warn: "#e0c060", bad: "#e06c6c", muted: "#9aa3b2" };
+const _EXP_PALETTE = ["#5aa9e6", "#4ec9a4", "#e0c060", "#e06c6c", "#7d8bd4", "#d47db0", "#8bd47d", "#d4a37d"];
+const _AGG_SKIP = new Set(["n_episodes", "n_errors", "success_rate"]);  // shown elsewhere / bookkeeping
+const FRAMEWORK_METRICS = [
+  { key: "success_rate", label: "success rate", get: (m) => m.success_rate, fmt: pct, def: true },
+  { key: "time", label: "time", get: (m) => m.duration_s, fmt: dur, def: true },
+  { key: "n_runs", label: "number of runs", count: true },  // runs of this task (not aggregated)
+  { key: "tool_calls", label: "tool calls", get: (m) => m.n_tool_calls },
+  { key: "iterations", label: "iterations", get: (m) => m.n_turns },
+  { key: "flagged_calls", label: "flagged calls", get: (m) => m.flagged_tool_calls },
+  { key: "output_tokens", label: "output tokens", get: (m) => m.tokens && m.tokens.output },
+  { key: "cache_read", label: "cache tokens", get: (m) => m.tokens && m.tokens.cache_read },
+  { key: "thinking_chars", label: "thinking chars", get: (m) => m.thinking_chars },
+];
+const STATUS_METRIC = { key: "status", label: "status", categorical: true };
+const AGGREGATORS = {
+  mean: (xs) => xs.reduce((a, b) => a + b, 0) / xs.length,
+  median: (xs) => { const s = [...xs].sort((a, b) => a - b), i = s.length >> 1; return s.length % 2 ? s[i] : (s[i - 1] + s[i]) / 2; },
+  min: (xs) => Math.min(...xs),
+  max: (xs) => Math.max(...xs),
+};
+// A run "finished" iff it ended cleanly: it has an exit_reason and no error category. Crashed /
+// unfinished runs (agent_api, eval_harness, loop_crash, still-running…) are dropped when masking.
+const isValidRun = (m) => !m.last_error_category && !!m.exit_reason;
+const _COLORS_KEY = "regact_viz_expcolors";
+const _loadColors = () => { try { return JSON.parse(localStorage.getItem(_COLORS_KEY)) || {}; } catch (e) { return {}; } };
+const _saveColors = () => { try { localStorage.setItem(_COLORS_KEY, JSON.stringify(_graph.colors)); } catch (e) { /* ignore */ } };
+// Persist the panel's controls across redraws: metric toggles, aggregate + error-bar method, the
+// crashed-run mask, which experiments are hidden, and per-experiment color overrides (localStorage).
+const _graph = {
+  agg: "mean", err: "none", mask: false,
+  active: new Set(["success_rate", "time"]),
+  hidden: new Set(), colors: _loadColors(),
+};
+
+const expLeaf = (e) => String(e).split("/").pop();
+const shortTask = (t) => String(t).replace(/^MiniGrid-/, "").replace(/-v\d+$/, "");
+const statusColor = (s) => (s === "agent_exit" ? _THEME.good : /limit/.test(s) ? _THEME.warn : s === "running" ? _THEME.muted : _THEME.bad);
+const txt = (s) => document.createTextNode(s);
+function svg(tag, attrs, ...kids) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  for (const k of kids) if (k) e.append(k);
+  return e;
+}
+
+function metricSpecs(games) {
+  const specs = [...FRAMEWORK_METRICS];
+  const seen = new Set();
+  for (const g of games)
+    for (const [k, v] of Object.entries(g.metrics.final_aggregate || {}))
+      if (typeof v === "number" && !_AGG_SKIP.has(k) && !seen.has(k)) {
+        seen.add(k);
+        specs.push({ key: "agg:" + k, label: k, get: (m) => m.final_aggregate && m.final_aggregate[k] });
+      }
+  specs.push(STATUS_METRIC);
+  return specs;
+}
+
+function groupByExpTask(games) {
+  const byExp = new Map();          // experiment -> Map(task -> [metrics of each run])
+  const tasks = new Set();
+  for (const g of games) {
+    tasks.add(g.task);
+    if (!byExp.has(g.experiment)) byExp.set(g.experiment, new Map());
+    const t = byExp.get(g.experiment);
+    if (!t.has(g.task)) t.set(g.task, []);
+    t.get(g.task).push(g.metrics);
+  }
+  return { experiments: [...byExp.keys()], tasks: [...tasks].sort(), byExp };
+}
+
+function makeExpColor(experiments) {
+  const idx = new Map(experiments.map((e, i) => [e, i]));  // stable index -> stable default color
+  return (e) => _graph.colors[e] || _EXP_PALETTE[(idx.get(e) || 0) % _EXP_PALETTE.length];
+}
+
+// Padding computed from the longest x-label so end-anchored, -35deg labels never clip either edge.
+function _chartPad(tasks) {
+  const reach = Math.max(6, ...tasks.map((t) => shortTask(t).length)) * 6.2;  // ~px of the widest label
+  return {
+    padT: 10, padR: 16, H: 210,
+    padL: Math.max(58, Math.round(reach * 0.82) + 8),   // y-labels + leftmost angled label (cos35)
+    padB: Math.max(84, Math.round(reach * 0.57) + 24),  // angled label vertical drop (sin35)
+  };
+}
+
+// A grouped bar chart: x = task, one bar per experiment = agg over that (exp,task)'s runs. `mask`
+// drops crashed/unfinished runs first; `errMethod` adds error/interval bars (std around the MEAN,
+// or the min-max range) - the interval is independent of which aggregate sets the bar height.
+function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
+  const { experiments, tasks, byExp } = group;
+  const agg = AGGREGATORS[aggName];
+  const runsOf = (exp, task) => {
+    const runs = (byExp.get(exp) && byExp.get(exp).get(task)) || [];
+    return mask ? runs.filter(isValidRun) : runs;
+  };
+  const seriesOf = (exp, task) =>
+    runsOf(exp, task).map((m) => spec.get(m)).filter((x) => x != null && !Number.isNaN(Number(x))).map(Number);
+  const val = (exp, task) => {
+    if (spec.count) return runsOf(exp, task).length || null;   // "number of runs": a count
+    const xs = seriesOf(exp, task);
+    return xs.length ? agg(xs) : null;
+  };
+  const errOf = (exp, task) => {                 // {lo, hi} interval, or null (needs >= 2 runs)
+    if (errMethod === "none" || spec.count) return null;
+    const xs = seriesOf(exp, task);
+    if (xs.length < 2) return null;
+    if (errMethod === "range") return { lo: Math.min(...xs), hi: Math.max(...xs) };
+    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;                            // std: centered
+    const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1)); // on the mean
+    return { lo: mean - sd, hi: mean + sd };
+  };
+  let max = 0;
+  for (const t of tasks) for (const e of experiments) {
+    const v = val(e, t); if (v != null) max = Math.max(max, v);
+    const eb = errOf(e, t); if (eb) max = Math.max(max, eb.hi);   // keep error bars in view
+  }
+  max = max || 1;
+  const { padL, padB, padR, padT, H } = _chartPad(tasks);
+  const groupW = Math.max(44, experiments.length * 20 + 16);
+  const W = padL + padR + tasks.length * groupW;
+  const plotH = H - padT - padB;
+  const yOf = (v) => padT + plotH * (1 - Math.max(0, Math.min(1, v / max)));   // value -> y, clamped
+  const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  for (const f of [0, 0.5, 1]) {                 // y gridlines + labels
+    const y = padT + plotH * (1 - f);
+    s.append(svg("line", { class: "gridline", x1: padL, y1: y, x2: W - padR, y2: y }));
+    s.append(svg("text", { class: "ylab", x: padL - 6, y: y + 3, "text-anchor": "end" },
+      txt(spec.fmt ? spec.fmt(max * f) : fmtMetric(max * f))));
+  }
+  tasks.forEach((task, ti) => {
+    const gx = padL + ti * groupW + 8;
+    const bw = (groupW - 16) / experiments.length;
+    experiments.forEach((exp, ei) => {
+      const v = val(exp, task);
+      if (v == null) return;
+      const x = gx + ei * bw, y = yOf(v);
+      const rect = svg("rect", { x: x + 1, y, width: Math.max(1, bw - 2), height: padT + plotH - y, rx: 2, fill: expColor(exp) });
+      rect.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${spec.label}: ${spec.fmt ? spec.fmt(v) : fmtMetric(v)}`)));
+      s.append(rect);
+      const eb = errOf(exp, task);               // error/interval bar centered on the bar's x
+      if (eb) {
+        const cx = x + bw / 2, yl = yOf(eb.lo), yh = yOf(eb.hi), cap = Math.max(2, bw * 0.22);
+        s.append(svg("line", { class: "errbar", x1: cx, y1: yh, x2: cx, y2: yl }));
+        s.append(svg("line", { class: "errbar", x1: cx - cap, y1: yh, x2: cx + cap, y2: yh }));
+        s.append(svg("line", { class: "errbar", x1: cx - cap, y1: yl, x2: cx + cap, y2: yl }));
+      }
+    });
+    const lx = gx + (groupW - 16) / 2, ly = H - padB + 12;   // x label (task), rotated
+    s.append(svg("text", { class: "xlab", x: lx, y: ly, "text-anchor": "end", transform: `rotate(-35 ${lx} ${ly})` }, txt(shortTask(task))));
+  });
+  return s;
+}
+
+// Status is categorical: per (task, experiment) a full-height bar stacked by exit-reason share,
+// colored by status; a thin underline ties each bar back to its experiment color.
+function statusChart(group, expColor) {
+  const { experiments, tasks, byExp } = group;
+  const statusOfM = (m) => m.exit_reason || m.last_error_category || "running";
+  const cats = new Set();
+  for (const e of experiments) for (const t of tasks) for (const m of (byExp.get(e) && byExp.get(e).get(t)) || []) cats.add(statusOfM(m));
+  const { padL, padB, padR, padT, H } = _chartPad(tasks);
+  const groupW = Math.max(44, experiments.length * 20 + 16);
+  const W = padL + padR + tasks.length * groupW, plotH = H - padT - padB;
+  const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  s.append(svg("line", { class: "gridline", x1: padL, y1: padT, x2: W - padR, y2: padT }));
+  s.append(svg("line", { class: "gridline", x1: padL, y1: padT + plotH, x2: W - padR, y2: padT + plotH }));
+  tasks.forEach((task, ti) => {
+    const gx = padL + ti * groupW + 8, bw = (groupW - 16) / experiments.length;
+    experiments.forEach((exp, ei) => {
+      const runs = (byExp.get(exp) && byExp.get(exp).get(task)) || [];
+      const x = gx + ei * bw;
+      if (!runs.length) return;
+      const counts = {};
+      for (const m of runs) { const st = statusOfM(m); counts[st] = (counts[st] || 0) + 1; }
+      let acc = 0;
+      for (const [st, c] of Object.entries(counts)) {
+        const frac = c / runs.length, segH = plotH * frac, y = padT + plotH - acc - segH;
+        const rect = svg("rect", { x: x + 1, y, width: Math.max(1, bw - 2), height: segH, fill: statusColor(st) });
+        rect.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${st}: ${c}/${runs.length}`)));
+        s.append(rect); acc += segH;
+      }
+      s.append(svg("rect", { x: x + 1, y: padT + plotH + 2, width: Math.max(1, bw - 2), height: 3, fill: expColor(exp) }));
+    });
+    const lx = gx + (groupW - 16) / 2, ly = H - padB + 12;
+    s.append(svg("text", { class: "xlab", x: lx, y: ly, "text-anchor": "end", transform: `rotate(-35 ${lx} ${ly})` }, txt(shortTask(task))));
+  });
+  return { chart: s, cats: [...cats] };
+}
+
+function legend(items) {   // items: [{label, color}] — the static status legend
+  const l = h("div", "legend");
+  for (const it of items) l.append(h("span", "leg", swatch(it.color), " " + it.label));
+  return l;
+}
+function swatch(color) { const s = h("span", "sw"); s.style.background = color; return s; }
+
+// The experiment legend is interactive: click the label to show/hide that experiment; click the
+// swatch (a native color input) to recolor it - the color persists to localStorage.
+function expLegend(experiments, expColor, redraw) {
+  const l = h("div", "legend");
+  for (const exp of experiments) {
+    const item = h("span", "leg exp-leg" + (_graph.hidden.has(exp) ? " off" : ""));
+    const pick = h("input"); pick.type = "color"; pick.className = "sw-pick";
+    pick.value = expColor(exp); pick.title = "pick colour";
+    pick.oninput = () => { _graph.colors[exp] = pick.value; _saveColors(); redraw(); };
+    const label = h("span", "leg-label", expLeaf(exp)); label.title = "click to show / hide";
+    label.onclick = () => { _graph.hidden.has(exp) ? _graph.hidden.delete(exp) : _graph.hidden.add(exp); redraw(); };
+    item.append(pick, label);
+    l.append(item);
+  }
+  return l;
+}
+
+// A segmented single-choice control; buttons update their own "on" state on click (the chart
+// redraw does not rebuild them), then run onPick.
+function segBtns(label, options, current, onPick) {
+  const seg = h("span", "seg", h("span", "muted", label));
+  const btns = [];
+  for (const name of options) {
+    const b = h("button", "aggbtn" + (name === current ? " on" : ""), name);
+    b.onclick = () => { for (const x of btns) x.classList.toggle("on", x === b); onPick(name); };
+    btns.push(b);
+    seg.append(b);
+  }
+  return seg;
+}
+function controlBar(redraw) {
+  const agg = segBtns("aggregate:", Object.keys(AGGREGATORS), _graph.agg, (n) => { _graph.agg = n; redraw(); });
+  const err = segBtns("error bars:", ["none", "std", "range"], _graph.err, (n) => { _graph.err = n; redraw(); });
+  const cb = h("input"); cb.type = "checkbox"; cb.id = "mask-crashed"; cb.checked = _graph.mask;
+  cb.onchange = () => { _graph.mask = cb.checked; redraw(); };
+  const mask = h("label", "maskctl"); mask.htmlFor = "mask-crashed";
+  mask.append(cb, " mask crashed / unfinished runs");
+  return h("div", "controlbar", agg, err, mask);
+}
+function metricControls(specs, redraw) {
+  const panel = h("div", "controls", h("div", "h", "Metrics"));
+  for (const spec of specs) {
+    const id = "m-" + spec.key;
+    const cb = h("input"); cb.type = "checkbox"; cb.id = id; cb.checked = _graph.active.has(spec.key);
+    cb.onchange = () => { cb.checked ? _graph.active.add(spec.key) : _graph.active.delete(spec.key); redraw(); };
+    const row = h("label", "ctl"); row.htmlFor = id; row.append(cb, " " + spec.label);
+    panel.append(row);
+  }
+  return panel;
+}
+
+// Build the panel: agg selector + charts (left) + metric checklist (right). `onlyExp` restricts to
+// one experiment (the per-game tab); null = every experiment (top-level Graphs).
+function graphsView(games, onlyExp) {
+  const shown = onlyExp ? games.filter((g) => g.experiment === onlyExp) : games;
+  const specs = metricSpecs(shown);
+  // Seed defaults on first open (only keep keys that still exist).
+  for (const spec of specs) if (spec.def && !_graph._seeded) _graph.active.add(spec.key);
+  _graph._seeded = true;
+  const group = groupByExpTask(shown);
+  const expColor = makeExpColor(group.experiments);   // stable colors over ALL experiments
+  const charts = h("div", "charts");
+  const redraw = () => {
+    clear(charts);
+    // Only render experiments not hidden in the legend; the legend still lists them all.
+    const activeExps = group.experiments.filter((e) => !_graph.hidden.has(e));
+    const g2 = { experiments: activeExps, tasks: group.tasks, byExp: group.byExp };
+    charts.append(expLegend(group.experiments, expColor, redraw));
+    let any = false;
+    for (const spec of specs) {
+      if (!_graph.active.has(spec.key)) continue;
+      any = true;
+      const card = h("div", "chartcard", h("h3", null, spec.label));
+      const scroll = h("div", "chartscroll");
+      if (spec.categorical) {
+        const { chart, cats } = statusChart(g2, expColor);
+        scroll.append(chart);
+        card.append(scroll, legend(cats.map((c) => ({ label: c, color: statusColor(c) }))));
+      } else {
+        scroll.append(groupedBarChart(spec, g2, expColor, _graph.agg, _graph.err, _graph.mask));
+        card.append(scroll);
+      }
+      charts.append(card);
+    }
+    if (!any) charts.append(h("div", "muted", "no metric selected — pick some on the right"));
+  };
+  const layout = h("div", "graphlayout", charts, metricControls(specs, redraw));
+  const wrap = h("div", "graphs", controlBar(redraw), layout);
+  redraw();
+  return wrap;
+}
+
+async function renderGraphs() {
+  crumb.textContent = "graphs";
+  const data = await gamesData();
+  clear(app);
+  app.append(panelNav("graphs"), graphsView(data.games, null));
+}
+
+// The per-game "Graphs" tab: the same charts but for THIS run's experiment only.
+async function renderGameGraphs(name) {
+  const data = await gamesData();
+  const me = data.games.find((g) => g.name === name);
+  const exp = me ? me.experiment : null;
+  const body = h("div");
+  body.append(h("div", "gnote muted",
+    exp ? `Aggregated over every run in this experiment (${expLeaf(exp)}).` : "unknown experiment"));
+  body.append(graphsView(data.games, exp));
+  shell(name, "graphs", body);
+}
+
 // ---------------------------------------------------------------- per-game shell
-const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"]];
+const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
 
 function shell(name, active, body) {
   crumb.textContent = name;
@@ -326,12 +668,14 @@ async function renderLogs(name) {
 async function route() {
   try {
     const parts = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean);
+    if (parts[0] === "graphs") return renderGraphs();
     if (parts[0] !== "game" || !parts[1]) return renderDashboard();
     const name = decodeURIComponent(parts[1]);
     const tab = parts[2] || "";
     if (tab === "conversation") await renderConversation(name);
     else if (tab === "artifacts") await renderArtifacts(name);
     else if (tab === "logs") await renderLogs(name);
+    else if (tab === "graphs") await renderGameGraphs(name);
     else await renderOverview(name);
   } catch (e) {
     clear(app); app.append(h("pre", "err", "error: " + e.message));

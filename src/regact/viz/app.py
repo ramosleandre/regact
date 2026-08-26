@@ -22,6 +22,15 @@ from regact.viz.metrics import game_metrics
 _STATIC = Path(__file__).parent / "static"
 
 
+def _experiment_of(game_relpath: str) -> str:
+    """Fallback experiment id when config.experiment_name is absent: for a
+    ``<experiment>/<timestamp>/<task>`` run path it is the grandparent; else the top component."""
+    parts = game_relpath.split("/")
+    if len(parts) >= 3:
+        return parts[-3]
+    return parts[0] if parts else game_relpath
+
+
 def build_app(experiment_dir: str) -> FastAPI:
     app = FastAPI(title="regact viz")
     root = Path(experiment_dir)
@@ -35,7 +44,18 @@ def build_app(experiment_dir: str) -> FastAPI:
         out = []
         for name in reader.list_games(experiment_dir):
             game = reader.load_game(experiment_dir, name)
-            out.append({"name": name, "state": game.state, "metrics": game_metrics(game)})
+            out.append(
+                {
+                    "name": name,
+                    # Grouping keys for the cross-run graphs: an experiment is one agent+problem
+                    # config (config.experiment_name), and one experiment holds many runs of many
+                    # tasks (some tasks repeated across timestamps -> aggregated in the UI).
+                    "experiment": game.config.get("experiment_name") or _experiment_of(name),
+                    "task": game.state.get("task_name") or name.rsplit("/", 1)[-1],
+                    "state": game.state,
+                    "metrics": game_metrics(game),
+                }
+            )
         return {"experiment": root.name, "games": out}
 
     def _require_game(name: str) -> None:

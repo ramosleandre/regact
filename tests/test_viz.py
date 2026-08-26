@@ -176,6 +176,34 @@ def test_logs_reads_output_and_events(tmp_path: Path) -> None:
     assert out["events"][0]["event"] == "turn_crash"
 
 
+def test_games_endpoint_tags_experiment_and_task(tmp_path: Path) -> None:
+    """/api/games tags each run with its experiment (config.experiment_name) and task
+    (state.task_name) so the graphs panel groups + aggregates across runs - including a task
+    repeated across timestamps within one experiment (the aggregation case)."""
+    from fastapi.testclient import TestClient
+
+    from regact.viz.app import build_app
+
+    root = tmp_path / "bench"
+    runs = {
+        "claude-fo/2026-01-01_a/DoorKey": ("bench/claude-fo", "DoorKey"),
+        "claude-fo/2026-01-01_a/Empty": ("bench/claude-fo", "Empty"),
+        "claude-fo/2026-01-02_b/Empty": ("bench/claude-fo", "Empty"),  # a rerun of Empty
+        "codex-fo/2026-01-01_a/DoorKey": ("bench/codex-fo", "DoorKey"),
+    }
+    for rel, (exp, task) in runs.items():
+        d = root / rel
+        (d / "logs").mkdir(parents=True)
+        (d / "logs" / "experiment_state.json").write_text(json.dumps({"task_name": task}))
+        (d / "logs" / "transcript.jsonl").write_text("")
+        (d / "config.json").write_text(json.dumps({"experiment_name": exp}))
+
+    games = TestClient(build_app(str(root))).get("/api/games").json()["games"]
+    assert {g["name"]: (g["experiment"], g["task"]) for g in games} == runs
+    empties = [g for g in games if g["task"] == "Empty" and g["experiment"] == "bench/claude-fo"]
+    assert len(empties) == 2  # both timestamps surface, to be aggregated per (experiment, task)
+
+
 def test_final_score_falls_back_past_errored_final_and_surfaces_both() -> None:
     """The Score KPI must show the last REAL submission when 'final' errored (e.g. a teardown
     ReadTimeout -> empty aggregate), instead of rendering blank; and it surfaces both the
