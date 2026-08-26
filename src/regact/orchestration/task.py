@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 from collections.abc import Sequence
 from typing import Any
@@ -62,6 +63,16 @@ def _regact_src_dir() -> str:
     import regact
 
     return os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+
+
+def _agent_regact_read_paths(src_dir: str) -> list[str]:
+    """The only regact source the agent's workdir needs: the package marker + the env client
+    (framework.make_env -> regact.envclient.client -> regact.envclient.obs). Binding just these -
+    not all of src - keeps scoring/anti-cheat/sandbox source out of the agent's namespace; the eval
+    subprocess uses a separate wrapper that still binds full src. Closure pinned by test_sandbox.py;
+    if a future workdir helper imports another regact module, add it here (not all of src)."""
+    regact_pkg = os.path.join(src_dir, "regact")
+    return [os.path.join(regact_pkg, "__init__.py"), os.path.join(regact_pkg, "envclient")]
 
 
 def _secret_module_paths(modules: tuple[str, ...]) -> list[str]:
@@ -365,13 +376,28 @@ async def run_task(
             else:
                 loop_tools = tools
 
-            agent_tmp = os.path.join(workdir, "tmp")
-            os.makedirs(agent_tmp, exist_ok=True)
+            # Under bwrap, keep the agent's scratch in the private /tmp tmpfs (out of the workdir,
+            # so ``find .`` stays clean and the scratch dir name can't leak the host path); on other
+            # backends it stays in workdir/tmp.
+            if resolve(requested_runtime) is SandboxRuntime.BWRAP:
+                agent_tmp = "/tmp"
+            else:
+                agent_tmp = os.path.join(workdir, "tmp")
+                os.makedirs(agent_tmp, exist_ok=True)
+            # 'python' on the agent's PATH is the interpreter that runs regact (has httpx +
+            # regact); system python3 has neither, so the agent's 'python foo.py' used to die on
+            # import. sys.executable's dir works on every install (venv, HPC module, cluster) and is
+            # already bound (under sys.prefix). Applies to all backends.
+            agent_bin = os.path.dirname(sys.executable)
             # workdir first so ``import framework`` (and code_library) resolves no matter
             # which directory the agent runs a script from - Python only puts the script's
             # own dir on sys.path, so ``python code_library/probe.py`` otherwise can't see
             # the root-level framework/ package.
-            agent_env = {"PYTHONPATH": os.pathsep.join([workdir, src_dir]), "TMPDIR": agent_tmp}
+            agent_env = {
+                "PATH": os.pathsep.join([agent_bin, os.environ.get("PATH", "")]),
+                "PYTHONPATH": os.pathsep.join([workdir, src_dir]),
+                "TMPDIR": agent_tmp,
+            }
             egress: EgressProxy | None = None
             egress_hosts = agent.host_egress_hosts()
             if net_isolation and egress_hosts:
@@ -397,7 +423,9 @@ async def run_task(
                 make_wrapper(
                     requested_runtime,
                     workdir=workdir,
-                    allow_read=[src_dir, *agent.host_read_paths()],
+                    # Only the env client, not all of ``src`` - the agent cannot read the scoring /
+                    # anti-cheat / sandbox source. The eval wrapper above keeps full ``src``.
+                    allow_read=[*_agent_regact_read_paths(src_dir), *agent.host_read_paths()],
                     deny_egress=net_isolation,
                     deny_read=deny_read,
                     allow_write_prefixes=agent.host_write_prefixes(),
