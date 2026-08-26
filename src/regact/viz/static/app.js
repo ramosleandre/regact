@@ -132,7 +132,9 @@ const _saveColors = () => { try { localStorage.setItem(_COLORS_KEY, JSON.stringi
 // crashed-run mask, which experiments are hidden, and per-experiment color overrides (localStorage).
 const _graph = {
   agg: "mean", err: "none", mask: false,
-  active: new Set(["success_rate", "time"]),
+  // "agg:mean_levels_completed" is an auto-discovered problem metric (ARC); harmless on games that
+  // never report it (no bar drawn). success_rate + time are the framework defaults.
+  active: new Set(["success_rate", "time", "agg:mean_levels_completed"]),
   hidden: new Set(), colors: _loadColors(),
 };
 
@@ -426,29 +428,52 @@ function shell(name, active, body) {
 }
 
 // ---------------------------------------------------------------- overview tab
+// Metrics render as a compact 2-column table (label | value), like Run config - simpler and more
+// legible than cards, and long values (the aggregate score) wrap cleanly. A value may carry a muted
+// qualifier (e.g. "shadow-replay verified"). Rows are [label, value, sub?]; a null row is skipped.
+function metricTable(title, rows) {
+  const sec = h("div", "kpisection");
+  sec.append(h("div", "kpih", title));
+  const t = h("table", "metrics");
+  for (const row of rows) {
+    if (!row) continue;
+    const [label, value, sub] = row;
+    const val = h("td", null, String(value));
+    if (sub) val.append(h("span", "muted", " · " + sub));
+    t.append(h("tr", null, h("td", "mlabel", label), val));
+  }
+  sec.append(t);
+  return sec;
+}
+
 async function renderOverview(name) {
   const d = await gameDetail(name);
   const m = d.metrics;
   const wrap = h("div");
-  const kpis = h("div", "kpis");
   const unverified = m.final_aggregate_unverified || {};
   const hasUnverified = Object.keys(unverified).length > 0;
-  const scoreKpis = [
-    kpi("Score", aggLine(m.final_aggregate), hasUnverified ? "shadow-replay verified" : "final submission"),
+  // Main = status + the shadow-replay-verified problem score + the run's headline effort/cost.
+  // Other = the un-replayed (controller-reported) score + secondary telemetry.
+  const main = [
+    ["Status", statusOf(m)],
+    ["Score", aggLine(m.final_aggregate), hasUnverified ? "shadow-replay verified" : "final submission"],
+    ["Time", dur(m.duration_s)],
+    ["Tool calls", m.n_tool_calls],
+    ["Flagged calls", m.flagged_tool_calls ?? 0],
   ];
-  if (hasUnverified) scoreKpis.push(kpi("Score · no replay", aggLine(unverified), "controller-reported"));
-  kpis.append(
-    kpi("Status", statusOf(m)),
-    kpi("Iterations", m.n_turns, "agent turns"),
-    kpi("Tool calls", m.n_tool_calls),
-    kpi("Submissions", m.n_submissions),
-    kpi("Output tokens", fmt(m.tokens.output), `cache ${fmt(m.tokens.cache_read)}`),
-    ...scoreKpis,
-    kpi("Time", dur(m.duration_s)),
-    kpi("Success", pct(m.success_rate)),
-    kpi("Thinking", fmt(m.thinking_chars) + " ch"),
-    kpi("Flagged calls", m.flagged_tool_calls ?? 0));
-  wrap.append(kpis, configBlock(d.config), barChart("Tool calls", m.tool_histogram));
+  const other = [
+    hasUnverified ? ["Score · no replay", aggLine(unverified), "controller-reported"] : null,
+    ["Iterations", m.n_turns, "agent turns"],
+    ["Thinking", fmt(m.thinking_chars) + " ch"],
+    ["Submissions", m.n_submissions],
+    ["Output tokens", fmt(m.tokens.output)],
+    ["Cache tokens", fmt(m.tokens.cache_read)],
+  ];
+  wrap.append(
+    metricTable("Main metrics", main),
+    metricTable("Other metrics", other),
+    configBlock(d.config),
+    barChart("Tool calls", m.tool_histogram));
   if (m.submission_trajectory.length) wrap.append(trajectory(m.submission_trajectory));
   if (m.flagged_calls && m.flagged_calls.length) wrap.append(flaggedPanel(m.flagged_calls));
   shell(name, "", wrap);
@@ -470,12 +495,6 @@ function configBlock(c) {
   const t = h("table");
   for (const [k, v] of rows) t.append(rowEl("td", [k, String(v)]));
   wrap.append(t); return wrap;
-}
-
-function kpi(label, value, sub) {
-  const k = h("div", "kpi", h("div", "v", String(value)));
-  k.append(h("div", "l", label + (sub ? ` · ${sub}` : "")));
-  return k;
 }
 function barChart(title, obj) {
   const wrap = h("div"); wrap.append(h("h2", null, title));
@@ -582,6 +601,9 @@ async function renderConversation(name) {
   shell(name, "conversation", layout);
 }
 
+const _TOOL_TEXT_MAX = 4000;  // char cap for both call args and result body (then the box scrolls)
+const _INLINE_ARG_MAX = 240;  // short args stay inline; longer ones get the scrollable block
+
 function toolBlock(tool) {
   // The reader tags calls authoritatively: blue submit, green submit-that-won a level, red cheat.
   const cls = { cheat: " cheat", submit: " submit", submit_win: " submit-win" }[tool.tag] || "";
@@ -589,12 +611,17 @@ function toolBlock(tool) {
   const inp = JSON.stringify(tool.input);
   const t = h("div", "t");
   if (tool.tag) t.append(h("span", "tag tag-" + tool.tag, _TAG_LABEL[tool.tag]), " ");
-  t.append(h("b", null, tool.name), " ",
-    h("span", "muted", inp.length > 240 ? inp.slice(0, 240) + "…" : inp));
+  t.append(h("b", null, tool.name), " ");
+  // Long call args get the SAME treatment as a long result: a scrollable block, never a "…" cut,
+  // so a full command / Write / Edit payload is readable. Short args stay compact inline.
+  if (inp.length > _INLINE_ARG_MAX)
+    t.append(h("pre", "args", inp.slice(0, _TOOL_TEXT_MAX)));
+  else
+    t.append(h("span", "muted", inp));
   box.append(t);
   if (tool.result != null) {
     const res = h("div", "res" + (tool.is_error ? " err" : ""));
-    res.append(h("pre", null, String(tool.result).slice(0, 4000)));
+    res.append(h("pre", null, String(tool.result).slice(0, _TOOL_TEXT_MAX)));
     box.append(res);
   }
   return box;

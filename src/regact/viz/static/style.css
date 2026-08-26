@@ -17,10 +17,9 @@ a { color: var(--accent); text-decoration: none; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
 .card.click { cursor: pointer; } .card.click:hover { border-color: var(--accent); }
 .card h3 { margin: 0 0 6px; font-size: 15px; }
-.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
-.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.kpi .v { font-size: 20px; font-weight: 700; }
-.kpi .l { color: var(--muted); font-size: 12px; }
+.kpisection { margin: 14px 0; }
+.kpih { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+.metrics td.mlabel { color: var(--muted); width: 200px; white-space: nowrap; }
 .muted { color: var(--muted); }
 .badge { padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
 .b-good { color: var(--good); border-color: var(--good); }
@@ -63,6 +62,8 @@ details.think pre { color: var(--think); opacity: .85; }
 .navitem.nav-cheat { border-left-color: var(--bad); }
 .tool .t { padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 13px; }
 .tool .t b { color: var(--accent); }
+/* Long call args scroll in place, same as a long result body (no "…" truncation). */
+.tool .t pre.args { font-size: 12px; color: var(--muted); max-height: 220px; overflow: auto; margin: 6px 0 0; }
 .tool .res { padding: 6px 10px; border-top: 1px dashed var(--line); }
 .tool .res.err { color: var(--bad); }
 .tool .res pre { font-size: 12px; color: var(--muted); max-height: 220px; overflow: auto; }
