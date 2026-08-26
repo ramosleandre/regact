@@ -5,6 +5,7 @@ without the CLI installed. Actually spawning the CLI is a separate live concern.
 """
 
 import os
+from pathlib import Path
 
 from regact.agent.base import build_agent
 from regact.agent.claude_adapter import ClaudeAgent
@@ -40,17 +41,18 @@ def test_host_paths_are_per_agent_and_ambient_config_stays_out() -> None:
     assert os.path.join(home, ".claude") not in claude_ro  # never in the read-only set
     # .claude.json IS exposed read-only: the CLI will not start a session without it.
     assert os.path.join(home, ".claude.json") in claude_ro
-    assert any(p.endswith("/codex-home") for p in codex_rw)  # codex's isolated CODEX_HOME
+    assert any("codex-home" in p for p in codex_rw)  # under codex's isolated CODEX_HOME root
     assert not any("claude" in p for p in codex_rw)  # no cross-contamination
 
 
 def test_claude_config_dir_isolates_when_forced(tmp_path) -> None:
-    """Forcing ``claude_home`` (or a file-based .credentials.json) relocates the config
-    dir; that isolated dir is what host_rw_paths binds — never codex's."""
+    """Forcing ``claude_home`` relocates the config dir to a FRESH per-task home UNDER it (not the
+    shared root, so nothing accumulates); host_rw_paths binds that dir, never codex's."""
     isolated = str(tmp_path / "claude-home")
     agent = ClaudeAgent({"claude_home": isolated})
     rw = agent.host_rw_paths()
-    assert any(p == os.path.realpath(isolated) for p in rw)
+    root = os.path.realpath(isolated)
+    assert len(rw) == 1 and rw[0].startswith(root + os.sep) and rw[0] != root
     assert not any("codex" in p for p in rw)
 
 
@@ -63,20 +65,22 @@ def test_claude_config_dir_falls_back_to_real_home_for_keychain_auth(monkeypatch
 
 
 def test_codex_uses_an_isolated_home(tmp_path) -> None:
-    """codex runs against a generated home, not the user's ~/.codex, so no ambient
-    config leaks into the session."""
+    """codex runs against a FRESH per-task home under the root (not the user's ~/.codex, and not the
+    shared root), so no ambient config or a prior task's session store leaks in."""
     home = tmp_path / "codex-home"
     agent = CodexAgent({"codex_home": str(home)})
-    real = os.path.realpath(str(home))
-    assert agent.host_rw_paths() == [real]  # the generated home, writable (session store)
+    root = os.path.realpath(str(home))
+    rw = agent.host_rw_paths()
+    assert len(rw) == 1 and rw[0].startswith(root + os.sep) and rw[0] != root
     # Only the CLI's install dirs are readable — never the ambient config root.
     assert os.path.realpath(os.path.expanduser("~/.codex")) not in agent.host_read_paths()
 
     agent._configure_workdir()  # what start() invokes to seed the home
-    assert agent._env_overrides["CODEX_HOME"] == real
-    assert agent._env_overrides["HOME"] == real  # also redirects ~/.agents
-    assert (home / "skills").is_dir()
-    assert (home / "config.toml").read_text().lstrip().startswith("#")
+    cfg = rw[0]
+    assert agent._env_overrides["CODEX_HOME"] == cfg
+    assert agent._env_overrides["HOME"] == cfg  # also redirects ~/.agents
+    assert os.path.isdir(os.path.join(cfg, "skills"))
+    assert Path(cfg, "config.toml").read_text().lstrip().startswith("#")
 
 
 def test_host_egress_hosts_are_per_agent() -> None:
@@ -244,9 +248,26 @@ def test_claude_uses_an_isolated_config_dir(tmp_path, monkeypatch) -> None:
     os.makedirs(agent._cwd, exist_ok=True)
     agent._configure_workdir()
 
-    real = os.path.realpath(str(home))
-    assert agent._env_overrides["CLAUDE_CONFIG_DIR"] == real
-    assert (home / ".credentials.json").read_text() == "{}"  # auth seeded...
-    assert not (home / "history.jsonl").exists()  # ...and nothing else
-    assert agent.host_rw_paths() == [real]
+    root = os.path.realpath(str(home))
+    cfg = agent._env_overrides["CLAUDE_CONFIG_DIR"]
+    assert cfg.startswith(root + os.sep) and cfg != root  # a fresh per-task home under the root
+    assert Path(cfg, ".credentials.json").read_text() == "{}"  # auth seeded...
+    assert not os.path.exists(os.path.join(cfg, "history.jsonl"))  # ...and nothing else
+    assert agent.host_rw_paths() == [cfg]
     assert str(user_home / ".claude") not in agent.host_read_paths()
+
+
+async def test_claude_config_home_is_per_task_and_cleaned(tmp_path) -> None:
+    """Each task gets its OWN empty config home seeded with only auth (so no memory/history from a
+    prior task leaks in), and the home is removed on close so nothing accumulates."""
+    home = tmp_path / "claude-home"
+    home.mkdir()
+    (home / ".credentials.json").write_text("{}")  # the persistent login at the root
+    a1 = ClaudeAgent({"claude_home": str(home)})
+    a2 = ClaudeAgent({"claude_home": str(home)})
+    d1, d2 = a1._config_dir(), a2._config_dir()
+    assert d1 != d2  # different tasks -> different homes (no shared, accumulating dir)
+    assert Path(d1, ".credentials.json").read_text() == "{}"  # auth seeded
+    assert not os.path.exists(os.path.join(d1, "projects"))  # no memory dir
+    await a1.close()
+    assert not os.path.exists(d1)  # cleaned on teardown

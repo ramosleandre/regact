@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import uuid
 from typing import Any
 
 from regact.agent.base import executable_paths
@@ -39,7 +40,8 @@ class CodexAgent(_CliAgent):
         # per-run workdir so the auth token stays out of run artifacts. Override via
         # ``agent.args["codex_home"]``.
         raw_home = str(self._args.get("codex_home") or "~/.regact/codex-home")
-        self._codex_home = os.path.realpath(os.path.expanduser(raw_home))
+        self._home_root = os.path.realpath(os.path.expanduser(raw_home))
+        self._session_home: str | None = None  # this task's fresh home (created on demand)
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -59,31 +61,46 @@ class CodexAgent(_CliAgent):
         return [*executable_paths("codex")]  # the CLI's bin dir + its real install tree
 
     def host_rw_paths(self) -> list[str]:
-        os.makedirs(self._codex_home, exist_ok=True)  # must exist for a bind/subpath rule
-        return [self._codex_home]
+        return [self._config_dir()]
 
     def host_egress_hosts(self) -> list[str]:
         # API-key mode needs only api.openai.com; ChatGPT-login adds auth/chatgpt.
         return ["api.openai.com", "auth.openai.com", "chatgpt.com"]
 
-    def _configure_workdir(self) -> None:
-        """Seed the isolated home and point codex at it via ``CODEX_HOME`` and ``HOME``.
+    def _config_dir(self) -> str:
+        """A FRESH per-task codex home, seeded with a minimal config + only the auth token, cached
+        so host_rw_paths() and _configure_workdir() agree. No session store / skills from a prior
+        task accumulate (a shared home would). Codex reads config + skills from both ``$CODEX_HOME``
+        and ``$HOME/.agents``, so start() redirects both at this empty home."""
+        if self._session_home is None:
+            home = os.path.join(self._home_root, "session", uuid.uuid4().hex)
+            os.makedirs(os.path.join(home, "skills"), exist_ok=True)
+            with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as handle:
+                handle.write("# generated: isolated codex home\n")
+            user_auth = os.path.join(os.path.expanduser("~"), ".codex", "auth.json")
+            for src in (os.path.join(self._home_root, "auth.json"), user_auth):
+                if os.path.exists(src):
+                    shutil.copyfile(src, os.path.join(home, "auth.json"))
+                    break
+            self._session_home = home
+        return self._session_home
 
-        Codex reads config and skills from both ``$CODEX_HOME`` and ``$HOME/.agents``;
-        redirecting both at the empty home yields a clean session (no ambient config,
-        plugins, or MCP servers). Writes a minimal ``config.toml`` and copies the auth
-        token if present (auth is file-based under ``CODEX_HOME``); otherwise codex falls
-        back to ``OPENAI_API_KEY``.
-        """
-        home = self._codex_home
-        os.makedirs(os.path.join(home, "skills"), exist_ok=True)
-        with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as handle:
-            handle.write("# generated: isolated codex home\n")
-        user_auth = os.path.join(os.path.expanduser("~"), ".codex", "auth.json")
-        if os.path.exists(user_auth):
-            shutil.copyfile(user_auth, os.path.join(home, "auth.json"))
+    def _configure_workdir(self) -> None:
+        """Point codex at its fresh per-task home (:meth:`_config_dir`) via ``CODEX_HOME`` and
+        ``HOME`` (the latter also redirects ``~/.agents``); otherwise codex falls back to
+        ``OPENAI_API_KEY``."""
+        home = self._config_dir()
         self._env_overrides["CODEX_HOME"] = home
         self._env_overrides["HOME"] = home
+
+    async def close(self) -> None:
+        """Drop the per-task home on teardown (nothing reads codex's native session store post-run;
+        the normalized transcript is already in logs/), so seeded auth + session state do not
+        accumulate under the home root."""
+        await super().close()
+        if self._session_home is not None:
+            shutil.rmtree(self._session_home, ignore_errors=True)
+            self._session_home = None
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["codex"]

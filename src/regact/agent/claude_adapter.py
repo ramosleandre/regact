@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from typing import Any
 
 from regact.agent.base import executable_paths
@@ -51,21 +52,44 @@ class ClaudeAgent(_CliAgent):
     def __init__(self, args: dict[str, object] | None = None) -> None:
         super().__init__(args)
         raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
-        self._claude_home = os.path.realpath(os.path.expanduser(raw_home))
+        self._home_root = os.path.realpath(os.path.expanduser(raw_home))
+        self._session_home: str | None = None  # this task's fresh config dir (created on demand)
+
+    def _real_creds(self) -> str:
+        return os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
+
+    def _can_isolate(self) -> bool:
+        """Relocate to an isolated dir only when auth survives it: a copyable ``.credentials.json``
+        exists (file-based login) or the caller forced a home. Else Keychain-only macOS auth, which
+        is keyed to the DEFAULT dir, would be lost and the CLI would strand as "Not logged in"."""
+        forced = self._args.get("claude_home") is not None
+        return (
+            forced
+            or os.path.exists(os.path.join(self._home_root, ".credentials.json"))
+            or os.path.exists(self._real_creds())
+        )
+
+    def _make_session_home(self) -> str:
+        """A FRESH per-task config dir seeded with ONLY the auth credential - no projects/memory,
+        sessions, or history from any prior task or run (which a shared home would accumulate). The
+        home root persists the login; each task gets its own empty dir under it."""
+        home = os.path.join(self._home_root, "session", uuid.uuid4().hex)
+        os.makedirs(home, exist_ok=True)
+        for src in (os.path.join(self._home_root, ".credentials.json"), self._real_creds()):
+            if os.path.exists(src):
+                shutil.copyfile(src, os.path.join(home, ".credentials.json"))
+                break
+        return home
 
     def _config_dir(self) -> str:
-        """The config dir claude will actually use — decided independently of start().
-
-        Isolated home when we can relocate without losing auth (a copyable
-        ``.credentials.json`` exists, or the caller forced ``args.claude_home``); else
-        the real ``~/.claude`` so Keychain-only macOS auth keeps working. Same rule as
-        :meth:`_configure_home`, so the sandbox binds the dir claude truly writes to.
-        """
-        forced = self._args.get("claude_home") is not None
-        creds = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
-        if forced or os.path.exists(creds):
-            return self._claude_home
-        return os.path.join(os.path.expanduser("~"), ".claude")
+        """The config dir claude will actually use — decided independently of start(), and cached so
+        host_rw_paths()/auth_check()/_configure_home() all agree. A fresh per-task home when we can
+        isolate without losing auth; else the real ``~/.claude`` (Keychain-only macOS auth)."""
+        if not self._can_isolate():
+            return os.path.join(os.path.expanduser("~"), ".claude")
+        if self._session_home is None:
+            self._session_home = self._make_session_home()
+        return self._session_home
 
     def _configure_workdir(self) -> None:
         # Native confinement: a .claude/settings.json deny-list keeps Claude's file
@@ -80,27 +104,23 @@ class ClaudeAgent(_CliAgent):
             self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)
 
     def _configure_home(self) -> None:
-        """Seed an isolated config dir and point claude at it via ``CLAUDE_CONFIG_DIR``.
-
-        Isolation is best-effort and MUST NOT break auth. It only kicks in when auth
-        lives in a copyable ``.credentials.json`` (the file-based login): we copy just
-        that file in, so the session starts with auth and nothing else — no other
-        session's transcript, prompt history, or user-level settings.
-
-        When there is no such file (macOS subscription auth lives in the Keychain, keyed
-        to the DEFAULT config dir and not found from a relocated one), isolating the dir
-        would strand the CLI as "Not logged in". In that case we leave ``CLAUDE_CONFIG_DIR``
-        unset so claude uses its real home and keeps its auth. Override the home
-        explicitly with ``args.claude_home`` to force isolation regardless.
-        """
+        """Point claude at its config dir. When we isolate, that dir is a fresh per-task home seeded
+        with only auth (see :meth:`_make_session_home`), so no prior session's memory / transcript /
+        history leaks in. On Keychain-only auth we leave ``CLAUDE_CONFIG_DIR`` unset so claude keeps
+        its real home + auth."""
         config_dir = self._config_dir()
-        if config_dir != self._claude_home:
-            return  # Keychain-only auth: use the real home, relocating would drop auth
-        os.makedirs(config_dir, exist_ok=True)
-        creds = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
-        if os.path.exists(creds):
-            shutil.copyfile(creds, os.path.join(config_dir, ".credentials.json"))
+        if config_dir == os.path.join(os.path.expanduser("~"), ".claude"):
+            return  # Keychain-only auth: real home, relocating would drop auth
         self._env_overrides["CLAUDE_CONFIG_DIR"] = config_dir
+
+    async def close(self) -> None:
+        """Drop the per-task config home on teardown (nothing reads claude's native session dir
+        post-run; the normalized transcript is already in logs/), so seeded auth + session state do
+        not accumulate under the home root."""
+        await super().close()
+        if self._session_home is not None:
+            shutil.rmtree(self._session_home, ignore_errors=True)
+            self._session_home = None
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
