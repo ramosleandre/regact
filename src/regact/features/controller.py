@@ -171,13 +171,13 @@ class FinalizeControllerHook(Hook):
         *,
         n_episodes: int,
         max_moves: int,
-        record_video: bool,
+        n_videos: int,
         shadow_replay: bool,
     ) -> None:
         self._deps = deps
         self._n_episodes = n_episodes
         self._max_moves = max_moves
-        self._record_video = record_video
+        self._n_videos = n_videos
         self._shadow_replay = shadow_replay
 
     async def run(self) -> EvalResult | None:
@@ -198,7 +198,7 @@ class FinalizeControllerHook(Hook):
                 lifecycle=deps.lifecycle,
                 n_episodes=self._n_episodes,
                 max_moves=self._max_moves,
-                record_video=self._record_video,
+                n_videos=self._n_videos,
             )
         except Exception as exc:
             # The out-of-process eval can raise at teardown past its own catches (e.g. a parent-side
@@ -221,8 +221,8 @@ class Controller:
     """The always-on controller-writing capability (core, not a feature).
 
     Owns its evaluation knobs (they configure the controller's scoring): ``n_episodes``
-    eval episodes per submission, ``max_moves`` env steps per rollout, ``record_video``
-    for the eval videos, ``shadow_replay`` for the anti-cheat re-score. Built by the
+    eval episodes per submission, ``max_moves`` env steps per rollout, ``n_videos``
+    eval episodes to record a video of, ``shadow_replay`` for the anti-cheat re-score. Built by the
     orchestrator from :class:`ControllerConfig`; exposes the same ``templates`` /
     ``prompt_fragment`` / ``tools`` / ``hooks`` seams a feature does, applied alongside
     the optional features.
@@ -235,12 +235,12 @@ class Controller:
         *,
         n_episodes: int = 1,
         max_moves: int = 2500,
-        record_video: bool = True,
+        n_videos: int = 2,
         shadow_replay: bool = False,
     ) -> None:
         self._n_episodes = int(n_episodes)
         self._max_moves = int(max_moves)
-        self._record_video = bool(record_video)
+        self._n_videos = int(n_videos)
         self._shadow_replay = bool(shadow_replay)
 
     @classmethod
@@ -249,7 +249,7 @@ class Controller:
         return cls(
             n_episodes=config.n_episodes,
             max_moves=config.max_moves,
-            record_video=config.record_video,
+            n_videos=config.n_videos,
             shadow_replay=config.shadow_replay,
         )
 
@@ -267,7 +267,7 @@ class Controller:
     def tools(self, deps: RunDeps) -> list[Tool]:
         # This feature owns the eval, so it also owns the eval fields of the state.
         deps.experiment.n_eval_episodes = self._n_episodes
-        deps.experiment.n_videos = self._n_episodes if self._record_video else 0
+        deps.experiment.n_videos = min(self._n_videos, self._n_episodes)
         submit = SubmitSolution(
             deps.experiment,
             _make_executor(deps, shadow_replay=self._shadow_replay),
@@ -277,7 +277,7 @@ class Controller:
             lifecycle=deps.lifecycle,
             n_episodes=self._n_episodes,
             max_moves=self._max_moves,
-            record_video=self._record_video,
+            n_videos=self._n_videos,
             feature_metrics=deps.feature_metrics,
         )
         return [submit, ExitTask(deps.experiment)]
@@ -289,7 +289,7 @@ class Controller:
                 deps,
                 n_episodes=self._n_episodes,
                 max_moves=self._max_moves,
-                record_video=self._record_video,
+                n_videos=self._n_videos,
                 shadow_replay=self._shadow_replay,
             )
         ]

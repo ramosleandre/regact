@@ -128,7 +128,7 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
     # The persisted state reflects the run's config and telemetry, not placeholders.
     state = json.loads((logs / "experiment_state.json").read_text())
     assert state["n_eval_episodes"] == 2
-    assert state["n_videos"] == 2  # record_video defaults to True
+    assert state["n_videos"] == 2  # n_videos defaults to 2, capped at n_episodes (=2)
     assert state["problem_kwargs"] == {"env_id": "fake-v0"}
     assert state["agent_session_id"] == "native-123"
     assert state["env_moves"] > 0  # eval episodes stepped the env

@@ -65,17 +65,17 @@ def test_mapping_carries_first_obs_in_prompt() -> None:
 
 
 def test_mapping_preserves_controller_eval_knobs() -> None:
-    """The controller's eval knobs (record_video/shadow_replay) live on ``config.controller``
+    """The controller's eval knobs (n_videos/shadow_replay) live on ``config.controller``
     and must survive the mapping (regression: as run-level flags they were once dropped, so
     `shadow_replay: true` silently ran with the anti-cheat replay OFF)."""
     cfg = run_config_from_mapping(
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "arc_agi"},
-            "controller": {"record_video": False, "shadow_replay": True},
+            "controller": {"n_videos": 0, "shadow_replay": True},
         }
     )
-    assert cfg.controller.record_video is False
+    assert cfg.controller.n_videos == 0
     assert cfg.controller.shadow_replay is True
 
 
@@ -184,7 +184,7 @@ def test_run_exp_hydra_composes_a_config() -> None:
     assert config.features == {}
     assert config.controller.n_episodes == 1
     assert config.controller.max_moves == 2500
-    assert config.controller.record_video is True
+    assert config.controller.n_videos == 2
     assert config.controller.shadow_replay is True
 
 

@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--max-moves", type=int, default=400)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--record-video", action="store_true")
+    parser.add_argument("--n-videos", type=int, default=0)  # record the first N episodes; 0 = none
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args(argv)
 
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
                 lifecycle=Lifecycle(args.lifecycle),
                 n_episodes=args.episodes,
                 max_moves=args.max_moves,
-                record_video=args.record_video,
+                n_videos=args.n_videos,
                 seed=args.seed,
             )
             payload = {"episodes": episodes}

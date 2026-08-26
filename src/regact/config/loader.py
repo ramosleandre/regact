@@ -71,11 +71,11 @@ def _features_from(raw: Any) -> dict[str, dict[str, Any]]:
 def _controller_from(raw: Any) -> ControllerConfig:
     """Build ``ControllerConfig`` from the ``controller`` mapping (defaults if absent).
 
-    ``n_episodes``/``max_moves`` may arrive as strings via env interpolation; coerce them.
-    The booleans come through as real YAML/CLI bools, so they are passed through untouched.
+    ``n_episodes``/``max_moves``/``n_videos`` may arrive as strings via env interpolation;
+    coerce them. The booleans come through as real YAML/CLI bools, passed through untouched.
     """
     fields: dict[str, Any] = dict(raw or {})
-    for name in ("n_episodes", "max_moves"):
+    for name in ("n_episodes", "max_moves", "n_videos"):
         if fields.get(name) is not None:
             fields[name] = int(fields[name])
     return ControllerConfig(**fields)

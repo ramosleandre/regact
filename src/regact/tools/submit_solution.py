@@ -34,7 +34,7 @@ class SubmitSolution(Tool):
         lifecycle: Lifecycle,
         n_episodes: int = 1,
         max_moves: int = 400,
-        record_video: bool = False,
+        n_videos: int = 0,
         feature_metrics: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._experiment = experiment
@@ -45,7 +45,7 @@ class SubmitSolution(Tool):
         self._lifecycle = lifecycle
         self._n_episodes = n_episodes
         self._max_moves = max_moves
-        self._record_video = record_video
+        self._n_videos = n_videos
         self._feature_metrics = feature_metrics
 
     @property
@@ -79,7 +79,7 @@ class SubmitSolution(Tool):
             lifecycle=self._lifecycle,
             n_episodes=self._n_episodes,
             max_moves=self._max_moves,
-            record_video=self._record_video,
+            n_videos=self._n_videos,
         )
 
         if self._feature_metrics is not None:

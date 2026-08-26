@@ -5,5 +5,5 @@
 controller:
   n_episodes: 1        # eval episodes per submission (multi-instance: more = better stats)
   max_moves: 2500      # max env.step per controller rollout (eval)
-  record_video: true   # record a video of each eval episode (per game's render_frame)
+  n_videos: 2          # record a video of the first min(n_videos, n_episodes) episodes (0 = none)
   shadow_replay: true  # re-score by replaying actions on a trusted env (anti-cheat; ~2x eval cost)

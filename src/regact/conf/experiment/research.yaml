@@ -17,7 +17,7 @@ defaults:
 sandbox: true             # confine the agent + block egress except its LLM host
 controller:
   shadow_replay: true     # re-score by replaying the actions on a trusted env (~2x eval)
-  record_video: true
+  n_videos: 2             # record a video of the first min(n_videos, n_episodes) episodes
 limits:
   max_turns: 350
   max_seconds_per_task: 3600   # 1h per game

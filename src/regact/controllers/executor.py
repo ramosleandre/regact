@@ -47,7 +47,7 @@ class Executor(Protocol):
         lifecycle: Lifecycle,
         n_episodes: int = ...,
         max_moves: int = ...,
-        record_video: bool = ...,
+        n_videos: int = ...,
     ) -> EvalResult: ...
 
 
@@ -76,7 +76,7 @@ def run_episodes_raw(
     lifecycle: Lifecycle,
     n_episodes: int,
     max_moves: int,
-    record_video: bool = False,
+    n_videos: int = 0,
     seed: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run the controller for each episode; return raw per-episode outcomes (no scoring).
@@ -86,6 +86,9 @@ def run_episodes_raw(
     score. Safe to run in a sandboxed subprocess. Raises if the controller cannot be loaded
     (the caller maps that to an eval error). Used in-process by :class:`ControllerExecutor` and
     out-of-process by ``regact.controllers.eval_runner``.
+
+    Frames are captured only for the first ``n_videos`` episodes (frames are the space/memory
+    hog of the raw dump), so a many-episode eval still yields at most ``n_videos`` videos.
     """
     factory = _load_controller_factory(solution_path)
     episode_count = 1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes
@@ -100,7 +103,7 @@ def run_episodes_raw(
         try:
             env.reset(seed=episode_seed)
             summary = run_controller(
-                env, factory(), max_steps=max_moves, collect_frames=record_video
+                env, factory(), max_steps=max_moves, collect_frames=index < n_videos
             )
         except Exception as exc:  # a fault in the reset (e.g. a slow-env timeout) or the controller
             out.append(
@@ -296,10 +299,11 @@ class ControllerExecutor:
         lifecycle: Lifecycle,
         n_episodes: int = 1,
         max_moves: int = 400,
-        record_video: bool = False,
+        n_videos: int = 0,
     ) -> EvalResult:
         """Drive the controller via the env client and persist the result."""
         _snapshot_solution(solution_path, output_path)
+        videos = n_videos if self._render_frame is not None else 0
         try:
             raw = run_episodes_raw(
                 self._env,
@@ -307,7 +311,7 @@ class ControllerExecutor:
                 lifecycle=lifecycle,
                 n_episodes=n_episodes,
                 max_moves=max_moves,
-                record_video=record_video and self._render_frame is not None,
+                n_videos=videos,
                 seed=self._seed,
             )
         except Exception as exc:  # import / attribute / syntax error in agent code
@@ -327,7 +331,7 @@ class ControllerExecutor:
             executor="in_process",
         )
         write_result(output_path, result)
-        if record_video and self._render_frame is not None:
+        if videos > 0 and self._render_frame is not None:
             _write_episode_videos(raw, output_path, self._render_frame)
         return result
 
@@ -372,16 +376,16 @@ class SandboxedExecutor:
         lifecycle: Lifecycle,
         n_episodes: int = 1,
         max_moves: int = 400,
-        record_video: bool = False,
+        n_videos: int = 0,
     ) -> EvalResult:
         """Run the eval subprocess, score its raw outcomes here, and persist the result."""
         out_dir = os.path.dirname(output_path) or "."
         os.makedirs(out_dir, exist_ok=True)
         _snapshot_solution(solution_path, output_path)
         raw_path = os.path.join(out_dir, "episodes_raw.json")
-        video = record_video and self._render_frame is not None
+        videos = n_videos if self._render_frame is not None else 0
         result = self._spawn_and_score(
-            task_name, solution_path, raw_path, lifecycle, n_episodes, max_moves, video
+            task_name, solution_path, raw_path, lifecycle, n_episodes, max_moves, videos
         )
         write_result(output_path, result)
         return result
@@ -394,7 +398,7 @@ class SandboxedExecutor:
         lifecycle: Lifecycle,
         n_episodes: int,
         max_moves: int,
-        record_video: bool,
+        n_videos: int,
     ) -> EvalResult:
         argv = [
             sys.executable,
@@ -411,8 +415,8 @@ class SandboxedExecutor:
             "--output",
             os.path.abspath(raw_path),
         ]
-        if record_video:
-            argv.append("--record-video")
+        if n_videos > 0:
+            argv += ["--n-videos", str(n_videos)]
         if self._seed is not None:
             argv += ["--seed", str(self._seed)]
         tmp = os.path.join(self._workdir, "tmp")
@@ -485,7 +489,7 @@ class SandboxedExecutor:
                 aggregate_metrics=self._aggregate_metrics,
                 executor="subprocess",
             )
-        if record_video and self._render_frame is not None:
+        if n_videos > 0 and self._render_frame is not None:
             _write_episode_videos(episodes, raw_path, self._render_frame)
         return result
 

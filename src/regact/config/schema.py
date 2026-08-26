@@ -82,13 +82,14 @@ class ControllerConfig:
 
     The controller is core, not a feature, so its settings live here rather than under
     ``features.<name>``. They configure the controller's *evaluation*: how many episodes
-    each submission is scored over, the per-rollout step cap, whether to record a video,
-    and whether to shadow-replay (anti-cheat re-score on a trusted env).
+    each submission is scored over, the per-rollout step cap, how many eval episodes to
+    record a video of, and whether to shadow-replay (anti-cheat re-score on a trusted env).
     """
 
     n_episodes: int = 1  # eval episodes per submission (multi-instance: more = better stats)
     max_moves: int = 2500  # max env.step per controller rollout (eval)
-    record_video: bool = True  # record a video of each eval episode (per game's render_frame)
+    # Record a video of the FIRST min(n_videos, n_episodes) eval episodes; 0 = no video.
+    n_videos: int = 2
     shadow_replay: bool = False  # re-score by replaying actions on a trusted env (anti-cheat)
 
 

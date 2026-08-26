@@ -137,7 +137,7 @@ async def test_sandboxed_executor_records_video(tmp_path: Path) -> None:
             lifecycle=Lifecycle.MULTI_INSTANCE,
             n_episodes=1,
             max_moves=10,
-            record_video=True,
+            n_videos=1,
         )
     video = Path(workdir) / "submissions" / "0" / "video_0.mp4"
     assert video.is_file() and video.stat().st_size > 0
