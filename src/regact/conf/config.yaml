@@ -15,6 +15,7 @@ defaults:
   - override hydra/hydra_logging: none
 
 parallel_workers: 1     # concurrent tasks; 1 = sequential
+n_attempts_per_task: 1  # repeat each task N times (interleaved) to aggregate over attempts; 1 = once
 first_obs_in_prompt: false  # true = render the first observation into the first message
 limits:
   max_turns: 350                # agent turns per task before the loop gives up

@@ -103,6 +103,9 @@ class RunConfig:
     controller: ControllerConfig = field(default_factory=ControllerConfig)
     features: dict[str, dict[str, Any]] = field(default_factory=dict)
     parallel_workers: int = 1  # 1 = sequential
+    # Repeat each task this many times (interleaved: every task's attempt A before any attempt A+1),
+    # so a run collects several attempts per task to aggregate over. 1 = each task once.
+    n_attempts_per_task: int = 1
     first_obs_in_prompt: bool = False  # render the first observation into the first message
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend

@@ -77,6 +77,40 @@ async def test_run_experiment_runs_all_tasks(tmp_path: Path) -> None:
     assert (tmp_path / "g2" / "logs" / "experiment_state.json").exists()
 
 
+def test_attempt_plan_is_interleaved_across_tasks() -> None:
+    """Repeated tasks run every task's attempt A before any task's attempt A+1 (task1@0, task2@0,
+    task1@1, ...), not all of task1's attempts first."""
+    from regact.orchestration.experiment import _attempt_plan
+
+    assert _attempt_plan(["t1", "t2"], 3) == [
+        ("t1", 0),
+        ("t2", 0),
+        ("t1", 1),
+        ("t2", 1),
+        ("t1", 2),
+        ("t2", 2),
+    ]
+    assert _attempt_plan(["t1", "t2"], 1) == [("t1", 0), ("t2", 0)]
+
+
+async def test_run_experiment_repeats_each_task_n_attempts(tmp_path: Path) -> None:
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED),
+        problem=ProblemConfig(name="fake_exp"),
+        limits=LimitsConfig(max_turns=1),
+        n_attempts_per_task=2,
+    )
+    reasons = await run_experiment(config, output_root=str(tmp_path))
+
+    # 2 tasks x 2 attempts = 4 runs, each in its own <task>/attempt_<n> dir.
+    assert set(reasons) == {"g1/attempt_0", "g1/attempt_1", "g2/attempt_0", "g2/attempt_1"}
+    for task in ("g1", "g2"):
+        for attempt in (0, 1):
+            assert (
+                tmp_path / task / f"attempt_{attempt}" / "logs" / "experiment_state.json"
+            ).exists()
+
+
 async def test_problem_tasks_selects_experiment_subset(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),

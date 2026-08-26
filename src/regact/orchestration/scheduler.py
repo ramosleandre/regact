@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from regact.config.schema import Lifecycle, RunConfig
 from regact.obs.errors import ErrorCategory, RegactError
 
-Unit = Callable[[str], Awaitable[object]]
+# A work item is opaque to the scheduler (a task name, or a (task, attempt) pair); ``task_of``
+# recovers the game name it targets, for the single-instance parallelism check.
+Unit = Callable[[Any], Awaitable[object]]
 
 
 class Scheduler:
@@ -43,20 +46,22 @@ class Scheduler:
                 "single_instance parallel runs require distinct games (a game is made once)",
             )
 
-    async def run(self, unit: Unit, task_names: list[str]) -> list[object]:
-        """Run ``unit(task_name)`` for each task, sequential or concurrency-bounded."""
-        self._validate(task_names)
+    async def run(
+        self, unit: Unit, items: list[Any], *, task_of: Callable[[Any], str] = lambda i: i
+    ) -> list[object]:
+        """Run ``unit(item)`` for each item, sequential or concurrency-bounded."""
+        self._validate([task_of(i) for i in items])
         workers = self._workers()
         if workers == 1:
-            return [await unit(name) for name in task_names]
+            return [await unit(item) for item in items]
 
         semaphore = asyncio.Semaphore(workers)
 
-        async def _bounded(name: str) -> object:
+        async def _bounded(item: Any) -> object:
             async with semaphore:
                 try:
-                    return await unit(name)
+                    return await unit(item)
                 except Exception as exc:
                     return f"task_error: {type(exc).__name__}: {exc}"
 
-        return list(await asyncio.gather(*(_bounded(name) for name in task_names)))
+        return list(await asyncio.gather(*(_bounded(item) for item in items)))
