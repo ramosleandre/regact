@@ -66,13 +66,20 @@ def _regact_src_dir() -> str:
 
 
 def _agent_regact_read_paths(src_dir: str) -> list[str]:
-    """The only regact source the agent's workdir needs: the package marker + the env client
-    (framework.make_env -> regact.envclient.client -> regact.envclient.obs). Binding just these -
-    not all of src - keeps scoring/anti-cheat/sandbox source out of the agent's namespace; the eval
-    subprocess uses a separate wrapper that still binds full src. Closure pinned by test_sandbox.py;
-    if a future workdir helper imports another regact module, add it here (not all of src)."""
+    """The regact source the agent's namespace needs. Two things import in-namespace: the env client
+    the workdir uses (framework.make_env -> regact.envclient.client/obs) and the netbridge launcher,
+    run as python -m regact.security.netbridge INSIDE the namespace to relay the loopback bridge.
+    Binding just these - not all of src - keeps scoring (regact.controllers) and the sandbox policy
+    (regact.security.runtime) out of the agent's filesystem; the eval subprocess uses a separate
+    wrapper with full src. Closure pinned by test_sandbox.py; add a module here, not all of src."""
     regact_pkg = os.path.join(src_dir, "regact")
-    return [os.path.join(regact_pkg, "__init__.py"), os.path.join(regact_pkg, "envclient")]
+    security = os.path.join(regact_pkg, "security")
+    return [
+        os.path.join(regact_pkg, "__init__.py"),
+        os.path.join(regact_pkg, "envclient"),
+        os.path.join(security, "__init__.py"),  # netbridge relay launcher runs in the namespace
+        os.path.join(security, "netbridge.py"),
+    ]
 
 
 def _secret_module_paths(modules: tuple[str, ...]) -> list[str]:
