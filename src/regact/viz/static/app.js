@@ -132,9 +132,9 @@ const _saveColors = () => { try { localStorage.setItem(_COLORS_KEY, JSON.stringi
 // crashed-run mask, which experiments are hidden, and per-experiment color overrides (localStorage).
 const _graph = {
   agg: "mean", err: "none", mask: false,
-  // "agg:mean_levels_completed" is an auto-discovered problem metric (ARC); harmless on games that
-  // never report it (no bar drawn). success_rate + time are the framework defaults.
-  active: new Set(["success_rate", "time", "agg:mean_levels_completed"]),
+  // Defaults span both problem families; a metric a game never reports draws no bar. success_rate
+  // is MiniGrid's; mean_levels_completion_rate is ARC's graded headline (its success_rate role).
+  active: new Set(["success_rate", "time", "agg:mean_levels_completion_rate", "agg:mean_levels_completed"]),
   hidden: new Set(), colors: _loadColors(),
 };
 

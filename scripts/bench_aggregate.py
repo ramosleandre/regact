@@ -181,6 +181,14 @@ def _classify_controller(solution_path: Path) -> str:
 _SOLVE_THRESHOLD = 0.6
 
 
+def _primary_score(aggregate: dict[str, Any]) -> float | None:
+    """A cell's headline score, problem-agnostic: MiniGrid's ``success_rate``, or - for ARC, which
+    renamed that away - ``mean_levels_completion_rate`` (graded mean fraction of levels cleared), so
+    the pivot and outcome classification stay meaningful across both problem families."""
+    score = aggregate.get("success_rate")
+    return score if score is not None else aggregate.get("mean_levels_completion_rate")
+
+
 def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> str:
     """Whether a cell's score is a trustworthy capability signal.
 
@@ -234,8 +242,8 @@ def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]
         "model": model,
         "seed": (config.get("problem") or {}).get("seed"),
         "controller": _classify_controller(task_dir / "workdir" / "solution.py"),
-        "outcome": _classify_outcome(aggregate.get("success_rate"), state.get("exit_reason")),
-        "success_rate": aggregate.get("success_rate"),
+        "outcome": _classify_outcome(_primary_score(aggregate), state.get("exit_reason")),
+        "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
         "n_episodes": aggregate.get("n_episodes"),
         "mean_levels_completed": aggregate.get("mean_levels_completed"),
         "exit_reason": state.get("exit_reason"),

@@ -173,13 +173,14 @@ def test_compute_episode_metrics_from_obs() -> None:
         "steps": 120,
         "levels_completed": 7,
         "win_levels": 7,
-        "level_fraction": 1.0,
+        "level_completion_rate": 1.0,
     }
 
 
-def test_success_rate_is_graded_by_level_fraction() -> None:
-    """success_rate is the mean PROPORTION of levels cleared (graded); win_rate keeps the binary
-    full-win. A 3/6 partial (ft09's case) scores success_rate 0.5, not 0."""
+def test_mean_levels_completion_rate_is_graded() -> None:
+    """The headline ARC metric is mean_levels_completion_rate - the mean PROPORTION of levels
+    cleared (graded); win_rate keeps the binary full-win. A 3/6 partial (ft09's) scores 0.5, not 0.
+    ARC has NO 'success_rate' key (it would be all-or-nothing, which is win_rate)."""
     problem = _problem()
     partial = problem.compute_episode_metrics(
         Obs(
@@ -189,16 +190,17 @@ def test_success_rate_is_graded_by_level_fraction() -> None:
         ),
         steps=25,
     )
-    assert partial["level_fraction"] == 0.5 and partial["success"] is False
+    assert partial["level_completion_rate"] == 0.5 and partial["success"] is False
     agg = problem.aggregate_episode_metrics([partial])
-    assert agg["success_rate"] == 0.5  # graded, not 0
+    assert agg["mean_levels_completion_rate"] == 0.5  # graded, not 0
+    assert "success_rate" not in agg  # renamed away from the misleading all-or-nothing name
     assert agg["win_rate"] == 0.0  # not a full win
     assert agg["mean_levels_completed"] == 3.0
     # win_levels=0 must not divide by zero:
     zero = problem.compute_episode_metrics(
         Obs(frame=None, is_done=True, info={"levels_completed": 0, "win_levels": 0}), steps=1
     )
-    assert zero["level_fraction"] == 0.0
+    assert zero["level_completion_rate"] == 0.0
 
 
 def test_milestone_detector_emits_on_level_and_win() -> None:
