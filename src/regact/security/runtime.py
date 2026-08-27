@@ -349,7 +349,12 @@ def _bwrap(
     for path in _python_prefixes():
         if os.path.isdir(path):
             cmd += ["--ro-bind", path, path]
-    for path in (os.path.realpath(p) for p in allow_read):
+    # Keep symlink aliases intact on the destination side.  ``executable_paths``
+    # deliberately includes every unresolved hop (for example Codex's
+    # ``standalone/current/bin``); realpath-ing those here collapses all hops to the
+    # versioned install dir and leaves the PATH entry's symlink dangling inside the
+    # namespace.  Make relative inputs absolute without resolving symlinks instead.
+    for path in (os.path.abspath(os.path.expanduser(p)) for p in allow_read):
         cmd += ["--ro-bind-try", path, path]
     cmd += ["--bind", wd, wd, "--chdir", wd]
     for path in (os.path.realpath(p) for p in allow_rw):

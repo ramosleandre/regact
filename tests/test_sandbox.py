@@ -140,6 +140,22 @@ def test_wrap_argv_allows_a_file_path(tmp_path: Path) -> None:
     assert f"--ro-bind-try {real} {real}" in " ".join(bwrap)  # binds files + tolerates absent
 
 
+def test_wrap_argv_bwrap_preserves_allowed_symlink_alias(tmp_path: Path) -> None:
+    """Executable allowlists include unresolved install aliases such as
+    ``standalone/current/bin``.  The bwrap destination must retain that alias so a
+    PATH symlink can traverse it inside the otherwise deny-default namespace."""
+    versioned = tmp_path / "releases" / "1.0" / "bin"
+    versioned.mkdir(parents=True)
+    current = tmp_path / "current"
+    current.symlink_to(versioned.parent, target_is_directory=True)
+    alias = str(current / "bin")
+
+    bwrap = wrap_argv(SandboxRuntime.BWRAP, ["tool"], workdir=str(tmp_path), allow_read=[alias])
+    joined = " ".join(bwrap)
+    assert f"--ro-bind-try {alias} {alias}" in joined
+    assert f"--ro-bind-try {os.path.realpath(alias)} {os.path.realpath(alias)}" not in joined
+
+
 def test_deny_read_carves_game_packages_out_of_the_allowed_venv() -> None:
     """deny_read hides packages that live INSIDE the allowed interpreter prefix (the venv)."""
     sb = wrap_argv(
@@ -215,6 +231,35 @@ def test_regact_problems_hidden_while_the_rest_of_regact_imports(tmp_path: Path)
     assert rc("from regact.envclient.client import EnvClient") == 0  # agent still runs
     assert rc("from regact.controllers.executor import run_episodes_raw") == 0  # eval still runs
     assert rc("import regact.problems.minigrid.problem") != 0  # the game wrapper is hidden
+
+
+@pytest.mark.skipif(
+    detect() is not SandboxRuntime.BWRAP, reason="agent narrowed-bind e2e needs a real bwrap host"
+)
+def test_agent_bind_exposes_only_envclient_not_framework_internals(tmp_path: Path) -> None:
+    """The AGENT wrapper binds only regact.envclient (task.py: ``_agent_regact_read_paths``), so the
+    workdir's env layer imports while the scoring / anti-cheat / sandbox source is absent from the
+    agent's filesystem - it cannot read how it is scored or confined. The eval wrapper keeps full
+    ``src`` (test above), so this asymmetry is safe."""
+    import regact
+    from regact.orchestration.task import _agent_regact_read_paths
+
+    src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+    agent_paths = _agent_regact_read_paths(src)
+
+    def rc(code: str) -> int:
+        argv = wrap_argv(
+            SandboxRuntime.BWRAP,
+            [sys.executable, "-c", code],
+            workdir=str(tmp_path),
+            allow_read=agent_paths,
+        )
+        return subprocess.run(argv, capture_output=True, text=True, timeout=60).returncode
+
+    assert rc("from regact.envclient.client import EnvClient") == 0  # the env layer still works
+    assert rc("import regact.security.netbridge") == 0  # the loopback relay runs in-namespace
+    assert rc("import regact.controllers.executor") != 0  # scoring / anti-cheat source is absent
+    assert rc("import regact.security.runtime") != 0  # the jail's own source is absent
 
 
 def test_detect_returns_a_known_runtime() -> None:
