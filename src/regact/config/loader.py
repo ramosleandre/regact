@@ -108,6 +108,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         n_attempts_per_task=int(data.get("n_attempts_per_task", 1)),
         first_obs_in_prompt=bool(data.get("first_obs_in_prompt", False)),
         flagging_warning_cap=int(data.get("flagging_warning_cap", 3)),
+        dry_run=bool(data.get("dry_run", False)),
         limits=_limits_from(data.get("limits") or {}),
         sandbox=_sandbox_bool(data.get("sandbox", False)),
         sandbox_opts=dict(data.get("sandbox_opts") or {}),

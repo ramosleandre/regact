@@ -159,3 +159,27 @@ async def test_run_experiment_tees_narration_to_run_log(tmp_path: Path) -> None:
     assert "task(s)" in text  # the experiment-start line
     assert "complete:" in text  # the summary line
     assert "g1" in text and "g2" in text  # per-task lifecycle lines
+
+
+async def test_dry_run_records_the_prompt_and_skips_the_agent(tmp_path: Path) -> None:
+    """dry_run builds and records the exact system prompt + first message, then exits with no agent
+    run (no LLM cost) - for previewing the prompt in the viz."""
+    import json
+
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED),
+        problem=ProblemConfig(name="fake_exp"),
+        dry_run=True,
+    )
+    reasons = await run_experiment(config, output_root=str(tmp_path))
+    assert set(reasons.values()) == {"dry_run"}
+
+    for task in ("g1", "g2"):
+        types = [
+            json.loads(line)["type"]
+            for line in (tmp_path / task / "logs" / "transcript.jsonl").read_text().splitlines()
+        ]
+        assert "SystemPrompt" in types and "UserMessage" in types  # the prompt is captured
+        assert "ToolCall" not in types  # the agent never ran
+        state = json.loads((tmp_path / task / "logs" / "experiment_state.json").read_text())
+        assert state["exit_reason"] == "dry_run"

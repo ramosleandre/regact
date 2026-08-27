@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent, build_agent
 from regact.agent.capabilities import uses_control_cli
+from regact.agent.events import SystemPrompt, UserMessage
 from regact.config.schema import (
     AgentName,
     Lifecycle,
@@ -456,6 +457,27 @@ async def run_task(
                 # sets REGACT_VERBALIZE_STATE=v1|v2 per arm ("off"/unset adds nothing).
                 verbalize_variant=os.environ.get("REGACT_VERBALIZE_STATE", "off").strip() or "off",
             )
+            if config.dry_run:
+                # Prompt-only: write the exact system prompt + first message to the transcript and
+                # exit - no agent, no eval, no cost. `make viz` then shows the prompt for review.
+                logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
+                rendered = (
+                    problem.render_obs_text(server.first_obs(task_name))
+                    if config.first_obs_in_prompt
+                    else None
+                )
+                transcript.write(SystemPrompt(system_prompt))
+                transcript.write(UserMessage(builder.build_first_message(rendered)))
+                experiment.exit_reason = "dry_run"
+                experiment.save(os.path.join(logs_dir, "experiment_state.json"))
+                logger.log(
+                    LogComponent.ORCHESTRATOR,
+                    "INFO",
+                    "session_end",
+                    phase="teardown",
+                    reason="dry_run",
+                )
+                return "dry_run"
             try:
                 await agent.start(
                     cwd=workdir,

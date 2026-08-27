@@ -79,6 +79,10 @@ run:  ## run ── Research run via Hydra (overrides via ARGS=..., e.g. ARGS="a
 run-kaggle:  ## run ── Competition run (flags via ARGS=..., e.g. ARGS="--games ls20")
 	$(RUN) -m $(PKG).run_kaggle $(ARGS)
 
+.PHONY: prompt-run
+prompt-run:  ## run ── Prompt-only run: write the prompt to a run dir, no agent/cost; view via make viz
+	$(RUN) -m $(PKG).run_exp dry_run=true $(ARGS)
+
 .PHONY: viz
 viz:  ## run ── Launch the visualizer: make viz EXP=experiments/<name>/latest [PORT=8030]
 	$(RUN) -m $(PKG).viz.app --experiment $(EXP) --port $(or $(PORT),8030)

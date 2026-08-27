@@ -111,6 +111,10 @@ class RunConfig:
     # When a tool call is flagged (sandbox/security rule), inject a one-off warning to the agent
     # on its next turn, up to this many times per task. 0 = never inject (flag silently as before).
     flagging_warning_cap: int = 3
+    # Prompt-only: build the workdir + the exact system prompt + first message, write them to the
+    # run's transcript, and exit WITHOUT running the agent (no LLM cost). For previewing the prompt
+    # in `make viz`. See `make prompt-run`.
+    dry_run: bool = False
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap
