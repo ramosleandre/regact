@@ -481,15 +481,17 @@ async function renderOverview(name) {
 
 function configBlock(c) {
   if (!c || !Object.keys(c).length) return h("div");
-  const a = c.agent || {}, p = c.problem || {}, lim = c.limits || {}, sec = c.security || {};
+  const a = c.agent || {}, p = c.problem || {}, lim = c.limits || {}, ctl = c.controller || {};
   const args = a.args && Object.keys(a.args).length ? " · " + JSON.stringify(a.args) : "";
+  const opts = c.sandbox_opts && Object.keys(c.sandbox_opts).length ? " · " + JSON.stringify(c.sandbox_opts) : "";
   const rows = [
     ["agent", `${a.name ?? "?"}${a.model ? " · " + a.model : ""}${args}`],
     ["problem", `${p.name ?? "?"} · ${p.lifecycle ?? "?"} · info=${p.info_mode ?? "?"} · obs=${p.obs_mode ?? "?"}`],
     ["features", Object.keys(c.features || {}).join(", ")],
     ["problem.tasks", (p.tasks || c.task_names || []).join(", ") || "(all)"],
-    ["limits", `keep_alive ${lim.keep_alive ?? "?"} · max_moves ${lim.max_moves ?? "?"}`],
-    ["security", `sandbox ${sec.sandbox ?? "?"} · deny_egress ${sec.deny_egress}`],
+    ["controller", `${ctl.n_episodes ?? "?"} ep · max_moves ${ctl.max_moves ?? "?"} · videos ${ctl.n_videos ?? "?"} · shadow_replay ${ctl.shadow_replay ?? "?"}`],
+    ["limits", `max_turns ${lim.max_turns ?? "?"} · max_seconds ${lim.max_seconds_per_task ?? "null"} · max_env_steps ${lim.max_actions_per_env ?? "null"}`],
+    ["sandbox", `${c.sandbox ?? "?"}${opts}`],
   ];
   const wrap = h("div"); wrap.append(h("h2", null, "Run config"));
   const t = h("table");

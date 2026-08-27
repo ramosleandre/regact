@@ -13,8 +13,18 @@ import logging
 import sys
 import threading
 
-# INFO-spammy: httpx/uvicorn log one line per HTTP request. Raising them to WARNING is enough.
-_INFO_NOISY = ("httpx", "httpcore", "uvicorn", "uvicorn.error", "uvicorn.access")
+# INFO-spammy: httpx/uvicorn log one line per HTTP request; arc_agi/arcengine log
+# "Found latest version of <game>: ..." on every env load/reset. Raising them to WARNING is
+# enough (a real env-side ERROR - e.g. a malformed action - still comes through).
+_INFO_NOISY = (
+    "httpx",
+    "httpcore",
+    "uvicorn",
+    "uvicorn.error",
+    "uvicorn.access",
+    "arc_agi",
+    "arcengine",
+)
 # WARNING-spammy: imageio_ffmpeg warns (at WARNING) once per encoded video about the harmless
 # macro_block_size resize of MiniGrid's 120px frames, so it needs ERROR to go quiet.
 _WARNING_NOISY = ("imageio", "imageio_ffmpeg")
