@@ -47,6 +47,26 @@ _DRAIN_TIMEOUT_S = 10.0  # bound on consuming an abandoned turn's leftover frame
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
+def _runner_regact_paths() -> list[str]:
+    """The regact source the in-sandbox alan runner imports (its full closure, incl. the lazy
+    ``regact.agent.alan_adapter``): the regact/regact.agent/regact.obs package markers plus the
+    runner + adapter + events + errors + transcript modules. Bound file-by-file so the sibling
+    adapters (regact.agent.claude_adapter, ...) and regact.obs.result stay out of the namespace."""
+    import regact
+
+    src = os.path.dirname(os.path.dirname(os.path.abspath(regact.__file__)))
+    rel = (
+        ("agent", "__init__.py"),
+        ("agent", "alan_runner.py"),
+        ("agent", "alan_adapter.py"),
+        ("agent", "events.py"),
+        ("obs", "__init__.py"),
+        ("obs", "errors.py"),
+        ("obs", "transcript.py"),
+    )
+    return [os.path.join(src, "regact", *parts) for parts in rel]
+
+
 class AlanSubprocessAgent(CodeAgent):
     """``CodeAgent`` backed by an ``alancode`` agent in a sandboxable child process."""
 
@@ -182,25 +202,32 @@ class AlanSubprocessAgent(CodeAgent):
         return [sys.executable, "-c", "import alancode"]
 
     def host_read_paths(self) -> list[str]:
-        """Where ``alancode`` actually lives, so the confined child can import it.
+        """Where the confined child's imports live: ``alancode`` itself, plus the regact modules the
+        runner pulls in.
 
-        An editable install (``pip install -e ../alancode``) leaves the package OUTSIDE
-        the interpreter prefix — the venv holds only a link — so binding the venv is not
-        enough and the child dies with ``ModuleNotFoundError``. Resolved with
-        ``find_spec`` (no import), and empty when alancode is absent.
+        This backend is unique: the child is ``python -m regact.agent.alan_runner`` (which lazily
+        imports ``regact.agent.alan_adapter``), so its regact closure must be inside the sandbox.
+        The agent wrapper's default bind is only ``regact.envclient`` + ``netbridge`` (task.py), so
+        the runner's closure is added here; scoring (``regact.controllers``) and the sandbox policy
+        (``regact.security.runtime``) stay unbound. alancode via ``find_spec`` (no import): an
+        editable install (``pip install -e ../alancode``) leaves it OUTSIDE the interpreter prefix,
+        so binding the venv is not enough and the child dies with ``ModuleNotFoundError``.
         """
         import importlib.util
 
+        paths: list[str] = []
         try:
             spec = importlib.util.find_spec("alancode")
         except (ImportError, ValueError):
-            return []
-        if spec is None:
-            return []
-        if spec.submodule_search_locations:
-            # The package dir's parent, so `import alancode` resolves on sys.path.
-            return [os.path.realpath(os.path.dirname(p)) for p in spec.submodule_search_locations]
-        return [os.path.realpath(os.path.dirname(spec.origin))] if spec.origin else []
+            spec = None
+        if spec is not None:
+            if spec.submodule_search_locations:
+                # The package dir's parent, so `import alancode` resolves on sys.path.
+                locs = spec.submodule_search_locations
+                paths += [os.path.realpath(os.path.dirname(p)) for p in locs]
+            elif spec.origin:
+                paths.append(os.path.realpath(os.path.dirname(spec.origin)))
+        return paths + _runner_regact_paths()
 
     def host_egress_hosts(self) -> list[str]:
         # A loopback base_url needs no egress: its port is bridged into the sandbox

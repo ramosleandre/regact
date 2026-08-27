@@ -83,6 +83,20 @@ def test_codex_uses_an_isolated_home(tmp_path) -> None:
     assert Path(cfg, "config.toml").read_text().lstrip().startswith("#")
 
 
+def test_alan_runner_regact_closure_is_bound_but_scoring_is_not() -> None:
+    """Alan's confined child runs `python -m regact.agent.alan_runner`; F1's default agent bind is
+    only regact.envclient + netbridge, so alan must add the runner's regact closure (else it dies
+    with ModuleNotFoundError, like the netbridge regression). The closure files must exist and must
+    NOT include the scoring / jail source (regact.controllers / regact.security.runtime)."""
+    from regact.agent.alan_subprocess import _runner_regact_paths
+
+    paths = _runner_regact_paths()
+    assert paths and all(os.path.exists(p) for p in paths)
+    assert any(p.endswith(os.path.join("agent", "alan_runner.py")) for p in paths)
+    assert any(p.endswith(os.path.join("agent", "alan_adapter.py")) for p in paths)
+    assert not any("controllers" in p or "runtime.py" in p for p in paths)
+
+
 def test_host_egress_hosts_are_per_agent() -> None:
     assert ClaudeAgent().host_egress_hosts() == ["api.anthropic.com"]
     assert "api.openai.com" in CodexAgent().host_egress_hosts()
