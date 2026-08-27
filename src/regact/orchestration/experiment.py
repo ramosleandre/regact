@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from datetime import datetime
+from urllib.parse import quote
 
 from regact.config.schema import RunConfig
 from regact.obs.console import configure_console_logging, console
@@ -99,6 +100,11 @@ async def run_experiment(config: RunConfig, *, output_root: str | None = None) -
         f"{config.agent.name} · {config.problem.name} · {len(task_names)} task(s){attempts_note} · "
         f"sandbox={config.sandbox} · workers={workers}"
     )
+    # Deep-link to this run in the viz (assumes `make viz EXP=<output_root>` on port 8030). The run
+    # path is relative to output_root, so it matches the tree the viewer serves.
+    rel = quote(os.path.relpath(root, os.path.abspath(config.output_root)), safe="")
+    console(f"viz: http://localhost:8030/#run/{rel}")
+    console(f"folder: {root}")  # the on-disk run dir, so the raw artifacts are one copy-paste away
     with install_stop_signal() as stop:
 
         async def unit(item: tuple[str, int]) -> str:

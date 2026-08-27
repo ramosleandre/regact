@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -93,13 +94,18 @@ _MAX_ARTIFACT_BYTES = 200_000
 
 
 _MAX_GAME_DEPTH = 8  # bound the walk; a sweep nests model/stamp/task = ~3 levels
+# A real game leaf is marked by its run state, NOT by a bare ``logs/`` - the experiments root is
+# littered with Slurm job-log dirs (``logs/{sbatch.*.out,simplelm.*.log}``, no run state) that would
+# otherwise masquerade as games and flood the browser.
+_GAME_MARKER = os.path.join("logs", "experiment_state.json")
 
 
 def list_games(experiment_dir: str) -> list[str]:
     """Every run dir under the experiment root, as a path RELATIVE to the root.
 
-    A run is a dir containing ``logs/``. Recursive so ONE viz serves a whole sweep
-    (model x task x seed = many nested runs), not just a single flat run: the id is the
+    A run is a dir whose ``logs/experiment_state.json`` exists (:data:`_GAME_MARKER`) - a bare
+    ``logs/`` is not enough, so Slurm job-log folders are skipped. Recursive so ONE viz serves a
+    whole sweep (model x task x seed = many nested runs), not just a single flat run: the id is the
     relative path (e.g. ``Coder-480B_seed0/2026-08-15_.../MiniGrid-DoorKey-8x8-v0``).
     A dir that IS a run is not descended into; the walk is depth-bounded; and a run is
     deduped by realpath so a ``latest`` symlink is not listed alongside its timestamp dir.
@@ -119,7 +125,7 @@ def list_games(experiment_dir: str) -> list[str]:
         except OSError:
             return
         for sub in subdirs:
-            if (sub / "logs").is_dir():
+            if (sub / _GAME_MARKER).is_file():
                 real = os.path.realpath(sub)
                 if real in seen:  # a `latest` symlink resolving to an already-listed run
                     continue
@@ -130,6 +136,67 @@ def list_games(experiment_dir: str) -> list[str]:
 
     walk(root, 0)
     return sorted(games)
+
+
+# A run dir is stamped ``%Y-%m-%d_%H-%M-%S`` (experiment._STAMP_FORMAT). We name runs by this
+# pattern rather than by "its children are all tasks", because a repeated task nests an extra
+# ``<task>/attempt_N`` level (n_attempts_per_task) that would otherwise push every kind up one rung.
+_RUN_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
+
+
+def build_tree(experiment_dir: str) -> list[dict[str, Any]]:
+    """A lazy nested tree of the folders down to task leaves, built from :func:`list_games`'s cheap
+    walk - NO metric parsing - so a top folder holding many benchmarks renders instantly.
+
+    Each node is ``{name, path (relpath from root), kind, n_tasks, n_children, children}``. ``kind``
+    is one rung of the hierarchy benchmark -> experiment -> run -> task: ``run`` (a timestamped run
+    dir, whatever nests below it), ``experiment`` (its children are runs), ``benchmark`` (its
+    children are experiments), ``task`` (a leaf game dir, see :data:`_GAME_MARKER`), or ``group`` (a
+    mixed / deeper / legacy folder). The frontend browses this; a task leaf opens the per-game view,
+    everything else scopes the games list to its subtree (``/api/games?under=``, dashboard+graphs).
+    """
+    nested: dict[str, Any] = {}
+    for game in sorted(list_games(experiment_dir)):
+        node = nested
+        for part in game.split("/"):
+            node = node.setdefault(part, {})
+
+    def to_nodes(children: dict[str, Any], prefix: str) -> list[dict[str, Any]]:
+        nodes = []
+        for name, sub in sorted(children.items()):
+            path = f"{prefix}/{name}" if prefix else name
+            kids = to_nodes(sub, path)
+            if _RUN_STAMP_RE.match(name):
+                # A timestamped run: everything under it is task-level (a task, or task/attempt_N
+                # for a repeated task). n_children counts the task dirs directly beneath it.
+                kind, n_tasks = "run", len(kids)
+            elif not kids:
+                kind, n_tasks = "task", 1
+            else:
+                n_tasks = sum(k["n_tasks"] for k in kids)
+                child_kinds = {k["kind"] for k in kids}
+                # Named by what its children are: experiment (of runs), benchmark (of experiments),
+                # else a mixed/deeper group.
+                kind = (
+                    "experiment"
+                    if child_kinds == {"run"}
+                    else "benchmark"
+                    if child_kinds == {"experiment"}
+                    else "group"
+                )
+            nodes.append(
+                {
+                    "name": name,
+                    "path": path,
+                    "kind": kind,
+                    "n_tasks": n_tasks,
+                    "n_children": len(kids),
+                    "children": kids,
+                }
+            )
+        return nodes
+
+    return to_nodes(nested, "")
 
 
 def load_game(experiment_dir: str, game: str) -> GameView:

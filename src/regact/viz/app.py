@@ -39,10 +39,20 @@ def build_app(experiment_dir: str) -> FastAPI:
     def index() -> str:
         return (_STATIC / "index.html").read_text(encoding="utf-8")
 
+    @app.get("/api/tree")
+    def tree() -> dict[str, Any]:
+        # Cheap folder scan (no metric parsing) - the browsable index for a many-experiment root.
+        return {"root": root.name, "tree": reader.build_tree(experiment_dir)}
+
     @app.get("/api/games")
-    def games() -> dict[str, Any]:
+    def games(under: str = "") -> dict[str, Any]:
+        # ``under`` scopes the (parsed) list to one subtree (a run/experiment), so the browser never
+        # parses the whole root at once. Empty = every game (kept for a flat single-run root).
+        names = reader.list_games(experiment_dir)
+        if under:
+            names = [n for n in names if n == under or n.startswith(under + "/")]
         out = []
-        for name in reader.list_games(experiment_dir):
+        for name in names:
             game = reader.load_game(experiment_dir, name)
             out.append(
                 {

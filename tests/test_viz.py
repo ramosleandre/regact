@@ -55,6 +55,7 @@ def test_list_games_recurses_a_sweep_and_dedupes_latest_symlink(tmp_path: Path) 
     runs = ["modelA_seed0/2026-08-15_a/DoorKey", "modelB_seed0/2026-08-15_b/DoorKey"]
     for r in runs:
         (root / r / "logs").mkdir(parents=True)
+        (root / r / "logs" / "experiment_state.json").write_text("{}")  # the real-game marker
     os.symlink(root / "modelA_seed0" / "2026-08-15_a", root / "modelA_seed0" / "latest")
 
     games = list_games(str(root))
@@ -62,6 +63,17 @@ def test_list_games_recurses_a_sweep_and_dedupes_latest_symlink(tmp_path: Path) 
     # a run dir is not descended into: a stray logs/ nested INSIDE a run is not a second game
     (root / runs[0] / "workdir" / "logs").mkdir(parents=True)
     assert list_games(str(root)) == sorted(runs)
+
+
+def test_list_games_skips_bare_logs_dirs(tmp_path: Path) -> None:
+    """A dir with a ``logs/`` but no ``experiment_state.json`` is NOT a game - Slurm job-log folders
+    (sbatch/simplelm output) litter the experiments root and must not masquerade as runs."""
+    root = tmp_path / "root"
+    (root / "slurm_job" / "logs").mkdir(parents=True)
+    (root / "slurm_job" / "logs" / "sbatch.123.out").write_text("...")  # no run state -> not a game
+    (root / "real/2026-08-15_a/DoorKey" / "logs").mkdir(parents=True)
+    (root / "real/2026-08-15_a/DoorKey" / "logs" / "experiment_state.json").write_text("{}")
+    assert list_games(str(root)) == ["real/2026-08-15_a/DoorKey"]
 
 
 def test_transcript_folds_into_turns(tmp_path: Path) -> None:
@@ -228,3 +240,67 @@ def test_final_score_falls_back_past_errored_final_and_surfaces_both() -> None:
     assert m["final_aggregate"]["success_rate"] == 1.0  # fell back past the blank final
     assert m["success_rate"] == 1.0
     assert m["final_aggregate_unverified"]["success_rate"] == 1.0  # both scores surfaced
+
+
+def test_build_tree_names_each_rung_of_the_hierarchy(tmp_path: Path) -> None:
+    """build_tree nests folders benchmark -> experiment -> run -> task from a cheap walk - no metric
+    parsing - so a many-experiment root browses instantly, and each rung is labelled so the landing
+    can separate benchmark folders from bare experiments."""
+    from regact.viz.reader import build_tree
+
+    s1, s2 = "2026-08-26_17-56-06", "2026-08-26_18-00-00"
+    paths = [
+        f"bench/claude_arc/{s1}/ft09",  # bench holds two experiments -> a benchmark
+        f"bench/claude_arc/{s1}/ls20",
+        f"bench/codex_arc/{s2}/tn36",
+        f"solo/{s1}/mg01",  # solo holds runs directly -> a bare experiment
+    ]
+    for p in paths:
+        (tmp_path / p / "logs").mkdir(parents=True)
+        (tmp_path / p / "logs" / "experiment_state.json").write_text("{}")
+    tree = build_tree(str(tmp_path))
+    by_name = {n["name"]: n for n in tree}
+    assert set(by_name) == {"bench", "solo"}
+    assert by_name["bench"]["kind"] == "benchmark"
+    assert by_name["bench"]["n_children"] == 2 and by_name["bench"]["n_tasks"] == 3
+    assert by_name["solo"]["kind"] == "experiment" and by_name["solo"]["n_children"] == 1
+    claude = by_name["bench"]["children"][0]  # bench/claude_arc
+    assert claude["kind"] == "experiment"
+    run = claude["children"][0]  # bench/claude_arc/<stamp>
+    assert run["kind"] == "run" and run["n_children"] == 2
+    assert {c["name"] for c in run["children"]} == {"ft09", "ls20"}
+    assert all(c["kind"] == "task" for c in run["children"])
+
+
+def test_build_tree_survives_repeated_task_attempts(tmp_path: Path) -> None:
+    """A repeated task nests an extra <task>/attempt_N level. The timestamped run must still read as
+    a run (and its parent as an experiment) - detection is by the stamp name, not by child depth,
+    so n_attempts_per_task cannot shift every folder up a rung."""
+    from regact.viz.reader import build_tree
+
+    stamp = "2026-08-26_17-56-06"
+    for p in [f"e/{stamp}/DoorKey/attempt_0", f"e/{stamp}/DoorKey/attempt_1", f"e/{stamp}/Empty"]:
+        (tmp_path / p / "logs").mkdir(parents=True)
+        (tmp_path / p / "logs" / "experiment_state.json").write_text("{}")
+    tree = build_tree(str(tmp_path))
+    assert [n["kind"] for n in tree] == ["experiment"]  # not benchmark: the attempts nest below run
+    run = tree[0]["children"][0]
+    assert run["kind"] == "run" and run["n_children"] == 2  # DoorKey + Empty task dirs
+
+
+def test_api_games_scopes_to_a_subtree(tmp_path: Path) -> None:
+    """/api/games?under=<run> parses only that subtree, so the browser never parses the whole
+    root at once."""
+    from fastapi.testclient import TestClient
+
+    from regact.viz.app import build_app
+
+    for p in ["bench/claude_arc/2026_10/ft09", "bench/codex_arc/2026_11/ls20"]:
+        (tmp_path / p / "logs").mkdir(parents=True)
+        (tmp_path / p / "logs" / "experiment_state.json").write_text('{"task_name": "x"}')
+        (tmp_path / p / "config.json").write_text("{}")
+    client = TestClient(build_app(str(tmp_path)))
+    assert client.get("/api/tree").json()["tree"][0]["name"] == "bench"
+    assert len(client.get("/api/games").json()["games"]) == 2  # no scope = every game
+    scoped = client.get("/api/games", params={"under": "bench/claude_arc/2026_10"}).json()["games"]
+    assert len(scoped) == 1 and scoped[0]["name"] == "bench/claude_arc/2026_10/ft09"

@@ -38,18 +38,23 @@ async function gameDetail(name) {
 }
 
 // ---------------------------------------------------------------- dashboard
-let _gamesCache = null;
-async function gamesData() {           // /api/games is shared by the dashboard + both graph views
-  if (!_gamesCache) _gamesCache = await api("/api/games");
-  return _gamesCache;
+const _gamesCache = {};                // /api/games payloads, keyed by the `under` subtree scope
+async function gamesData(under = "") { // scoped, so the browser never parses the whole root at once
+  if (!(under in _gamesCache))
+    _gamesCache[under] = await api("/api/games" + (under ? "?under=" + encodeURIComponent(under) : ""));
+  return _gamesCache[under];
 }
 
-// Top-level panels: the game grid ("Experiments") and the cross-experiment "Graphs".
-function panelNav(active) {
+// Top-level panels for a scoped subtree: the game grid ("Experiments") + cross-run "Graphs", plus a
+// link back to the browse tree. `under` (the subtree path) rides each link so the scope holds.
+function panelNav(active, under = "") {
   const nav = h("div", "panelnav");
-  for (const [slug, label] of [["", "Experiments"], ["graphs", "Graphs"]]) {
-    const a = h("a", "panel" + (slug === active ? " on" : ""), label);
-    a.href = "#" + slug;
+  const suffix = under ? "/" + encodeURIComponent(under) : "";
+  const back = h("a", "panel", "< all"); back.href = "#"; nav.append(back);
+  for (const [slug, label] of [["run", "Experiments"], ["graphs", "Graphs"]]) {
+    const on = (slug === "run" && active === "") || slug === active;
+    const a = h("a", "panel" + (on ? " on" : ""), label);
+    a.href = "#" + slug + suffix;
     nav.append(a);
   }
   return nav;
@@ -69,23 +74,68 @@ function gameCard(g) {
   return card;
 }
 
-async function renderDashboard() {
+async function renderDashboard(under = "") {
   crumb.textContent = "";
-  const data = await gamesData();
-  crumb.textContent = `${data.experiment} · ${data.games.length} game(s)`;
-  if (data.games.length === 1) { location.hash = "game/" + encodeURIComponent(data.games[0].name); return; }
+  const data = await gamesData(under);
+  crumb.textContent = `${under || data.experiment} · ${data.games.length} game(s)`;
+  // Always list the tasks (even a single one), so pointing at an experiment shows the experiment
+  // interface rather than diving straight into the lone game's overview.
   const byExp = new Map();          // one section per experiment, its task cards beneath
   for (const g of data.games) {
     if (!byExp.has(g.experiment)) byExp.set(g.experiment, []);
     byExp.get(g.experiment).push(g);
   }
-  clear(app); app.append(panelNav(""));
+  clear(app); app.append(panelNav("", under));
   for (const [exp, games] of byExp) {
     app.append(h("h2", "expsection", expLeaf(exp), h("span", "muted", ` · ${games.length} run(s)`)));
     const grid = h("div", "grid");
     for (const g of games) grid.append(gameCard(g));
     app.append(grid);
   }
+}
+
+// What the viewer's root itself is decides whether we land on the browse lists or go straight to a
+// dashboard. If EVERY top folder is a run/task the root is ONE experiment; if every top folder is an
+// experiment the root is ONE benchmark - either way open its dashboard (the benchmark/experiment
+// interface). Only a mixed collection (many benchmarks + bare experiments + legacy folders, i.e. the
+// experiments root) gets the browse landing.
+function _rootIsSingleScope(tree) {
+  const kinds = new Set(tree.map((n) => n.kind));
+  const onlyRunsOrTasks = [...kinds].every((k) => k === "run" || k === "task");
+  return onlyRunsOrTasks || (kinds.size === 1 && kinds.has("experiment"));
+}
+
+// The browse landing: three plain clickable lists - Benchmarks, Experiments, and Undetected (legacy
+// / ambiguous folders we cannot confidently place). Each row opens that folder's scoped dashboard.
+const _BROWSE_LISTS = [
+  { title: "Benchmarks", of: (n) => n.kind === "benchmark", unit: "experiment", count: (n) => n.n_children },
+  { title: "Experiments", of: (n) => n.kind === "experiment", unit: "run", count: (n) => n.n_children },
+  { title: "Undetected", of: (n) => n.kind !== "benchmark" && n.kind !== "experiment", unit: "task", count: (n) => n.n_tasks },
+];
+
+async function renderBrowse() {
+  crumb.textContent = "";
+  const { root, tree } = await api("/api/tree");
+  crumb.textContent = root;
+  if (!tree.length) { clear(app); app.append(h("div", "muted", "no runs under this folder")); return; }
+  if (_rootIsSingleScope(tree)) { renderDashboard(""); return; }
+  clear(app);
+  for (const list of _BROWSE_LISTS) {
+    const items = tree.filter(list.of);
+    if (!items.length) continue;
+    app.append(h("h2", "expsection", list.title));
+    const box = h("div", "tree");
+    for (const node of items) box.append(browseItem(node, list.unit, list.count(node)));
+    app.append(box);
+  }
+}
+
+// A plain folder row (no box): click opens the scoped dashboard for its subtree (same "run" route
+// the launch deep-link uses; renderDashboard groups the games under it by experiment and adds Graphs).
+function browseItem(node, unit, n) {
+  const link = h("span", "tlink trun", "> " + node.name);
+  link.onclick = () => { location.hash = "run/" + encodeURIComponent(node.path); };
+  return h("div", "tnode", link, h("span", "muted", ` · ${n} ${unit}${n === 1 ? "" : "s"}`));
 }
 
 function statusOf(m) {
@@ -393,16 +443,17 @@ function graphsView(games, onlyExp) {
   return wrap;
 }
 
-async function renderGraphs() {
+async function renderGraphs(under = "") {
   crumb.textContent = "graphs";
-  const data = await gamesData();
+  const data = await gamesData(under);
   clear(app);
-  app.append(panelNav("graphs"), graphsView(data.games, null));
+  app.append(panelNav("graphs", under), graphsView(data.games, null));
 }
 
-// The per-game "Graphs" tab: the same charts but for THIS run's experiment only.
+// The per-game "Graphs" tab: the same charts but for THIS run's experiment only (scoped to the
+// experiment subtree - the game path minus its /timestamp/task - so it never parses the whole root).
 async function renderGameGraphs(name) {
-  const data = await gamesData();
+  const data = await gamesData(name.split("/").slice(0, -2).join("/"));
   const me = data.games.find((g) => g.name === name);
   const exp = me ? me.experiment : null;
   const body = h("div");
@@ -697,8 +748,10 @@ async function renderLogs(name) {
 async function route() {
   try {
     const parts = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean);
-    if (parts[0] === "graphs") return renderGraphs();
-    if (parts[0] !== "game" || !parts[1]) return renderDashboard();
+    if (!parts.length) return renderBrowse();
+    if (parts[0] === "graphs") return renderGraphs(parts[1] ? decodeURIComponent(parts[1]) : "");
+    if (parts[0] === "run") return renderDashboard(parts[1] ? decodeURIComponent(parts[1]) : "");
+    if (parts[0] !== "game" || !parts[1]) return renderBrowse();
     const name = decodeURIComponent(parts[1]);
     const tab = parts[2] || "";
     if (tab === "conversation") await renderConversation(name);

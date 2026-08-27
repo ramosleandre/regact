@@ -103,6 +103,11 @@ tr.err td { color: var(--bad); }
 .panel:hover { color: var(--fg); }
 .panel.on { color: var(--fg); background: var(--panel); border-color: var(--line); }
 h2.expsection { margin-top: 22px; font-size: 15px; }
+.tree { margin: 10px 0; font-family: ui-monospace, monospace; font-size: 13px; }
+.tnode { padding: 2px 0; }
+.tlink { cursor: pointer; }
+.tlink:hover { color: var(--accent); }
+.trun { color: var(--fg); }
 
 /* graphs panel: charts (left) + metric checklist (right), agg selector on top */
 .aggbar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }

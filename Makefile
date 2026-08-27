@@ -84,7 +84,7 @@ prompt-run:  ## run ── Prompt-only run: write the prompt to a run dir, no ag
 	$(RUN) -m $(PKG).run_exp dry_run=true $(ARGS)
 
 .PHONY: viz
-viz:  ## run ── Launch the visualizer: make viz EXP=experiments/<name>/latest [PORT=8030]
+viz:  ## run ── Visualizer: make viz EXP=experiments [PORT=8030] (EXP = any run, experiment, or top folder to browse)
 	$(RUN) -m $(PKG).viz.app --experiment $(EXP) --port $(or $(PORT),8030)
 
 # ── diagnostics (every one also runs as `python -m regact.<name>`, since an HPC
