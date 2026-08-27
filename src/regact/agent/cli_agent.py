@@ -22,6 +22,7 @@ import os
 import signal
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable
+from typing import TextIO
 
 from regact.agent.base import CodeAgent
 from regact.agent.events import AgentError, AgentEvent
@@ -44,6 +45,7 @@ class _CliAgent(CodeAgent):
         self._session_id: str | None = None
         self._pending: list[str] = []  # messages queued by inject(), prepended next turn
         self._proc: asyncio.subprocess.Process | None = None
+        self._cli_log: TextIO | None = None  # the CLI's own stderr, captured per task (not stdout)
 
     async def start(
         self,
@@ -64,6 +66,13 @@ class _CliAgent(CodeAgent):
         self._system_prompt = system_prompt
         self._env_overrides = dict(env or {})
         self._runtime_wrap = runtime_wrap
+        # Capture the CLI's stderr (its "Reading prompt from stdin" chatter + diagnostics) to a
+        # per-task file, not the operator's terminal; stdout stays piped (the parsed JSON stream).
+        logs_dir = os.path.join(os.path.dirname(cwd), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        self._cli_log = open(  # noqa: SIM115 - lives for the task, closed in close()
+            os.path.join(logs_dir, "agent_cli.log"), "a", encoding="utf-8"
+        )
         self._configure_workdir()
 
     def session_id(self) -> str | None:
@@ -85,7 +94,7 @@ class _CliAgent(CodeAgent):
             cwd=self._cwd or None,
             stdin=asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
-            stderr=None,
+            stderr=self._cli_log or None,  # per-task agent_cli.log, else inherit
             env={**os.environ, **self._env_overrides},
             limit=_STDOUT_LINE_LIMIT,
             start_new_session=True,
@@ -132,6 +141,9 @@ class _CliAgent(CodeAgent):
     async def close(self) -> None:
         await self.abort()
         self._proc = None
+        if self._cli_log is not None:
+            self._cli_log.close()
+            self._cli_log = None
 
     # --- subclass hooks ---------------------------------------------------- #
     @abstractmethod

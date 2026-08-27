@@ -141,3 +141,21 @@ def test_each_run_gets_its_own_timestamped_dir(tmp_path: Path) -> None:
 
     # An explicit output_root still wins verbatim (tests and run_kaggle rely on it).
     assert resolve_run_dir(config, output_root=str(tmp_path / "fixed")) == str(tmp_path / "fixed")
+
+
+async def test_run_experiment_tees_narration_to_run_log(tmp_path: Path) -> None:
+    """The terminal narration (experiment start + per-task lifecycle + summary) is teed to
+    <run>/run.log, so a run is reviewable/monitorable from the run folder alone."""
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED),
+        problem=ProblemConfig(name="fake_exp"),
+        limits=LimitsConfig(max_turns=1),
+    )
+    await run_experiment(config, output_root=str(tmp_path))
+
+    run_log = tmp_path / "run.log"
+    assert run_log.exists()
+    text = run_log.read_text()
+    assert "task(s)" in text  # the experiment-start line
+    assert "complete:" in text  # the summary line
+    assert "g1" in text and "g2" in text  # per-task lifecycle lines

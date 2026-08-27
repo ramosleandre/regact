@@ -17,6 +17,14 @@ from regact.envclient.obs import Obs
 from regact.tools.base import Tool, ToolContext
 
 
+def _env_fault(op: str, exc: Exception) -> HTTPException:
+    """A native env step/reset that raised is an AGENT-triggered fault (a malformed action, a WFC
+    gen failure): return it as a clean 422, which FastAPI handles WITHOUT the uvicorn 'Exception in
+    ASGI application' 500 that would otherwise spam the operator's terminal. The message rides the
+    agent's env-client error, so the agent (and the transcript) see what failed."""
+    return HTTPException(status_code=422, detail=f"env {op} failed: {type(exc).__name__}: {exc}")
+
+
 class EnvServer:
     """A localhost HTTP server fronting one or more :class:`EnvSession` objects.
 
@@ -82,13 +90,19 @@ class EnvServer:
         def reset(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
             session = self._session(game_id)
             env = session.make()
-            obs = env.reset(seed=body.get("seed"))
+            try:
+                obs = env.reset(seed=body.get("seed"))
+            except Exception as exc:  # an agent-triggered env fault (e.g. a WFC gen failure)
+                raise _env_fault("reset", exc) from exc
             return {"obs": obs.to_json(), "action_count": env.action_count}
 
         @app.post("/env/{game_id}/step")
         def step(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
             env = self._require_live(game_id)
-            obs = env.step(body.get("action"))
+            try:
+                obs = env.step(body.get("action"))
+            except Exception as exc:  # a malformed action the agent sent, etc.
+                raise _env_fault("step", exc) from exc
             return {"obs": obs.to_json(), "action_count": env.action_count}
 
         @app.get("/env/{game_id}/current")

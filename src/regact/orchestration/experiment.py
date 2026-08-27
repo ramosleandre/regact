@@ -82,11 +82,13 @@ def _run_label(task: str, attempt: int, n_attempts: int) -> str:
 
 async def run_experiment(config: RunConfig, *, output_root: str | None = None) -> dict[str, str]:
     """Run every task ``n_attempts_per_task`` times; return ``{run_label: exit_reason}``."""
-    configure_console_logging()  # silence third-party INFO noise (httpx, uvicorn) on the terminal
-    problem = build_problem(config.problem.name, config.problem.kwargs)
-    task_names = _resolve_task_names(config, problem.get_task_names())
     root = resolve_run_dir(config, output_root=output_root)
     os.makedirs(root, exist_ok=True)
+    # Silence third-party INFO noise AND tee the terminal narration to <run>/run.log, so the whole
+    # experiment is reviewable from the run folder (live or after it finishes).
+    configure_console_logging(run_log_path=os.path.join(root, "run.log"))
+    problem = build_problem(config.problem.name, config.problem.kwargs)
+    task_names = _resolve_task_names(config, problem.get_task_names())
     _link_latest(root)
 
     n_attempts = max(1, config.n_attempts_per_task)

@@ -101,3 +101,45 @@ def test_multi_instance_fresh_on_reset() -> None:
     assert client.last_step() == 2
     client.reset()  # fresh env
     assert client.last_step() == 0
+
+
+def test_env_fault_returns_422_not_a_terminal_500() -> None:
+    """A native env step/reset that raises (a malformed action, a WFC gen failure) comes back as a
+    clean 422 - so FastAPI does NOT surface an unhandled ASGI 500 (which uvicorn logs to the
+    operator's terminal), and the agent's env client gets a usable error instead of a bare crash."""
+
+    class _RaisingStep(FakeNativeEnv):
+        def step(self, action: int) -> object:  # type: ignore[override]
+            raise KeyError("x")  # e.g. arcengine on a malformed ACTION6
+
+    server = EnvServer()
+    server.register(
+        "g",
+        EnvSession(
+            make_native=lambda: _RaisingStep(goal=3),
+            key="g",
+            renderer=RawRenderer(),
+            lifecycle=MultiInstancePolicy(),
+        ),
+    )
+    app = TestClient(server.app)
+    assert app.post("/env/g/reset", json={}).status_code == 200  # reset ok -> env is live
+    r = app.post("/env/g/step", json={"action": 6})
+    assert r.status_code == 422 and "step failed" in r.json()["detail"]
+
+    class _RaisingReset(FakeNativeEnv):
+        def reset(self, *, seed: int | None = None) -> object:  # type: ignore[override]
+            raise RuntimeError("Could not generate a valid pattern")  # a WFC gen failure
+
+    s2 = EnvServer()
+    s2.register(
+        "g",
+        EnvSession(
+            make_native=lambda: _RaisingReset(goal=3),
+            key="g",
+            renderer=RawRenderer(),
+            lifecycle=MultiInstancePolicy(),
+        ),
+    )
+    r2 = TestClient(s2.app).post("/env/g/reset", json={})
+    assert r2.status_code == 422 and "reset failed" in r2.json()["detail"]
