@@ -17,6 +17,7 @@ defaults:
 parallel_workers: 1     # concurrent tasks; 1 = sequential
 n_attempts_per_task: 1  # repeat each task N times (interleaved) to aggregate over attempts; 1 = once
 first_obs_in_prompt: false  # true = render the first observation into the first message
+flagging_warning_cap: 3  # warn the agent (next turn) when a call is flagged, up to N times; 0 = off
 limits:
   max_turns: 350                # agent turns per task before the loop gives up
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit

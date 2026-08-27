@@ -496,6 +496,7 @@ async def run_task(
                     hooks=hooks,
                     move_count=lambda: server.total_action_count(task_name),
                     stop=stop,
+                    flagging_warning_cap=config.flagging_warning_cap,
                 )
             finally:  # always release the agent subprocess + network plumbing, even on a crash
                 await agent.close()

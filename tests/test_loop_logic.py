@@ -110,3 +110,49 @@ async def test_logging_tool_logs_every_call() -> None:
     assert logger.logged
     _, kwargs = logger.logged[0]
     assert kwargs["tool"] == "Ok"
+
+
+async def test_flagging_warning_injected_up_to_cap() -> None:
+    """A flagged call injects the sandbox warning on the agent's next turn, capped at
+    flagging_warning_cap; 0 disables it; a clean call injects nothing (but every flag
+    is counted)."""
+    from regact.orchestration.loop import _FLAGGING_WARNING, _flag_suspicious_call
+    from regact.session.state import ExperimentState
+
+    class _RecordingAgent:
+        def __init__(self) -> None:
+            self.injected: list[str] = []
+
+        async def inject(self, message: str) -> None:
+            self.injected.append(message)
+
+    def make(cap: int) -> tuple[_LoopContext, _RecordingAgent]:
+        agent = _RecordingAgent()
+        ctx = _LoopContext(
+            agent=agent,  # type: ignore[arg-type]
+            experiment=ExperimentState(problem_name="p", task_name="t"),
+            tools_by_name={},
+            transcript=None,  # type: ignore[arg-type]
+            logger=_FakeLogger(),
+            cwd="/tmp",
+            policy=default_policy(),
+            flagging_warning_cap=cap,
+        )
+        return ctx, agent
+
+    bad = ToolCall("c", "Bash", {"command": "python -c 'import minigrid'"})  # forbidden import
+    clean = ToolCall("c", "Bash", {"command": "ls code_library"})
+
+    capped, agent = make(2)
+    for _ in range(3):
+        await _flag_suspicious_call(bad, capped)
+    assert agent.injected == [_FLAGGING_WARNING, _FLAGGING_WARNING]  # capped at 2
+    assert capped.experiment.flagged_tool_calls == 3  # but every flag is still COUNTED
+
+    off, off_agent = make(0)
+    await _flag_suspicious_call(bad, off)
+    assert off_agent.injected == []  # 0 = never inject
+
+    ok, ok_agent = make(3)
+    await _flag_suspicious_call(clean, ok)
+    assert ok_agent.injected == []  # a clean call is not flagged -> no warning

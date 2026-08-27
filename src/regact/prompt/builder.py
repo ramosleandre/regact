@@ -109,10 +109,7 @@ class PromptBuilder:
     def build_first_message(self, rendered_obs: str | None = None) -> str:
         """The first user message: the first observation (for reference) + a generic, agnostic
         start. The how (controller, tools, approach) all lives in the system prompt."""
-        start = (
-            "Begin working on the task described in your instructions above. "
-            "Keep going until you solve the game."
-        )
+        start = "Begin working on the task described in your instructions above."
         if rendered_obs:
             header = f"This is the first observation of the game, for reference. {start}"
             return f"{header}\n\n{rendered_obs}"
@@ -137,7 +134,7 @@ def _control_channel_block(
     # them over the workdir control CLI - the SAME split task.py binds on via uses_control_cli (a
     # channel taught here but not bound there is the seam bug).
     if not uses_control_cli(tool_protocol):
-        return f"## Framework tools\n\nCall the framework tools directly: {', '.join(tool_names)}."
+        return f"# Framework tools\n\nCall the framework tools directly: {', '.join(tool_names)}."
     if tool_protocol in _TERMINAL_MD:  # bash-only dialect: fold submit/exit into its fragment
         commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
         terminal = _TERMINAL_MD[tool_protocol].read_text(encoding="utf-8")
@@ -145,7 +142,7 @@ def _control_channel_block(
     # client_cli (Claude/codex): a plain list of the control commands
     lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
     return (
-        "## Framework tools\n\n"
+        "# Framework tools\n\n"
         "Run a framework tool from your working directory; each prints its result "
         "(e.g. your score) to stdout:\n\n"
         f"{lines}"

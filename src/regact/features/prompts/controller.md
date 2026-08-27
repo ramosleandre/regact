@@ -1,4 +1,4 @@
-## Controller
+# Controller
 
 You interact with the environment through coding **controllers**, i.e. classes inheriting
 `BaseController` (from `code_library/base_controller.py`) that implement the
@@ -19,7 +19,9 @@ We advise you follow this approach to solve the game:
 - 3) After a script result, observe its output to understand the environment, and iterate on
   (1) on the controllers/scripts. Balance exploration and exploitation.
 - 4) Once you have a performing controller, submit it by importing it into `solution.py`'s
-  `get_controller` function and using the SubmitSolution python command.
+  `get_controller` function and running `python framework/control.py SubmitSolution`.
 
-When you have finished - your best controller is in `solution.py` and you do not wish to
-improve it further - end the run with the **ExitTask** python command.
+`SubmitSolution` and `ExitTask` are NOT callable tools - they are run from your working directory
+as `python framework/control.py <ToolName>`. When you have finished - your best controller is in
+`solution.py` and you do not wish to improve it further - end the run with
+`python framework/control.py ExitTask`.

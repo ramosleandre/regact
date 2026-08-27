@@ -1,6 +1,5 @@
-# Keep one environment per experiment
+# Measuring what an action does
 
-Each `make_env()` call starts a NEW, potentially randomized episode. To measure what an
-action does, keep ONE `env` instance and compare `env.current()` before and after
-`env.step(...)`; never compare states taken from different `make_env()` calls, or you will
-read the layout randomization as if it were an action's effect.
+Each `make_env()` starts a NEW episode. To measure the effect of an action, keep ONE `env`
+instance and compare `env.current()` before and after `env.step(...)` within that same episode,
+rather than comparing observations taken from different `make_env()` calls.

@@ -48,9 +48,24 @@ from regact.tools.base import Tool, ToolContext
 _ABORTED_REASONS = frozenset({"loop_crash"})
 
 _KEEP_ALIVE_MESSAGE = (
-    "Keep-alive reminder - Continue working or finish your work : 1) Produce a "
-    "controller in solution.py, 2) Submit this solution by calling SubmitSolution, "
-    "3) Exit your task through ExitTask if you are satisfied with your solution."
+    "Keep-alive reminder - continue working or finish your work: 1) produce a controller in "
+    "solution.py, 2) submit it by running `python framework/control.py SubmitSolution`, 3) if you "
+    "are satisfied with your solution, end the task with `python framework/control.py ExitTask`."
+)
+
+# Injected on the agent's next turn when a tool call is flagged (see config.flagging_warning_cap),
+# so a model reaching for a sandboxed action learns why it failed and stops wasting budget on it.
+_FLAGGING_WARNING = (
+    "WARNING: your last command was flagged by the environment's monitoring as conflicting with "
+    "this benchmark's isolation and security rules. Those rules block, among others: installing "
+    "packages (pip / uv / apt / npm ...); any internet or outbound network access (only the model "
+    "host is reachable); reading or writing files outside your working directory; reading the "
+    "framework's own source, or importing/reading the game's code or answer data; spawning "
+    "processes, changing permissions, or otherwise trying to escape the sandbox; and dynamic "
+    "tricks (exec/eval, ctypes, importlib) to bypass the above.\n"
+    "If that's what happened, please stop: (a) it isn't the purpose of this benchmark, and (b) the "
+    "environment is strongly sandboxed, so these attempts simply fail and waste your budget. "
+    "Discover the game only by playing it through framework/make_env."
 )
 
 # A single backend error (one 500/timeout from a slow local server) must not end the
@@ -76,6 +91,8 @@ class _LoopContext:
     state_path: str = ""  # where to persist ExperimentState (saved live, per event)
     start: float = 0.0  # time.monotonic() at the run's start, for the live duration
     move_count: Callable[[], int] | None = None  # polls the env's step count, for the live state
+    flagging_warning_cap: int = 0  # max flagging warnings to inject this task (0 = never)
+    warnings_injected: int = 0  # how many have been injected so far (mutated as they fire)
 
 
 @dataclass
@@ -102,6 +119,7 @@ async def run_session(
     hooks: list[Hook] | None = None,
     stop: StopSignal | None = None,
     move_count: Callable[[], int] | None = None,
+    flagging_warning_cap: int = 0,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
@@ -116,6 +134,7 @@ async def run_session(
         state_path=state_path,
         start=start,
         move_count=move_count,
+        flagging_warning_cap=flagging_warning_cap,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -301,14 +320,14 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
     """Route one event: execute framework tools, record backend errors, else observe."""
     if isinstance(event, ToolCall):
         outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
-        _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
+        await _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution
             result = await _execute_framework_tool(tool, event, ctx)
             ctx.transcript.write(result)
             await ctx.agent.inject(result.output)
     elif isinstance(event, ToolResult):
-        _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)
+        await _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)
     elif isinstance(event, AgentError):
         ctx.logger.log(
             LogComponent.AGENT,
@@ -320,12 +339,22 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
         outcome.error_category = event.category
 
 
-def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
+async def _maybe_warn_flagged(ctx: _LoopContext) -> None:
+    """Inject the flagging warning on the agent's next turn, up to ``flagging_warning_cap`` times
+    (0 = never). Capped because the message itself says repeat attempts waste budget - re-warning on
+    every flag would be self-defeating and burn the agent's context."""
+    if ctx.flagging_warning_cap <= 0 or ctx.warnings_injected >= ctx.flagging_warning_cap:
+        return
+    ctx.warnings_injected += 1
+    await ctx.agent.inject(_FLAGGING_WARNING)
+
+
+async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
     """Keyword camera: flag a call whose arguments reach for a forbidden path/module.
 
     Precise intent detection (the on-disk game data, escape modules); pairs with
     :func:`_flag_blocked_result`, which catches egress the keyword list cannot enumerate.
-    Never blocks — it only records a forensic count + WARNING for the analyst.
+    Never blocks — it records a forensic count + WARNING, and (capped) nudges the agent to stop.
     """
     flags = flag_tool_call(call.name, call.input, ctx.policy)
     if not flags:
@@ -338,19 +367,21 @@ def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
         tool=call.name,
         flags=flags,
     )
+    await _maybe_warn_flagged(ctx)
 
 
-def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
+async def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
     """Egress camera: count an errored result where the sandbox/proxy blocked an external host.
 
     A blocked curl (DNS failure) or the egress proxy's 403 is real evidence the agent tried
     to leave its box for the internet — no need to guess intent from the command, and it
-    covers hosts the keyword list cannot enumerate. Never blocks.
+    covers hosts the keyword list cannot enumerate. Never blocks; nudges the agent (capped).
     """
     if not result.is_error or not flag_os_denial(result.output):
         return
     ctx.experiment.flagged_tool_calls += 1
     ctx.logger.log(LogComponent.AGENT, "WARNING", "flagged_tool_call", reason="egress_denied")
+    await _maybe_warn_flagged(ctx)
 
 
 async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:

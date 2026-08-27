@@ -116,7 +116,9 @@ def test_build_prompt_informative_vs_minimal() -> None:
     info = problem.build_prompt("ls20", info_mode=InfoMode.INFORMATIVE)
     assert "ARC-AGI-3" in info
     assert "obs.available_actions" in info  # the Observation section names the field
-    assert "Game id" in info and "Levels to win" in info  # game-specific metadata
+    assert "Levels to win" in info  # the one metadata line kept (game id + human baseline removed)
+    assert "Game id" not in info and "Human baseline" not in info
+    assert "How to read and solve" in info  # the ARC-approach advice block
     # actions are described live in the first observation (render_obs_text), not statically
     assert "## Actions" not in info
 

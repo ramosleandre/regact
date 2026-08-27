@@ -1,8 +1,10 @@
 # Game: MiniGrid ({task})
 
-MiniGrid is a symbolic 2D grid world. Read the current objective from
-`obs.frame["mission"]`. Layouts and start states may vary between episodes, so derive
-your actions from each observation rather than replaying a fixed sequence.
+MiniGrid is a symbolic 2D grid world. Read the current objective from `obs.frame["mission"]`.
+
+This game may or may not be stochastic: layouts and start states can differ between episodes/seeds.
+If it is, a fixed action sequence will not generalise - your `act(obs)` must react to the current
+observation, and you should evaluate your controller across several `make_env()` episodes.
 
 `obs.frame` is a dict with keys `image`, `direction`, and `mission`.
 

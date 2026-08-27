@@ -432,15 +432,11 @@ class ArcAgiProblem(BaseProblem):
                 "the framework tells you nothing more about this task."
             )
         body = _PROMPT.read_text(encoding="utf-8").replace("{task}", task.title).rstrip()
-        meta = [f"Game id: {task.game_id}"]
-        if task.win_levels is not None:
-            meta.append(f"Levels to win: {task.win_levels}")
-        if task.baseline_actions:
-            total = sum(task.baseline_actions)
-            meta.append(f"Human baseline: {total} actions total.")
-        # The actions are described live in the first observation (render_obs_text), from
-        # the real available_actions, so they are not duplicated statically here.
-        return body + "\n" + "\n".join(meta)
+        # Only "Levels to win" is shown - the game id is internal, and the human baseline was an
+        # irrelevant efficiency anchor. (baseline_actions is still used for RHAE scoring, just not
+        # surfaced here.) The actions are described live in the first observation (render_obs_text).
+        meta = [f"Levels to win: {task.win_levels}"] if task.win_levels is not None else []
+        return body + ("\n" + "\n".join(meta) if meta else "")
 
     def config_kwargs(self) -> dict[str, Any]:
         return {"environments_dir": self._dir, "operation_mode": self._operation_mode}

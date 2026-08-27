@@ -108,6 +108,9 @@ class RunConfig:
     # so a run collects several attempts per task to aggregate over. 1 = each task once.
     n_attempts_per_task: int = 1
     first_obs_in_prompt: bool = False  # render the first observation into the first message
+    # When a tool call is flagged (sandbox/security rule), inject a one-off warning to the agent
+    # on its next turn, up to this many times per task. 0 = never inject (flag silently as before).
+    flagging_warning_cap: int = 3
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap
