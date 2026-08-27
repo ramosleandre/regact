@@ -77,13 +77,20 @@ class CodexAgent(_CliAgent):
             os.makedirs(os.path.join(home, "skills"), exist_ok=True)
             with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as handle:
                 handle.write("# generated: isolated codex home\n")
-            user_auth = os.path.join(os.path.expanduser("~"), ".codex", "auth.json")
-            for src in (os.path.join(self._home_root, "auth.json"), user_auth):
-                if os.path.exists(src):
-                    shutil.copyfile(src, os.path.join(home, "auth.json"))
-                    break
+            src = self._freshest_auth()  # the LIVE token, not a stale copy (rotation -> "revoked")
+            if src is not None:
+                shutil.copyfile(src, os.path.join(home, "auth.json"))
             self._session_home = home
         return self._session_home
+
+    def _freshest_auth(self) -> str | None:
+        """Newest existing auth.json of {isolated root, real ~/.codex} - seed the live token."""
+        candidates = [
+            os.path.join(self._home_root, "auth.json"),
+            os.path.join(os.path.expanduser("~"), ".codex", "auth.json"),
+        ]
+        existing = [c for c in candidates if os.path.exists(c)]
+        return max(existing, key=os.path.getmtime) if existing else None
 
     def _configure_workdir(self) -> None:
         """Point codex at its fresh per-task home (:meth:`_config_dir`) via ``CODEX_HOME`` and
@@ -96,11 +103,19 @@ class CodexAgent(_CliAgent):
     async def close(self) -> None:
         """Drop the per-task home on teardown (nothing reads codex's native session store post-run;
         the normalized transcript is already in logs/), so seeded auth + session state do not
-        accumulate under the home root."""
+        accumulate. First preserve any token refresh back to the isolated ROOT (never ~/.codex)."""
         await super().close()
-        if self._session_home is not None:
-            shutil.rmtree(self._session_home, ignore_errors=True)
-            self._session_home = None
+        if self._session_home is None:
+            return
+        refreshed = os.path.join(self._session_home, "auth.json")
+        if os.path.exists(refreshed):
+            try:
+                os.makedirs(self._home_root, exist_ok=True)
+                shutil.copyfile(refreshed, os.path.join(self._home_root, "auth.json"))
+            except OSError:
+                pass  # best-effort; a lost refresh just re-seeds from ~/.codex next run
+        shutil.rmtree(self._session_home, ignore_errors=True)
+        self._session_home = None
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         argv = ["codex"]

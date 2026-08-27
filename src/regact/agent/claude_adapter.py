@@ -69,16 +69,23 @@ class ClaudeAgent(_CliAgent):
             or os.path.exists(self._real_creds())
         )
 
+    def _freshest_creds(self) -> str | None:
+        """The NEWEST existing credential of {isolated root, real ~/.claude} - seed the LIVE token,
+        never a stale copy. OAuth rotates the refresh token, so a stale copy reads back as
+        'revoked'. Handles both logins: into ~/.claude (its copy is newer) or into the root."""
+        candidates = [os.path.join(self._home_root, ".credentials.json"), self._real_creds()]
+        existing = [c for c in candidates if os.path.exists(c)]
+        return max(existing, key=os.path.getmtime) if existing else None
+
     def _make_session_home(self) -> str:
-        """A FRESH per-task config dir seeded with ONLY the auth credential - no projects/memory,
-        sessions, or history from any prior task or run (which a shared home would accumulate). The
-        home root persists the login; each task gets its own empty dir under it."""
+        """A FRESH per-task config dir seeded with ONLY the (freshest) auth credential - no
+        projects/memory, sessions, or history from any prior task or run (which a shared home would
+        accumulate). The root persists the login; each task gets its own empty dir under it."""
         home = os.path.join(self._home_root, "session", uuid.uuid4().hex)
         os.makedirs(home, exist_ok=True)
-        for src in (os.path.join(self._home_root, ".credentials.json"), self._real_creds()):
-            if os.path.exists(src):
-                shutil.copyfile(src, os.path.join(home, ".credentials.json"))
-                break
+        src = self._freshest_creds()
+        if src is not None:
+            shutil.copyfile(src, os.path.join(home, ".credentials.json"))
         return home
 
     def _config_dir(self) -> str:
@@ -116,11 +123,21 @@ class ClaudeAgent(_CliAgent):
     async def close(self) -> None:
         """Drop the per-task config home on teardown (nothing reads claude's native session dir
         post-run; the normalized transcript is already in logs/), so seeded auth + session state do
-        not accumulate under the home root."""
+        not accumulate. First preserve any token refresh Claude wrote back to the isolated ROOT
+        (never the user's ~/.claude) - dropping a rotated refresh token revokes the persistent one.
+        """
         await super().close()
-        if self._session_home is not None:
-            shutil.rmtree(self._session_home, ignore_errors=True)
-            self._session_home = None
+        if self._session_home is None:
+            return
+        refreshed = os.path.join(self._session_home, ".credentials.json")
+        if os.path.exists(refreshed):
+            try:
+                os.makedirs(self._home_root, exist_ok=True)
+                shutil.copyfile(refreshed, os.path.join(self._home_root, ".credentials.json"))
+            except OSError:
+                pass  # best-effort; a lost refresh just re-seeds from ~/.claude next run
+        shutil.rmtree(self._session_home, ignore_errors=True)
+        self._session_home = None
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
