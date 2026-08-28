@@ -37,6 +37,7 @@ from regact.testing.fakes import FakeNativeEnv
 
 _IDENTITY_PARSER = "def parse(obs):\n    return obs\n"
 _IDENTITY_RENDER = "def render(state):\n    return state\n"
+_NO_DEPS: Any = None  # CwmFeature.submission_metrics ignores its deps arg
 
 
 def _ctx(workdir: Path) -> FeatureContext:
@@ -198,13 +199,14 @@ def test_feature_knobs_bake_into_verify(tmp_path: Path) -> None:
         "world_model/model_state.py",
         "world_model/model_parser.py",
         "world_model/model_render.py",
+        "world_model/model_transition.py",
         "world_model/model_notes.py",
         "world_model/verify.py",
     }
     verify = templates["world_model/verify.py"]
-    assert "MAX_OBS_DEFAULT = 123" in verify
-    assert "MAX_FAILURES_DEFAULT = 4" in verify
-    assert "__MAX_OBS__" not in verify
+    assert "MAX_UNIQUE_USED_DEFAULT = 123" in verify
+    assert "MAX_INCOHERENCES_DEFAULT = 4" in verify
+    assert "__MAX_UNIQUE_USED__" not in verify
 
 
 def test_unknown_feature_param_fails_loudly() -> None:
@@ -221,6 +223,41 @@ def test_loader_carries_feature_knobs() -> None:
         }
     )
     assert config.features == {"cwm": {"max_tested_transitions_per_verify": 5}}
+
+
+# --------------------------------------------------------------------------- #
+# Data-integrity metric (computed from the trusted canonical, model-independent)
+# --------------------------------------------------------------------------- #
+def test_data_integrity_counts_conflicts(tmp_path: Path) -> None:
+    from regact.features.cwm import _data_integrity
+
+    path = tmp_path / "transitions.jsonl"
+    a = {"o": _obs(0), "a": 1, "r": 0.0, "o2": _obs(1), "done": False}
+    conflict = {"o": _obs(0), "a": 1, "r": 0.0, "o2": _obs(2), "done": False}  # same (o,a), diff o2
+    path.write_text("\n".join(json.dumps(t) for t in (a, dict(a), conflict)) + "\n")
+    assert _data_integrity(str(path)) == {
+        "n_transitions": 3,  # the identical dup still counts on disk
+        "n_distinct_transitions": 2,  # but collapses to 2 distinct
+        "n_conflicting_transitions": 1,
+    }
+
+
+def test_submission_metrics_reports_data_integrity(tmp_path: Path) -> None:
+    ctx = FeatureContext(
+        problem_name="fake",
+        task_name="corridor",
+        workdir=str(tmp_path / "workdir"),
+        output_dir=str(tmp_path),
+    )
+    feature = CwmFeature()
+    assert feature.submission_metrics(_NO_DEPS) == {}  # no canonical written yet
+    feature.env_wrapper(ctx)  # sets the canonical path on the feature
+    canonical = tmp_path / "cwm" / "transitions.jsonl"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text(
+        json.dumps({"o": _obs(0), "a": 1, "r": 0.0, "o2": _obs(1), "done": False}) + "\n"
+    )
+    assert feature.submission_metrics(_NO_DEPS)["n_transitions"] == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -241,6 +278,8 @@ def _scaffold(
     *,
     parser_src: str = _IDENTITY_PARSER,
     render_src: str = _IDENTITY_RENDER,
+    step_src: str | None = None,
+    lines: list[dict[str, Any]] | None = None,
     n_transitions: int = 3,
 ) -> Path:
     for template in CwmFeature().templates(_ctx(workdir)):
@@ -250,15 +289,22 @@ def _scaffold(
     world = workdir / "world_model"
     (world / "model_parser.py").write_text(parser_src)
     (world / "model_render.py").write_text(render_src)
-    lines = []
-    for i in range(n_transitions):
-        done = i == n_transitions - 1
-        lines.append(
-            json.dumps({"o": _obs(i), "a": 1, "r": 0.0, "o2": _obs(i + 1, done=done), "done": done})
-        )
+    if step_src is not None:  # else keep the NotImplementedError stub
+        (world / "model_transition.py").write_text(step_src)
+    if lines is None:
+        lines = [
+            {
+                "o": _obs(i),
+                "a": 1,
+                "r": 0.0,
+                "o2": _obs(i + 1, done=(i == n_transitions - 1)),
+                "done": i == n_transitions - 1,
+            }
+            for i in range(n_transitions)
+        ]
     data = workdir / "data"
     data.mkdir(parents=True, exist_ok=True)
-    (data / "transitions.jsonl").write_text("\n".join(lines) + "\n")
+    (data / "transitions.jsonl").write_text("\n".join(json.dumps(t) for t in lines) + "\n")
     return world / "verify.py"
 
 
@@ -275,13 +321,20 @@ def _run_verify(script: Path, *args: str) -> dict[str, Any]:
     return json.loads(proc.stdout)
 
 
+def _incoherences(report: dict[str, Any], check: str) -> list[dict[str, Any]]:
+    return [f for f in report["incoherences"] if f.get("check") == check]
+
+
 def test_verify_identity_model_is_fully_coherent(tmp_path: Path) -> None:
     report = _run_verify(_scaffold(tmp_path))
-    # 3 distinct o's + the terminal o2.
-    assert report["n_obs_tested"] == 4
-    assert report["coherence"] == 1.0
-    assert report["n_transitions"] == 3
-    assert report["failures"] == []
+    assert report["coverage"]["n_unique_obs"] == 4  # 3 distinct o's + the terminal o2
+    assert report["parser_injectivity"] == 1.0
+    assert report["representation_coherence"] == 1.0
+    assert report["transition_accuracy"] is None  # step is still the stub
+    assert report["coverage"]["n_transitions_total"] == 3
+    assert report["incoherences"] == []
+    assert report["valid"] is False  # no rule of motion yet
+    assert report["next_priority"] == "implementing the rule of motion"
 
 
 def test_verify_reports_mismatch_with_pointed_diff(tmp_path: Path) -> None:
@@ -290,9 +343,10 @@ def test_verify_reports_mismatch_with_pointed_diff(tmp_path: Path) -> None:
         "    s['frame'] = dict(s['frame'], pos=99)\n    return s\n"
     )
     report = _run_verify(_scaffold(tmp_path, render_src=render))
-    assert report["coherence"] == 0.0
-    failure = report["failures"][0]
-    assert failure["kind"] == "mismatch"
+    assert report["representation_coherence"] == 0.0
+    assert report["next_priority"] == "fixing representation coherence"
+    failure = _incoherences(report, "representation")[0]
+    assert failure["kind"] == "mismatch" and failure["part"] == "frame"
     assert failure["detail"].startswith("obs.frame.pos: 99 != ")
 
 
@@ -302,30 +356,113 @@ def test_verify_reports_shape_mismatch(tmp_path: Path) -> None:
         "    s['frame'] = dict(s['frame'], cells=[])\n    return s\n"
     )
     report = _run_verify(_scaffold(tmp_path, render_src=render))
-    failures = [f for f in report["failures"] if "length" in f["detail"]]
+    failures = [f for f in report["incoherences"] if "length" in f.get("detail", "")]
     assert failures and failures[0]["kind"] == "mismatch"
 
 
-def test_verify_counts_a_raising_parse_as_incoherent(tmp_path: Path) -> None:
+def test_verify_a_raising_parse_fails_injectivity(tmp_path: Path) -> None:
     raising = "def parse(obs):\n    raise KeyError('x')\n"
     report = _run_verify(_scaffold(tmp_path, parser_src=raising))
-    assert report["coherence"] == 0.0
-    assert report["failures"][0]["kind"] == "error"
-    assert "KeyError" in report["failures"][0]["detail"]
+    assert report["parser_injectivity"] == 0.0  # no obs produced a state
+    assert report["next_priority"] == "fixing parser injectivity"
+    failure = _incoherences(report, "injectivity")[0]
+    assert failure["kind"] == "error" and failure["part"] == "parse"
+    assert "KeyError" in failure["detail"]
 
 
-def test_verify_cap_reports_skipped(tmp_path: Path) -> None:
-    report = _run_verify(_scaffold(tmp_path), "--max-obs", "2")
-    assert report["n_obs_tested"] == 2
-    assert report["n_obs_skipped"] == 2
+def test_verify_stub_parser_reports_not_implemented(tmp_path: Path) -> None:
+    raising = "def parse(obs):\n    raise NotImplementedError\n"
+    report = _run_verify(_scaffold(tmp_path, parser_src=raising))
+    assert report["parser_injectivity"] is None
+    assert report["next_priority"] == "implementing the parser"
 
 
-def test_verify_complexity_ignores_notes_and_itself(tmp_path: Path) -> None:
+def test_verify_cap_limits_unique_used(tmp_path: Path) -> None:
+    report = _run_verify(_scaffold(tmp_path), "--max-used", "2")
+    assert report["coverage"]["n_unique_obs"] == 2
+    assert report["coverage"]["n_obs_total"] == 4  # 3 o's + 1 terminal o2
+
+
+def test_verify_complexity_is_per_module_and_ignores_notes(tmp_path: Path) -> None:
     script = _scaffold(tmp_path)
-    before = _run_verify(script)["complexity"]["ast_nodes"]
+    comp = _run_verify(script)["complexity"]
+    assert {"parser", "render", "transition", "state", "total"} <= set(comp)
+    before = comp["total"]
     notes = tmp_path / "world_model" / "model_notes.py"
     notes.write_text(notes.read_text() + "\n" + "JUNK = [0]\n" * 30)
-    assert _run_verify(script)["complexity"]["ast_nodes"] == before
+    assert _run_verify(script)["complexity"]["total"] == before  # notes excluded
+
+
+def test_verify_state_size_vs_obs(tmp_path: Path) -> None:
+    report = _run_verify(_scaffold(tmp_path))  # identity: state == obs
+    size = report["state_size"]
+    assert size["avg"] > 0 and size["avg_obs"] > 0 and size["ratio"] is not None
+
+
+def test_verify_injectivity_flags_a_collapsing_parser(tmp_path: Path) -> None:
+    collapse = "def parse(obs):\n    return {'x': 1}\n"  # every obs -> one state
+    report = _run_verify(_scaffold(tmp_path, parser_src=collapse))
+    assert report["parser_injectivity"] < 1.0
+    assert report["next_priority"] == "fixing parser injectivity"
+    assert report["injectivity_collisions"] == {"n_observations": 4, "n_states": 1}
+    collision = _incoherences(report, "injectivity")[0]
+    assert len(collision["transitions"]) > 1
+
+
+def test_verify_shows_all_numbers_even_when_gated(tmp_path: Path) -> None:
+    # A non-injective parser still gets a representation number (not hidden behind "fix first").
+    collapse = "def parse(obs):\n    return {'x': 1}\n"
+    report = _run_verify(_scaffold(tmp_path, parser_src=collapse))
+    assert report["parser_injectivity"] < 1.0
+    assert isinstance(report["representation_coherence"], float)  # computed + shown, not None
+
+
+_GOAL3_STEP = (
+    "def step(state, action):\n"
+    "    pos = state['frame']['pos'] + 1\n"
+    "    done = pos == 3\n"
+    "    return {'frame': {'pos': pos, 'cells': [0] * pos},\n"
+    "            'reward': 1.0 if done else 0.0, 'is_done': done,\n"
+    "            'available_actions': [1], 'info': {}}\n"
+)
+
+
+def test_verify_valid_when_representation_and_transition_perfect(tmp_path: Path) -> None:
+    report = _run_verify(_scaffold(tmp_path, step_src=_GOAL3_STEP))
+    assert report["transition_accuracy"] == 1.0
+    assert report["valid"] is True and report["next_priority"] is None
+    assert report["coverage"]["n_unique_transitions"] == 3
+
+
+def test_verify_transition_mismatch_is_pointed(tmp_path: Path) -> None:
+    stay = "def step(state, action):\n    return dict(state)\n"  # never advances
+    report = _run_verify(_scaffold(tmp_path, step_src=stay))
+    assert report["transition_accuracy"] == 0.0
+    assert report["next_priority"] == "fixing the rule of motion"
+    failure = _incoherences(report, "transition")[0]
+    assert failure["kind"] == "mismatch"
+
+
+def test_verify_flags_conflicting_transitions(tmp_path: Path) -> None:
+    lines = [
+        {"o": _obs(0), "a": 1, "r": 0.0, "o2": _obs(1), "done": False},
+        {"o": _obs(0), "a": 1, "r": 0.0, "o2": _obs(2), "done": False},  # same (o,a), diff o2
+    ]
+    report = _run_verify(_scaffold(tmp_path, lines=lines))
+    assert report["n_conflicting_transitions"] == 1
+
+
+def test_verify_handles_none_reward_at_episode_start(tmp_path: Path) -> None:
+    start = {
+        "frame": {"pos": 0, "cells": []},
+        "reward": None,
+        "is_done": False,
+        "available_actions": [1],
+        "info": {},
+    }
+    lines = [{"o": start, "a": 1, "r": 0.0, "o2": _obs(1), "done": False}]
+    report = _run_verify(_scaffold(tmp_path, lines=lines))  # identity model
+    assert report["representation_coherence"] == 1.0  # None handled, not a crash
 
 
 # --------------------------------------------------------------------------- #
@@ -411,5 +548,5 @@ async def test_run_task_with_cwm_records_and_verifies(tmp_path: Path) -> None:
     (workdir / "world_model" / "model_parser.py").write_text(_IDENTITY_PARSER)
     (workdir / "world_model" / "model_render.py").write_text(_IDENTITY_RENDER)
     report = _run_verify(workdir / "world_model" / "verify.py")
-    assert report["coherence"] == 1.0
-    assert report["n_transitions"] == len(lines)
+    assert report["representation_coherence"] == 1.0
+    assert report["coverage"]["n_transitions_total"] == len(lines)

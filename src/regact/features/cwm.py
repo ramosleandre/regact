@@ -1,11 +1,14 @@
-"""The Code World Model feature (v2: the representation model).
+"""The Code World Model feature (representation + transition model).
 
 Records every real env transition into the agent's workdir (via the env-wrapper
 seam, server-side — the agent cannot forge or lose data) and scaffolds
-``world_model/``: the ``parse``/``render``/``State`` stubs the agent fills, plus
-a self-contained ``verify.py`` the agent runs to measure coherence
-(``render(parse(o)) == o``) against the recorded data. Design and decisions:
-``context/cwm_v2.md``.
+``world_model/``: the ``parse``/``render``/``State``/``step`` stubs the agent
+fills, plus a self-contained ``verify.py`` it runs to measure - against the
+recorded data - representation coherence (``render(parse(o)) == o``), parser
+injectivity, and transition coherence (``render(step(parse(o), a)) == o2``). The
+feature also contributes data-integrity numbers (conflicting transitions,
+coverage) to each submission's metrics. Design + decisions: ``context/cwm_v2.md``
+and ``context/cwm_v3.md`` (v3 = the transition model).
 """
 
 from __future__ import annotations
@@ -37,10 +40,11 @@ _PROMPT_MD = Path(__file__).parent / "prompts" / "cwm.md"
 _VERIFY_TEMPLATE = Path(__file__).parent / "templates" / "cwm_verify.py"
 
 _STATE_STUB = '''\
-"""The state space of your world model: what the world IS.
+"""State: your compressed representation of ONE observation.
 
-Design the fields yourself; instances are plain data. The state must capture
-everything observable — ``render`` has to rebuild the full obs from it.
+render(state) rebuilds the WHOLE observation from this, so the state must carry
+everything the observation shows. Keep it small: a state as big as the obs has
+understood nothing. Design the fields yourself; instances are plain data.
 """
 
 
@@ -49,7 +53,11 @@ class State:
 '''
 
 _PARSER_STUB = '''\
-"""parse(obs) -> State: read one json obs dict into your state."""
+"""parse(obs) -> State: read one json observation dict into your state.
+
+Inspect a transition first (``from verify import load_transitions``) to see this
+game's observation structure - do not assume it.
+"""
 
 from model_state import State
 
@@ -59,12 +67,32 @@ def parse(obs: dict) -> State:
 '''
 
 _RENDER_STUB = '''\
-"""render(state) -> obs dict: rebuild the obs EXACTLY as observed (same format)."""
+"""render(state) -> obs dict: rebuild the observation EXACTLY as observed.
+
+Everything the observation contains - not just the main frame - must come back
+out, same shape and values.
+"""
 
 from model_state import State
 
 
 def render(state: State) -> dict:
+    raise NotImplementedError
+'''
+
+_TRANSITION_STUB = '''\
+"""step(state, action) -> State: advance the world one action.
+
+Return the NEXT state, so that render(step(parse(o), a)) is the next observation.
+Fill this once parse/render are coherent; verify reports transition accuracy as
+n/a until then. Because step maps State -> State, you can chain it to "dream" a
+plan forward in code without spending real environment steps.
+"""
+
+from model_state import State
+
+
+def step(state: State, action) -> State:
     raise NotImplementedError
 '''
 
@@ -170,6 +198,41 @@ class RecordingEnvWrapper(EnvWrapper):
         return after
 
 
+def _data_integrity(path: str) -> dict[str, int]:
+    """Coverage + determinism check over the recorded transitions (no model needed): total count,
+    distinct transitions (by the full tuple), and how many ``(o, a)`` pairs gave more than one
+    outcome (a determinism / hidden-state violation). Mirrors verify.py's data-side counting."""
+    outcomes: dict[str, set[str]] = {}
+    distinct: set[str] = set()
+    n = 0
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for raw in handle:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    transition = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if "o" not in transition or "o2" not in transition:
+                    continue
+                n += 1
+                pair = json.dumps([transition["o"], transition.get("a")], sort_keys=True)
+                outcome = json.dumps(
+                    [transition["o2"], transition.get("r"), transition.get("done")], sort_keys=True
+                )
+                outcomes.setdefault(pair, set()).add(outcome)
+                distinct.add(pair + outcome)
+    except OSError:
+        return {}
+    return {
+        "n_transitions": n,
+        "n_distinct_transitions": len(distinct),
+        "n_conflicting_transitions": sum(1 for outs in outcomes.values() if len(outs) > 1),
+    }
+
+
 class CwmFeature(Feature):
     """The Code World Model capability (recording + world_model/ scaffold)."""
 
@@ -187,12 +250,14 @@ class CwmFeature(Feature):
     ) -> None:
         self._max_tested = int(max_tested_transitions_per_verify)
         self._max_printed_failures = int(max_printed_incoherence_transitions_per_verify)
+        self._canonical: str | None = None  # set in env_wrapper; read by submission_metrics
 
     def templates(self, ctx: FeatureContext) -> list[TemplateFile]:
         return [
             TemplateFile("world_model/model_state.py", _STATE_STUB),
             TemplateFile("world_model/model_parser.py", _PARSER_STUB),
             TemplateFile("world_model/model_render.py", _RENDER_STUB),
+            TemplateFile("world_model/model_transition.py", _TRANSITION_STUB),
             TemplateFile("world_model/model_notes.py", _NOTES_STUB),
             TemplateFile("world_model/verify.py", self._verify_source()),
         ]
@@ -206,13 +271,23 @@ class CwmFeature(Feature):
     def hooks(self, deps: RunDeps) -> list[Hook]:
         return []
 
+    def submission_metrics(self, deps: RunDeps) -> dict[str, Any]:
+        """Data-integrity numbers over the trusted recorded transitions (model-independent):
+        total, distinct, and conflicting - the last should be 0 under the deterministic +
+        fully-observable hypothesis, so a non-zero value flags it in post-hoc analysis. Logged
+        under this feature's ``cwm`` key on each submission; the agent sees the same conflict count
+        in ``verify.py`` output."""
+        if not self._canonical or not os.path.exists(self._canonical):
+            return {}
+        return _data_integrity(self._canonical)
+
     def env_wrapper(self, ctx: FeatureContext) -> Callable[[Any], Any] | None:
-        canonical = (
+        self._canonical = (
             os.path.join(ctx.output_dir, "cwm", "transitions.jsonl") if ctx.output_dir else None
         )
         recorder = TransitionRecorder(
             os.path.join(ctx.workdir, _TRANSITIONS_RELPATH),
-            canonical_path=canonical,
+            canonical_path=self._canonical,
             mirror_root=ctx.workdir,
         )
         return lambda env: RecordingEnvWrapper(env, recorder)
@@ -220,8 +295,8 @@ class CwmFeature(Feature):
     def _verify_source(self) -> str:
         """The verify.py template with this run's parameters baked in as defaults."""
         source = _VERIFY_TEMPLATE.read_text(encoding="utf-8")
-        return source.replace('int("__MAX_OBS__")', str(self._max_tested)).replace(
-            'int("__MAX_FAILURES__")', str(self._max_printed_failures)
+        return source.replace('int("__MAX_UNIQUE_USED__")', str(self._max_tested)).replace(
+            'int("__MAX_INCOHERENCES__")', str(self._max_printed_failures)
         )
 
 
