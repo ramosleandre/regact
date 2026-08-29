@@ -94,8 +94,9 @@ WORK_DIR="$(mktemp -d)"  # per-task exit codes + unique Hydra run dirs (outside 
 # outputs/<timestamp>/ dir; it lives outside experiments/ so it never looks like a run stamp.
 run_task_bench() {
     local task="$1"
-    local exp="exp_${task}_${AGENT}-${MODEL_NAME}_seed${SEED}"
-    echo "[bench] start task=${task} -> experiments/bench_${BENCH_DATE}/${exp}"
+    local exp="${EXPERIMENT_NAME:-exp_${task}_${AGENT}-${MODEL_NAME}_seed${SEED}}"
+    local oroot="${OUTPUT_ROOT:-experiments/bench_${BENCH_DATE}}"
+    echo "[bench] start task=${task} -> ${oroot}/${exp}"
     python -m regact.run_exp \
         agent="${AGENT}" \
         agent.model="openai/${MODEL_NAME}" \
@@ -107,7 +108,7 @@ run_task_bench() {
         problem.seed="${SEED}" \
         controller.n_episodes="${N_EPISODES}" \
         limits.max_seconds_per_task="${WALLTIME_S}" \
-        output_root="experiments/bench_${BENCH_DATE}" \
+        output_root="${oroot}" \
         experiment_name="${exp}" \
         sandbox="${SANDBOX}" \
         hydra.run.dir="${WORK_DIR}/hydra_${task}" \
