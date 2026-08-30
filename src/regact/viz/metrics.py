@@ -40,6 +40,9 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         # otherwise. A gap vs final_aggregate flags cheating OR a replay/scoring bug.
         "final_aggregate_unverified": _final_aggregate_unverified(game),
         "duration_s": game.state.get("duration_s", 0),
+        # Cumulative real env.step calls this task made (exploration + eval rollouts). None for runs
+        # recorded before it was tracked, so the viz shows "-" rather than a wrong 0.
+        "env_moves": game.state.get("env_moves"),
         "success_rate": _final_metric(game, "success_rate"),
         "last_error_category": game.state.get("last_error_category"),
         "exit_reason": game.state.get("exit_reason"),  # None while running

@@ -50,7 +50,12 @@ async function gamesData(under = "") { // scoped, so the browser never parses th
 function panelNav(active, under = "") {
   const nav = h("div", "panelnav");
   const suffix = under ? "/" + encodeURIComponent(under) : "";
-  const back = h("a", "panel", "< all"); back.href = "#"; nav.append(back);
+  // Back goes ONE logical level up (benchmark -> global, experiment -> benchmark), never through
+  // the run/timestamp level. Empty parent -> the global browse landing.
+  const parent = under.split("/").slice(0, -1).join("/");
+  const back = h("a", "panel", "< back");
+  back.href = parent ? "#run/" + encodeURIComponent(parent) : "#";
+  nav.append(back);
   for (const [slug, label] of [["run", "Experiments"], ["graphs", "Graphs"]]) {
     const on = (slug === "run" && active === "") || slug === active;
     const a = h("a", "panel" + (on ? " on" : ""), label);
@@ -154,13 +159,16 @@ function statusBadge(m) {
 const _THEME = { good: "#4ec9a4", warn: "#e0c060", bad: "#e06c6c", muted: "#9aa3b2" };
 const _EXP_PALETTE = ["#5aa9e6", "#4ec9a4", "#e0c060", "#e06c6c", "#7d8bd4", "#d47db0", "#8bd47d", "#d4a37d"];
 const _AGG_SKIP = new Set(["n_episodes", "n_errors", "success_rate"]);  // shown elsewhere / bookkeeping
+// `def: true` = a Main metric: shown in the game overview's Main-metrics table AND activated by
+// default in the Graphs panel (the two are kept in sync - see MAIN_METRIC_KEYS + renderOverview).
 const FRAMEWORK_METRICS = [
   { key: "success_rate", label: "success rate", get: (m) => m.success_rate, fmt: pct, def: true },
+  { key: "env_actions", label: "env actions", get: (m) => m.env_moves, def: true },
   { key: "time", label: "time", get: (m) => m.duration_s, fmt: dur, def: true },
+  { key: "tool_calls", label: "tool calls", get: (m) => m.n_tool_calls, def: true },
+  { key: "flagged_calls", label: "flagged calls", get: (m) => m.flagged_tool_calls, def: true },
   { key: "n_runs", label: "number of runs", count: true },  // runs of this task (not aggregated)
-  { key: "tool_calls", label: "tool calls", get: (m) => m.n_tool_calls },
   { key: "iterations", label: "iterations", get: (m) => m.n_turns },
-  { key: "flagged_calls", label: "flagged calls", get: (m) => m.flagged_tool_calls },
   { key: "output_tokens", label: "output tokens", get: (m) => m.tokens && m.tokens.output },
   { key: "cache_read", label: "cache tokens", get: (m) => m.tokens && m.tokens.cache_read },
   { key: "thinking_chars", label: "thinking chars", get: (m) => m.thinking_chars },
@@ -244,7 +252,7 @@ function _chartPad(tasks) {
 // drops crashed/unfinished runs first; `errMethod` adds error/interval bars (std around the MEAN,
 // or the min-max range) - the interval is independent of which aggregate sets the bar height.
 function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
-  const { experiments, tasks, byExp } = group;
+  const { experiments, byExp } = group;
   const agg = AGGREGATORS[aggName];
   const runsOf = (exp, task) => {
     const runs = (byExp.get(exp) && byExp.get(exp).get(task)) || [];
@@ -266,6 +274,9 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
     const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1)); // on the mean
     return { lo: mean - sd, hi: mean + sd };
   };
+  // Only keep tasks with at least one value: with the mask on, a task whose runs are all
+  // crashed/unfinished (or that never reported this metric) gets no phantom x-axis column.
+  const tasks = group.tasks.filter((task) => experiments.some((exp) => val(exp, task) != null));
   let max = 0;
   for (const t of tasks) for (const e of experiments) {
     const v = val(e, t); if (v != null) max = Math.max(max, v);
@@ -286,17 +297,20 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
   }
   tasks.forEach((task, ti) => {
     const gx = padL + ti * groupW + 8;
-    const bw = (groupW - 16) / experiments.length;
+    const bw = (groupW - 16) / experiments.length;   // one slot per experiment (task spacing = groupW)
+    const barW = Math.max(1, bw / 2);                // bars are half the slot -> clearer separation
+    const base = padT + plotH;                       // y of the zero baseline
     experiments.forEach((exp, ei) => {
       const v = val(exp, task);
       if (v == null) return;
-      const x = gx + ei * bw, y = yOf(v);
-      const rect = svg("rect", { x: x + 1, y, width: Math.max(1, bw - 2), height: padT + plotH - y, rx: 2, fill: expColor(exp) });
+      const cx = gx + ei * bw + bw / 2;              // bar centered in its slot
+      const barTop = Math.min(yOf(v), base - 2);     // a value of 0 still shows a >=2px line
+      const rect = svg("rect", { x: cx - barW / 2, y: barTop, width: barW, height: base - barTop, rx: 2, fill: expColor(exp) });
       rect.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${spec.label}: ${spec.fmt ? spec.fmt(v) : fmtMetric(v)}`)));
       s.append(rect);
-      const eb = errOf(exp, task);               // error/interval bar centered on the bar's x
+      const eb = errOf(exp, task);               // error/interval bar centered on the bar
       if (eb) {
-        const cx = x + bw / 2, yl = yOf(eb.lo), yh = yOf(eb.hi), cap = Math.max(2, bw * 0.22);
+        const yl = yOf(eb.lo), yh = yOf(eb.hi), cap = Math.max(2, barW * 0.44);
         s.append(svg("line", { class: "errbar", x1: cx, y1: yh, x2: cx, y2: yl }));
         s.append(svg("line", { class: "errbar", x1: cx - cap, y1: yh, x2: cx + cap, y2: yh }));
         s.append(svg("line", { class: "errbar", x1: cx - cap, y1: yl, x2: cx + cap, y2: yl }));
@@ -469,6 +483,12 @@ const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", 
 function shell(name, active, body) {
   crumb.textContent = name;
   const nav = h("div", "tabs");
+  // Back to this game's EXPERIMENT dashboard (skip the run/timestamp level), so navigation is
+  // benchmark -> experiment -> task, never stopping at a single-run page.
+  const parent = name.split("/").slice(0, -2).join("/");
+  const back = h("a", "tab", "< back");
+  back.href = parent ? "#run/" + encodeURIComponent(parent) : "#";
+  nav.append(back);
   for (const [slug, label] of TABS) {
     const href = "#game/" + encodeURIComponent(name) + (slug ? "/" + slug : "");
     const a = h("a", "tab" + (slug === active ? " on" : ""), label);
@@ -508,6 +528,7 @@ async function renderOverview(name) {
   const main = [
     ["Status", statusOf(m)],
     ["Score", aggLine(m.final_aggregate), hasUnverified ? "shadow-replay verified" : "final submission"],
+    ["Env actions", fmt(m.env_moves)],
     ["Time", dur(m.duration_s)],
     ["Tool calls", m.n_tool_calls],
     ["Flagged calls", m.flagged_tool_calls ?? 0],
@@ -530,24 +551,42 @@ async function renderOverview(name) {
   shell(name, "", wrap);
 }
 
+// Exhaustive + grouped: one table per top-level config section (problem, agent, controller,
+// features, ...) plus a "parameters" table for the scalar base fields - same look as the metric
+// tables. Nested objects flatten to dotted keys (so `features.cwm.*` shows, never "[object Object]").
+function _confVal(v) {
+  // Any object/array (incl. empty {} / []) -> JSON, never "[object Object]"; scalars -> String.
+  return v !== null && typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+function _flattenConfig(obj, prefix, rows) {
+  for (const k of Object.keys(obj).sort()) {
+    const key = prefix ? prefix + "." + k : k;
+    const v = obj[k];
+    if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length) {
+      _flattenConfig(v, key, rows);
+    } else {
+      rows.push([key, _confVal(v)]);
+    }
+  }
+}
+
 function configBlock(c) {
   if (!c || !Object.keys(c).length) return h("div");
-  const a = c.agent || {}, p = c.problem || {}, lim = c.limits || {}, ctl = c.controller || {};
-  const args = a.args && Object.keys(a.args).length ? " · " + JSON.stringify(a.args) : "";
-  const opts = c.sandbox_opts && Object.keys(c.sandbox_opts).length ? " · " + JSON.stringify(c.sandbox_opts) : "";
-  const rows = [
-    ["agent", `${a.name ?? "?"}${a.model ? " · " + a.model : ""}${args}`],
-    ["problem", `${p.name ?? "?"} · ${p.lifecycle ?? "?"} · info=${p.info_mode ?? "?"} · obs=${p.obs_mode ?? "?"}`],
-    ["features", Object.keys(c.features || {}).join(", ")],
-    ["problem.tasks", (p.tasks || c.task_names || []).join(", ") || "(all)"],
-    ["controller", `${ctl.n_episodes ?? "?"} ep · max_moves ${ctl.max_moves ?? "?"} · videos ${ctl.n_videos ?? "?"} · shadow_replay ${ctl.shadow_replay ?? "?"}`],
-    ["limits", `max_turns ${lim.max_turns ?? "?"} · max_seconds ${lim.max_seconds_per_task ?? "null"} · max_env_steps ${lim.max_actions_per_env ?? "null"}`],
-    ["sandbox", `${c.sandbox ?? "?"}${opts}`],
-  ];
   const wrap = h("div"); wrap.append(h("h2", null, "Run config"));
-  const t = h("table");
-  for (const [k, v] of rows) t.append(rowEl("td", [k, String(v)]));
-  wrap.append(t); return wrap;
+  const base = [], sections = [];
+  for (const k of Object.keys(c).sort()) {
+    const v = c[k];
+    if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length) {
+      const rows = []; _flattenConfig(v, "", rows);
+      sections.push([k, rows]);
+    } else {
+      base.push([k, _confVal(v)]);
+    }
+  }
+  if (base.length) wrap.append(metricTable("parameters", base));
+  for (const [name, rows] of sections) wrap.append(metricTable(name, rows));
+  return wrap;
 }
 function barChart(title, obj) {
   const wrap = h("div"); wrap.append(h("h2", null, title));
