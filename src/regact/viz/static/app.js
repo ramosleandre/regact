@@ -248,6 +248,23 @@ function _chartPad(tasks) {
   };
 }
 
+// A small task-preview thumbnail under each x-axis label (rendered on demand by the server at
+// /api/task_preview), so a task is recognizable at a glance. `centerXOf(ti)` is the task's group
+// center; the image removes itself if the server can't render that task.
+const _THUMB_GAP = 6;
+function appendTaskThumbs(s, tasks, centerXOf, yTop, size) {
+  tasks.forEach((task, ti) => {
+    const img = svg("image", {
+      x: centerXOf(ti) - size / 2, y: yTop, width: size, height: size,
+      href: "api/task_preview?task=" + encodeURIComponent(task),
+      preserveAspectRatio: "xMidYMid meet",
+    });
+    img.addEventListener("error", () => img.remove());
+    img.append(svg("title", {}, txt(task)));
+    s.append(img);
+  });
+}
+
 // A grouped bar chart: x = task, one bar per experiment = agg over that (exp,task)'s runs. `mask`
 // drops crashed/unfinished runs first; `errMethod` adds error/interval bars (std around the MEAN,
 // or the min-max range) - the interval is independent of which aggregate sets the bar height.
@@ -288,7 +305,10 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
   const W = padL + padR + tasks.length * groupW;
   const plotH = H - padT - padB;
   const yOf = (v) => padT + plotH * (1 - Math.max(0, Math.min(1, v / max)));   // value -> y, clamped
-  const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const thumb = Math.min(48, groupW - 6);          // task-preview size; fits inside one group slot
+  const yThumb = H + _THUMB_GAP;                    // BELOW the angled label band (labels fill padB)
+  const Hsvg = yThumb + thumb + 4;                  // extend the canvas for the thumbnail row
+  const s = svg("svg", { class: "chart", width: W, height: Hsvg, viewBox: `0 0 ${W} ${Hsvg}` });
   for (const f of [0, 0.5, 1]) {                 // y gridlines + labels
     const y = padT + plotH * (1 - f);
     s.append(svg("line", { class: "gridline", x1: padL, y1: y, x2: W - padR, y2: y }));
@@ -319,6 +339,7 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
     const lx = gx + (groupW - 16) / 2, ly = H - padB + 12;   // x label (task), rotated
     s.append(svg("text", { class: "xlab", x: lx, y: ly, "text-anchor": "end", transform: `rotate(-35 ${lx} ${ly})` }, txt(shortTask(task))));
   });
+  appendTaskThumbs(s, tasks, (ti) => padL + ti * groupW + 8 + (groupW - 16) / 2, yThumb, thumb);
   return s;
 }
 
@@ -332,7 +353,10 @@ function statusChart(group, expColor) {
   const { padL, padB, padR, padT, H } = _chartPad(tasks);
   const groupW = Math.max(44, experiments.length * 20 + 16);
   const W = padL + padR + tasks.length * groupW, plotH = H - padT - padB;
-  const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const thumb = Math.min(48, groupW - 6);
+  const yThumb = H + _THUMB_GAP;                    // BELOW the angled label band (labels fill padB)
+  const Hsvg = yThumb + thumb + 4;
+  const s = svg("svg", { class: "chart", width: W, height: Hsvg, viewBox: `0 0 ${W} ${Hsvg}` });
   s.append(svg("line", { class: "gridline", x1: padL, y1: padT, x2: W - padR, y2: padT }));
   s.append(svg("line", { class: "gridline", x1: padL, y1: padT + plotH, x2: W - padR, y2: padT + plotH }));
   tasks.forEach((task, ti) => {
@@ -355,6 +379,7 @@ function statusChart(group, expColor) {
     const lx = gx + (groupW - 16) / 2, ly = H - padB + 12;
     s.append(svg("text", { class: "xlab", x: lx, y: ly, "text-anchor": "end", transform: `rotate(-35 ${lx} ${ly})` }, txt(shortTask(task))));
   });
+  appendTaskThumbs(s, tasks, (ti) => padL + ti * groupW + 8 + (groupW - 16) / 2, yThumb, thumb);
   return { chart: s, cats: [...cats] };
 }
 
