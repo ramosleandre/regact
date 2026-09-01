@@ -182,17 +182,29 @@ class TransitionRecorder:
 
 
 class RecordingEnvWrapper(EnvWrapper):
-    """Records ``(o, a, r, o', done)`` around each ``step`` — every value a
-    local of that one call, so transitions are genuine by construction. Resets
-    are not recorded (their obs enters the dataset as the next step's ``o``)."""
+    """Records ``(o, a, r, o', done)`` around each ``step``. Resets are not recorded (their obs
+    enters the dataset as the next step's ``o``).
+
+    A per-instance lock serializes reset+step so that capturing ``o`` (``last_obs``) and producing
+    ``o'`` is atomic. Without it, a concurrent step or reset on the same env can advance
+    ``last_obs`` between the two, recording a genuine ``(a, o')`` against a STALE ``o`` - which is
+    how a mid-trajectory step got recorded with the reset frame as ``o`` (a false ``(o,a)->o'``
+    conflict). One env can only take one action at a time, so serializing here is also correct env
+    semantics."""
 
     def __init__(self, inner: Any, recorder: TransitionRecorder) -> None:
         super().__init__(inner)
         self._recorder = recorder
+        self._lock = threading.Lock()
+
+    def reset(self, *, seed: int | None = None) -> Obs:
+        with self._lock:
+            return super().reset(seed=seed)
 
     def step(self, action: Action) -> Obs:
-        before: Obs | None = self._inner.last_obs
-        after = super().step(action)
+        with self._lock:  # capture `before` + step atomically; record outside (locals, immutable)
+            before: Obs | None = self._inner.last_obs
+            after = super().step(action)
         if before is not None:
             self._recorder.record(before, action, after)
         return after

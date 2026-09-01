@@ -132,6 +132,37 @@ def test_recording_accumulates_across_instance_swaps(tmp_path: Path) -> None:
     assert len(_lines(tmp_path)) == 2
 
 
+def test_concurrent_steps_record_genuine_transitions(tmp_path: Path) -> None:
+    """Concurrent steps on ONE env must each record a genuine (o, a, o2). Without serialization,
+    ``before = last_obs`` and the step race: a real (a, o2) gets recorded against a STALE o - the
+    false ``(o,a) -> o2`` conflict seen in a real run. The wrapper's lock makes capture+step atomic
+    (and also serializes the not-thread-safe env), so every line is a clean unit step."""
+    import threading
+
+    session = _cwm_session(tmp_path, goal=300)  # >> total steps, so no episode ever ends
+    env = session.make()
+    env.reset()
+    n_threads, per_thread = 6, 40
+    total = n_threads * per_thread
+
+    def worker() -> None:
+        for _ in range(per_thread):
+            env.step(1)
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    lines = _canonical_lines(tmp_path)
+    assert len(lines) == total
+    # every recorded transition is a genuine unit step, and the o's are exactly 0..total-1
+    # (no stale o, no lost/duplicated step from the counter race).
+    assert all(ln["o2"]["frame"]["pos"] == ln["o"]["frame"]["pos"] + 1 for ln in lines)
+    assert sorted(ln["o"]["frame"]["pos"] for ln in lines) == list(range(total))
+
+
 def test_mirror_fault_never_breaks_step(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """A fault on the agent mirror is best-effort (logged, never raised); with no
     canonical set, the step still succeeds."""
