@@ -46,12 +46,12 @@ def _configured_lifecycle(problem_name: str) -> Lifecycle:
     return Lifecycle.MULTI_INSTANCE
 
 
-def _first_obs(problem: BaseProblem, task: str) -> Any:
+def _first_obs(problem: BaseProblem, task: str, mode: ObsMode = ObsMode.RAW) -> Any:
     """The observation a fresh env starts on (no action taken)."""
     env = WrappedEnv(
         problem.make_env(task),
         task_name=task,
-        renderer=problem.obs_renderer(task, mode=ObsMode.RAW),
+        renderer=problem.obs_renderer(task, mode=mode),
     )
     return env.last_obs if env.last_obs is not None else env.reset()
 
@@ -85,6 +85,7 @@ def show(
     print(f"\n{bar}\n{problem_name}  task={task_name}  lifecycle={lifecycle.value}  obs={obs_mode}")
     print(f"features={features}  tool_protocol={tool_protocol}  info_mode={info_mode.value}\n{bar}")
 
+    obs_mode_enum = ObsMode(obs_mode) if obs_mode in {m.value for m in ObsMode} else ObsMode.RAW
     print("\n##### SYSTEM PROMPT #####\n")
     print(
         builder.build_system_prompt(
@@ -94,6 +95,7 @@ def show(
             controller=Controller.from_config(ControllerConfig()),
             lifecycle=lifecycle,
             info_mode=info_mode,
+            obs_mode=obs_mode_enum,
             tool_protocol=tool_protocol,  # type: ignore[arg-type]
             tool_names=["SubmitSolution", "ExitTask"],
         )
@@ -101,7 +103,7 @@ def show(
 
     print("\n##### FIRST MESSAGE #####\n")
     try:
-        rendered = _render_obs(problem, _first_obs(problem, task_name), obs_mode)
+        rendered = _render_obs(problem, _first_obs(problem, task_name, obs_mode_enum), obs_mode)
     except Exception as exc:
         rendered = f"(could not build a live observation: {type(exc).__name__}: {exc})"
     print(builder.build_first_message(rendered))

@@ -232,7 +232,9 @@ def _bootstrap_workdir(
         env_base_url=conn.base_url,
         game_id=task_name,
         lifecycle=config.problem.lifecycle,
-        helper_templates=problem.helper_templates(task_name, info_mode=config.problem.info_mode),
+        helper_templates=problem.helper_templates(
+            task_name, info_mode=config.problem.info_mode, helper=config.problem.helper
+        ),
     )
 
 
@@ -451,6 +453,7 @@ async def run_task(
                 controller=controller,
                 lifecycle=config.problem.lifecycle,
                 info_mode=config.problem.info_mode,
+                obs_mode=config.problem.obs_mode,
                 tool_protocol=caps.tool_protocol,
                 tool_names=[tool.name for tool in tools],
                 # Opt-in tier-2 verbalization variant (empty_response sweep S2/S3); the bench

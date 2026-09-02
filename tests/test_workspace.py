@@ -171,7 +171,7 @@ def test_workspace_writes_feature_templates(tmp_path: Path) -> None:
 class _StubProblem:
     name = "grid"
 
-    def build_prompt(self, task_name: str, *, info_mode: object) -> str:
+    def build_prompt(self, task_name: str, *, info_mode: object, obs_mode: object = None) -> str:
         return f"# Game: grid\n\nYou are playing grid task {task_name}."
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from regact.agent.capabilities import ToolProtocol, uses_control_cli
-from regact.config.schema import InfoMode, Lifecycle
+from regact.config.schema import InfoMode, Lifecycle, ObsMode
 from regact.features.base import Feature, FeatureContext
 
 if TYPE_CHECKING:
@@ -78,6 +78,7 @@ class PromptBuilder:
         controller: Controller | None = None,
         lifecycle: Lifecycle,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
+        obs_mode: ObsMode = ObsMode.RAW,
         tool_protocol: ToolProtocol = "native",
         tool_names: list[str] | None = None,
         verbalize_variant: str = "off",
@@ -92,7 +93,7 @@ class PromptBuilder:
         ctx = FeatureContext(problem_name=problem.name, task_name=task_name, workdir="")
         sections = [
             _SYSTEM_MD.read_text(encoding="utf-8"),
-            problem.build_prompt(task_name, info_mode=info_mode),
+            problem.build_prompt(task_name, info_mode=info_mode, obs_mode=obs_mode),
         ]
         if controller is not None and (core := controller.prompt_fragment(ctx)):
             sections.append(core)  # the controller is core, not under "# Features"

@@ -67,7 +67,7 @@ class _FakeProblem(BaseProblem):
             "success_rate": sum(bool(e.get("success")) for e in episodes) / n,
         }
 
-    def build_prompt(self, task_name: str, *, info_mode: Any) -> str:
+    def build_prompt(self, task_name: str, *, info_mode: Any, obs_mode: Any = None) -> str:
         return f"# Game: fake ({task_name})\nReach the goal."
 
     def config_kwargs(self) -> dict[str, Any]:

@@ -31,6 +31,8 @@ class Lifecycle(StrEnum):
 
 class ObsMode(StrEnum):
     RAW = "raw"
+    # ARC-AGI-3: show only the settled final grid of each step, not the intra-step animation stack.
+    RAW_LAST_FRAME_ONLY = "raw_last_frame_only"
     # ascii / structured / vlm_caption land with their renderers (Later).
 
 
@@ -54,6 +56,17 @@ class AgentConfig:
 
 
 @dataclass
+class HelperConfig:
+    """Optional helper capabilities shipped into the agent's ``code_library`` for a problem.
+
+    ``to_png`` adds an obs->PNG renderer: useful only for a VISION-capable agent (Claude Code,
+    Codex) that can then open/read the image; leave it off for Alan Code, which is text-only.
+    """
+
+    to_png: bool = False
+
+
+@dataclass
 class ProblemConfig:
     name: str  # the problem family, e.g. "arc_agi" (iterates its games)
     tasks: list[str] = field(default_factory=list)  # empty = every task exposed by the problem
@@ -61,6 +74,7 @@ class ProblemConfig:
     obs_mode: ObsMode = ObsMode.RAW
     info_mode: InfoMode = InfoMode.INFORMATIVE
     seed: int | None = None  # ignored by deterministic envs (ARC)
+    helper: HelperConfig = field(default_factory=HelperConfig)  # code_library helper capabilities
     kwargs: dict[str, Any] = field(default_factory=dict)  # problem-specific ctor args
 
 

@@ -19,7 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from regact.config.schema import InfoMode, ObsMode
+from regact.config.schema import HelperConfig, InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
@@ -62,6 +62,29 @@ _RENDER_SCALE = 8
 # --------------------------------------------------------------------------- #
 # Server-side gym shim: JSON int/dict actions -> native GameAction
 # --------------------------------------------------------------------------- #
+_CLICK_ACTION_ID = (
+    6  # ACTION6: the click action, the only one that requires data (x, y coordinates)
+)
+
+
+def _validated_click_data(data: Any) -> dict[str, Any]:
+    """The x,y payload for a click action, or a clear error. Without this guard a malformed
+    ACTION6 (missing or out-of-range coordinates) raises a cryptic ``KeyError: 'x'`` deep inside
+    arcengine's game code; here the agent gets an actionable message and can self-correct."""
+    if not isinstance(data, dict) or "x" not in data or "y" not in data:
+        raise ValueError(
+            "ACTION6 (click) requires data={'x': int, 'y': int} with 0<=x,y<=63; "
+            f"got data={data!r}. Use complex_action(x, y) from code_library/arc_agi_helper.py."
+        )
+    try:
+        x, y = int(data["x"]), int(data["y"])
+    except (TypeError, ValueError):
+        raise ValueError(f"ACTION6 (click) x,y must be integers 0-63; got data={data!r}.") from None
+    if not (0 <= x <= 63 and 0 <= y <= 63):
+        raise ValueError(f"ACTION6 (click) x,y must be within 0-63; got x={x}, y={y}.")
+    return {**data, "x": x, "y": y}
+
+
 class _ArcGymShim:
     """Adapt an arc ``EnvironmentWrapper`` to the gym-like interface WrappedEnv drives.
 
@@ -107,7 +130,11 @@ class _ArcGymShim:
 
     def _decode(self, action: Any) -> tuple[Any, dict[str, Any] | None]:
         if isinstance(action, dict):
-            return self._GameAction.from_id(int(action["action"])), action.get("data")
+            action_id = int(action["action"])
+            data = action.get("data")
+            if action_id == _CLICK_ACTION_ID:  # ACTION6 is the only action that needs coordinates
+                data = _validated_click_data(data)
+            return self._GameAction.from_id(action_id), data
         return self._GameAction.from_id(int(action)), None
 
     def _outcome(self, obs: Any) -> tuple[float, bool]:
@@ -138,11 +165,19 @@ class ArcRenderer(ObsRenderer):
 
     Import-free: it reads ``native_obs.frame`` and the scalar metadata the shim
     already placed in ``info``, so it needs no arc library to construct.
+
+    ``last_frame_only`` collapses the intra-step animation stack to just its final grid (kept as a
+    one-element list so ``obs.frame[-1]`` stays valid) - the settled, game-logic-relevant state.
     """
+
+    def __init__(self, *, last_frame_only: bool = True) -> None:
+        self._last_frame_only = last_frame_only
 
     def render(self, native_obs: object, info: dict[str, Any] | None) -> Obs:
         info = dict(info or {})
         frame = getattr(native_obs, "frame", native_obs)
+        if self._last_frame_only and isinstance(frame, (list, tuple)) and frame:
+            frame = [frame[-1]]
         return Obs(
             frame=jsonify(frame),
             available_actions=list(info.get("available_actions", [])),
@@ -186,6 +221,17 @@ _ACTION7 = (
     "the last move) — discover what it does by interaction."
 )
 _DIRECTIONAL_IDS = frozenset({1, 2, 3, 4})
+
+# `{frame_desc}` in arc_agi.md, filled per the `last_frame_only` problem kwarg.
+_FRAME_DESC_SINGLE = (
+    "`obs.frame`: a one-element list holding the current 64x64 grid of integer cells (0-15) - "
+    "read it as `obs.frame[-1]`. Only the final, settled grid of each step is shown."
+)
+_FRAME_DESC_STACK = (
+    "`obs.frame`: the current frame(s), a list of 64x64 grids of integer cells (0-15). The last "
+    "grid is the current state (you can receive multiple frames after an action if something moved "
+    "during it)."
+)
 
 
 def _actions_for_ids(available: Iterable[int]) -> str:
@@ -232,6 +278,35 @@ ACTION7 = 7
 def complex_action(x: int, y: int) -> dict:
     """Payload for the click action: ``env.step(complex_action(x, y))``."""
     return {"action": ACTION6, "data": {"x": x, "y": y}}
+'''
+
+
+# Appended to the helper only when problem.helper.to_png is on (vision-capable agents). Its imports
+# are lazy (numpy/PIL, not the game library), so the base helper stays import-free.
+_RENDER_HELPER = '''
+
+# ---- obs -> PNG (vision agents only): save the current grid as an image you can open and SEE ----
+_ARC_PALETTE = [
+    (255, 255, 255), (204, 204, 204), (153, 153, 153), (102, 102, 102),
+    (51, 51, 51), (0, 0, 0), (229, 58, 163), (255, 123, 204),
+    (249, 60, 49), (30, 147, 255), (136, 216, 241), (255, 220, 0),
+    (255, 133, 27), (146, 18, 49), (79, 204, 48), (163, 86, 214),
+]
+
+
+def to_png(obs, path="frame.png", scale=8):
+    """Render the current ARC grid (obs.frame[-1]) to a PNG and return `path`. Open/read the image
+    to SEE objects, walls, symmetry and motion that are invisible in the raw integer grid."""
+    import numpy as np
+    from PIL import Image
+
+    frame = obs.frame
+    grid = frame[-1] if isinstance(frame, (list, tuple)) and frame else frame
+    cells = np.clip(np.asarray(grid, dtype=np.int64), 0, len(_ARC_PALETTE) - 1)
+    rgb = np.asarray(_ARC_PALETTE, dtype=np.uint8)[cells]
+    rgb = np.repeat(np.repeat(rgb, scale, axis=0), scale, axis=1)
+    Image.fromarray(rgb).save(path)
+    return path
 '''
 
 
@@ -322,21 +397,26 @@ class ArcAgiProblem(BaseProblem):
         return list(self._tasks)
 
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
-        if mode is not ObsMode.RAW:
+        if mode not in (ObsMode.RAW, ObsMode.RAW_LAST_FRAME_ONLY):
             raise RegactError(
                 ErrorCategory.ENV_RUNTIME, f"arc_agi: obs_mode {mode!r} not supported yet"
             )
-        return ArcRenderer()
+        return ArcRenderer(last_frame_only=mode is ObsMode.RAW_LAST_FRAME_ONLY)
 
     def milestone_detector(self, task_name: str) -> Any:
         return _milestone_detector
 
     def helper_templates(
-        self, task_name: str, *, info_mode: InfoMode = InfoMode.INFORMATIVE
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode = InfoMode.INFORMATIVE,
+        helper: HelperConfig | None = None,
     ) -> list[TemplateFile]:
-        # The ARC helper is the action-construction interface (not a rules spoiler), so it
-        # ships under every info_mode - unchanged behaviour.
-        return [TemplateFile("code_library/arc_agi_helper.py", _HELPER)]
+        # The ARC helper is the action-construction interface (not a rules spoiler), so it ships
+        # under every info_mode. to_png appends an obs->PNG renderer for vision agents.
+        content = _HELPER + (_RENDER_HELPER if helper and helper.to_png else "")
+        return [TemplateFile("code_library/arc_agi_helper.py", content)]
 
     def secret_modules(self) -> tuple[str, ...]:
         return ("arcengine", "arc_agi")
@@ -411,18 +491,22 @@ class ArcAgiProblem(BaseProblem):
     def derived_submission_metrics(
         self, task_name: str, raw_episodes: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """RHAE — the competition's own metric — from a submission's episodes + the
-        game's per-level human baseline. Absent baseline (or no usable episode) yields
-        no key rather than a crash, so a game without a benchmark simply shows none."""
+        """RHAE (the competition's own efficiency metric) and its linear variant LRHAE, from a
+        submission's episodes + the game's per-level human baseline. Absent baseline (or no usable
+        episode) yields no key, so a game without a benchmark simply shows none."""
         from regact.problems.arc_agi.scoring import rhae_from_results
 
         baseline = self._task(task_name).baseline_actions
         if not baseline:
             return {}
         rhae = rhae_from_results({"episodes": raw_episodes}, baseline_actions=baseline)
-        return {"rhae": round(rhae.score, 1)} if rhae is not None else {}
+        if rhae is None:
+            return {}
+        return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
 
-    def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
+    def build_prompt(
+        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+    ) -> str:
         task = self._task(task_name)
         if info_mode is InfoMode.MINIMAL:
             return (
@@ -431,7 +515,13 @@ class ArcAgiProblem(BaseProblem):
                 "`obs.available_actions` from your own scripts with `make_env()`; "
                 "the framework tells you nothing more about this task."
             )
-        body = _PROMPT.read_text(encoding="utf-8").replace("{task}", task.title).rstrip()
+        last_frame_only = obs_mode is ObsMode.RAW_LAST_FRAME_ONLY
+        body = (
+            _PROMPT.read_text(encoding="utf-8")
+            .replace("{task}", task.title)
+            .replace("{frame_desc}", _FRAME_DESC_SINGLE if last_frame_only else _FRAME_DESC_STACK)
+            .rstrip()
+        )
         # Only "Levels to win" is shown - the game id is internal, and the human baseline was an
         # irrelevant efficiency anchor. (baseline_actions is still used for RHAE scoring, just not
         # surfaced here.) The actions are described live in the first observation (render_obs_text).

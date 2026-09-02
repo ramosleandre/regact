@@ -1,19 +1,28 @@
-"""ARC-AGI-3 RHAE score — the competition's own metric, computed offline.
+"""ARC-AGI-3 efficiency metrics (RHAE / LRHAE), computed offline from our own recorded data.
 
-This mirrors ``arc_agi.scorecard.EnvironmentScoreCalculator`` (and the formula the
-Milestone-1 winners compute locally): per level, efficiency versus the human action
-baseline, squared, capped, and level-weighted. It lets us judge an *offline* run on
-the 25 public games by the metric that actually scores the competition — a much better
-signal than "won / did not win", because ARC-AGI-3 rewards *few actions*, not just wins.
+Implemented directly from the metric's definition (not derived from the arc library's scorecard),
+so we own the formula and its variants:
 
-Offline only estimates the score (the public games' baselines are known); the real
-competition score is over the 110 hidden games whose baselines are private and OOD.
+Per level ``l`` (1-indexed) the agent completed with ``a>0`` actions, given the human baseline
+``h`` actions, the ratio is ``r = h / a`` and the level score is::
+
+    S_l = min(1.15, r**2)     # RHAE   - squared ratio (the competition's own choice)
+    S_l = min(1.15, r)        # LRHAE  - the linear variant, EXACTLY RHAE without the squaring
+
+An unsolved level scores 0. Levels are weighted by their number (level ``l`` has weight ``l``). The
+game score is the level scores' weighted average, then capped by the fraction of levels solved so
+credit cannot be banked on levels never reached::
+
+    E = min( levels_completed / total_levels ,  sum_l(S_l * l) / sum_l(l) )
+
+RHAE and LRHAE differ only in the per-level exponent, so both come from one pass. Scores are on
+a 0-1 scale (the per-level cap 1.15 is only reachable when you beat the human badly; the completion
+cap keeps the game score in [0, 1]). A dataset's score is the mean of its games' scores.
 
 Inputs come from data we already record per episode:
-- ``baseline_actions`` — the per-level human benchmark (from the game metadata).
-- ``levels_completed`` — how many levels the controller cleared (from the final obs).
-- ``actions_per_level`` — actions spent on each cleared level, derived from the
-  "level completed" milestones (each carries the step at which a level was cleared).
+- ``baseline_actions`` - the per-level human baseline (median human actions, from game metadata).
+- ``levels_completed`` - how many levels the controller cleared (from the final obs).
+- ``actions_per_level`` - actions on each cleared level, from the "level completed" milestones.
 """
 
 from __future__ import annotations
@@ -23,16 +32,16 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-# Per-level efficiency is capped at 1.15x the human baseline (surpassing humans earns no
-# extra), then scaled to a 0-115 points band.
-_LEVEL_CAP = 115.0
+# Per-level efficiency is capped at 1.15x the human baseline (surpassing humans earns no extra).
+_LEVEL_CAP = 1.15
 
 
 @dataclass(frozen=True)
 class RhaeResult:
-    """One game's RHAE breakdown."""
+    """One game's efficiency breakdown (both metric variants)."""
 
-    score: float  # 0-100 (can be < the naive mean; capped by fraction of levels scored)
+    rhae: float  # 0-1, squared ratio (the competition metric)
+    lrhae: float  # 0-1, linear ratio - RHAE without the squaring
     levels_completed: int
     total_levels: int
     actions_per_level: tuple[int, ...]  # actions on each COMPLETED level (index 0 = level 1)
@@ -46,7 +55,7 @@ def actions_per_level_from_milestones(
 
     Each "level completed" milestone carries the ``step`` at which that level was
     cleared; the actions for a level are the steps since the previous completion. The
-    trailing (uncompleted) level, if any, is not counted — only cleared levels score.
+    trailing (uncompleted) level, if any, is not counted - only cleared levels score.
     """
     completion_steps = sorted(
         int(str(m["step"]))
@@ -63,6 +72,35 @@ def actions_per_level_from_milestones(
     return out
 
 
+def _efficiency_score(
+    *,
+    baselines: Sequence[int],
+    actions_per_level: Sequence[int],
+    levels_completed: int,
+    n_levels: int,
+    square: bool,
+) -> float:
+    """The game score ``E`` for one exponent (``square`` -> RHAE, else LRHAE)."""
+    if not baselines or n_levels == 0:
+        return 0.0
+    total_weight = 0
+    weighted_sum = 0.0
+    for idx in range(n_levels):
+        weight = idx + 1  # level l is 1-indexed and weighted by l
+        total_weight += weight
+        actions = actions_per_level[idx] if idx < len(actions_per_level) else 0
+        baseline = baselines[idx] if idx < len(baselines) else 0
+        if idx < levels_completed and actions > 0 and baseline > 0:
+            ratio = baseline / actions
+            level_score = min(_LEVEL_CAP, ratio * ratio if square else ratio)
+        else:
+            level_score = 0.0
+        weighted_sum += level_score * weight
+    weighted_avg = weighted_sum / total_weight if total_weight else 0.0
+    completion = levels_completed / n_levels
+    return min(completion, weighted_avg)
+
+
 def rhae_score(
     *,
     baseline_actions: Sequence[int] | None,
@@ -70,46 +108,22 @@ def rhae_score(
     levels_completed: int,
     total_levels: int | None = None,
 ) -> RhaeResult:
-    """The ARC-AGI-3 score for one game.
-
-    Per level ``l`` completed with ``a>0`` actions and human baseline ``b``:
-    ``min(115, (b / a)^2 x 100)``; uncompleted levels score 0. Level weight is
-    ``l`` (1-indexed). Final = ``sum (score_l x w_l) / sum  w_l``, capped at
-    ``sum  w_l(scored>0) / sum  w_l x 100`` — so you cannot bank credit on levels you
-    did not reach. Returns 0 when there is no baseline.
-    """
+    """RHAE and LRHAE for one game (both on a 0-1 scale). Zero when there is no baseline."""
     baselines = tuple(int(x) for x in (baseline_actions or ()))
     n_levels = total_levels if total_levels is not None else len(baselines)
-    if not baselines or n_levels == 0:
-        return RhaeResult(0.0, levels_completed, n_levels, tuple(actions_per_level), baselines)
-
-    total_score = 0.0
-    total_weights = 0
-    max_weights = 0
-    for level_idx in range(n_levels):
-        weight = level_idx + 1
-        total_weights += weight
-        completed = level_idx < levels_completed
-        actions = actions_per_level[level_idx] if level_idx < len(actions_per_level) else 0
-        baseline = baselines[level_idx] if level_idx < len(baselines) else 0
-        if completed and actions > 0 and baseline > 0:
-            level_score = min(_LEVEL_CAP, (baseline / actions) ** 2 * 100)
-        else:
-            level_score = 0.0
-        if level_score > 0:
-            max_weights += weight
-        total_score += level_score * weight
-
-    if total_weights == 0:
-        return RhaeResult(0.0, levels_completed, n_levels, tuple(actions_per_level), baselines)
-    score = total_score / total_weights
-    max_score = max_weights / total_weights * 100
+    shared = {
+        "baselines": baselines,
+        "actions_per_level": actions_per_level,
+        "levels_completed": levels_completed,
+        "n_levels": n_levels,
+    }
     return RhaeResult(
-        min(score, max_score),
-        levels_completed,
-        n_levels,
-        tuple(actions_per_level),
-        baselines,
+        rhae=_efficiency_score(**shared, square=True),
+        lrhae=_efficiency_score(**shared, square=False),
+        levels_completed=levels_completed,
+        total_levels=n_levels,
+        actions_per_level=tuple(actions_per_level),
+        baseline_actions=baselines,
     )
 
 
@@ -144,7 +158,7 @@ def _latest_results_json(game_output_dir: str) -> dict[str, object] | None:
 def rhae_from_results(
     results: dict[str, object], *, baseline_actions: Sequence[int] | None
 ) -> RhaeResult | None:
-    """Compute a game's RHAE from its serialized ``results.json`` + the human baseline.
+    """Compute a game's RHAE/LRHAE from its serialized ``results.json`` + the human baseline.
 
     Reads the first non-errored episode's ``milestones`` (to derive per-level actions)
     and ``metrics`` (levels_completed / steps). Returns ``None`` if there is no usable
@@ -180,13 +194,13 @@ def rhae_from_results(
 
 def _game_status(game_dir: str, results: dict[str, object] | None) -> str:
     """Diagnose why a game has no score: distinguish 'agent never submitted' from
-    'submitted but cleared no level' from 'ran but produced nothing' — so an empty
+    'submitted but cleared no level' from 'ran but produced nothing' - so an empty
     recap tells us WHERE the pipeline stopped, not just that it's empty."""
     subs = os.path.join(game_dir, "workdir", "submissions")
     if not os.path.isdir(subs):
         return "no-run"  # the game workdir/submissions dir was never created
     if results is None:
-        return "no-submit"  # ran, but no results.json → SubmitSolution never produced one
+        return "no-submit"  # ran, but no results.json -> SubmitSolution never produced one
     episodes = results.get("episodes")
     if not isinstance(episodes, list) or not episodes:
         return "empty"
@@ -203,7 +217,7 @@ def summarize_run(
     tasks: Sequence[str],
     baselines: Mapping[str, Sequence[int] | None],
 ) -> str:
-    """A human-readable RHAE recap of an offline run: one line per game + an aggregate.
+    """A human-readable RHAE/LRHAE recap of an offline run: one line per game + an aggregate.
 
     ``run_dir`` is the directory that run owns (each run is timestamped, so the path
     cannot be rebuilt from the config alone). ``baselines`` maps game key -> per-level
@@ -213,10 +227,11 @@ def summarize_run(
     it) so this stays testable.
     """
     lines = [
-        f"=== ARC-AGI-3 run summary ({len(tasks)} games) — RHAE proxy (offline) ===",
-        f"  {'game':<8} {'levels':>8}  {'actions/baseline':>18}  {'RHAE':>6}  status",
+        f"=== ARC-AGI-3 run summary ({len(tasks)} games) - RHAE/LRHAE (offline) ===",
+        f"  {'game':<8} {'levels':>8}  {'actions/baseline':>18}  {'RHAE':>6}  {'LRHAE':>6}  status",
     ]
-    scored: list[float] = []
+    rhaes: list[float] = []
+    lrhaes: list[float] = []
     wins = 0
     status_counts: dict[str, int] = {}
     for task in tasks:
@@ -228,21 +243,26 @@ def summarize_run(
             if rhae is not None and baselines.get(task) is None:
                 status = "no-baseline"
             status_counts[status] = status_counts.get(status, 0) + 1
-            lines.append(f"  {task:<8} {'—':>8}  {'—':>18}  {'—':>6}  {status}")
+            lines.append(f"  {task:<8} {'-':>8}  {'-':>18}  {'-':>6}  {'-':>6}  {status}")
             continue
         acts = sum(rhae.actions_per_level)
         base = sum(rhae.baseline_actions[: rhae.levels_completed]) if rhae.baseline_actions else 0
         lvl = f"{rhae.levels_completed}/{rhae.total_levels}"
-        ab = f"{acts} / {base}" if base else f"{acts} / —"
-        lines.append(f"  {task:<8} {lvl:>8}  {ab:>18}  {rhae.score:>6.1f}  {status}")
-        scored.append(rhae.score)
+        ab = f"{acts} / {base}" if base else f"{acts} / -"
+        lines.append(
+            f"  {task:<8} {lvl:>8}  {ab:>18}  {rhae.rhae:>6.3f}  {rhae.lrhae:>6.3f}  {status}"
+        )
+        rhaes.append(rhae.rhae)
+        lrhaes.append(rhae.lrhae)
         status_counts[status] = status_counts.get(status, 0) + 1
         if rhae.total_levels and rhae.levels_completed >= rhae.total_levels:
             wins += 1
-    mean = sum(scored) / len(scored) if scored else 0.0
-    lines.append("  " + "-" * 54)
+    mean_rhae = sum(rhaes) / len(rhaes) if rhaes else 0.0
+    mean_lrhae = sum(lrhaes) / len(lrhaes) if lrhaes else 0.0
+    lines.append("  " + "-" * 60)
     lines.append(
-        f"  mean RHAE {mean:.1f}  |  {wins} wins/{len(tasks)}  |  {len(scored)} games scored"
+        f"  mean RHAE {mean_rhae:.3f}  |  mean LRHAE {mean_lrhae:.3f}  |  "
+        f"{wins} wins/{len(tasks)}  |  {len(rhaes)} games scored"
     )
     if status_counts:
         breakdown = "  ".join(f"{k}={v}" for k, v in sorted(status_counts.items()))

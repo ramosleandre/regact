@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from regact.config.schema import InfoMode, ObsMode
+from regact.config.schema import HelperConfig, InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
@@ -183,7 +183,10 @@ class MiniGridProblem(BaseProblem):
             "mean_reward": sum(e.get("reward", 0.0) for e in episodes) / n,
         }
 
-    def build_prompt(self, task_name: str, *, info_mode: InfoMode) -> str:
+    def build_prompt(
+        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+    ) -> str:
+        # obs_mode is accepted for interface parity; MiniGrid renders one obs mode (RAW).
         if info_mode is InfoMode.MINIMAL:
             return (
                 f"# Game: MiniGrid ({task_name})\n\n"
@@ -211,10 +214,14 @@ class MiniGridProblem(BaseProblem):
         return prompt
 
     def helper_templates(
-        self, task_name: str, *, info_mode: InfoMode = InfoMode.INFORMATIVE
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode = InfoMode.INFORMATIVE,
+        helper: HelperConfig | None = None,
     ) -> list[TemplateFile]:
         """Ship the encoding constants in informative modes; minimal mode hands out nothing
-        (the agent must discover the encodings by interaction)."""
+        (the agent must discover the encodings by interaction). ``helper`` is unused here."""
         if info_mode is InfoMode.MINIMAL:
             return []
         return [TemplateFile("code_library/minigrid_helper.py", _MINIGRID_HELPER)]

@@ -95,6 +95,32 @@ def test_renderer_makes_frame_json_safe() -> None:
     assert obs.info["state"] == "NOT_FINISHED"
 
 
+def test_renderer_last_frame_only_collapses_the_animation_stack() -> None:
+    # A 3-grid intra-step stack: the default keeps only the final settled grid (1-element list).
+    native = SimpleNamespace(frame=[[[1]], [[2]], [[3]]])
+    assert ArcRenderer(last_frame_only=True).render(native, {}).frame == [[[3]]]
+    # Opting out preserves the whole stack.
+    assert ArcRenderer(last_frame_only=False).render(native, {}).frame == [[[1]], [[2]], [[3]]]
+
+
+def test_validated_click_data_guards_action6() -> None:
+    from regact.problems.arc_agi.problem import _validated_click_data
+
+    assert _validated_click_data({"x": 3, "y": 5}) == {"x": 3, "y": 5}
+    assert _validated_click_data({"x": "3", "y": "5"}) == {"x": 3, "y": 5}  # coerced to int
+    for bad in (
+        None,
+        {},
+        {"x": 1},
+        {"y": 1},
+        {"x": 1, "y": 99},
+        {"x": -1, "y": 1},
+        {"x": "a", "y": 1},
+    ):
+        with pytest.raises(ValueError, match="ACTION6"):
+            _validated_click_data(bad)
+
+
 def test_render_frame_colorizes_grid_for_video() -> None:
     img = _problem().render_frame(Obs(frame=[[[0, 1], [2, 3]]]))  # a 2x2 grid stack
     assert img is not None and img.shape == (16, 16, 3) and img.dtype.name == "uint8"
@@ -104,11 +130,23 @@ def test_render_frame_colorizes_grid_for_video() -> None:
 
 
 def test_helper_template_is_import_free() -> None:
-    [tmpl] = _problem().helper_templates("ls20")
+    [tmpl] = _problem().helper_templates("ls20")  # default helper (to_png off)
     assert tmpl.relpath == "code_library/arc_agi_helper.py"
     assert "import" not in tmpl.content.split('"""', 2)[-1]  # no imports in the code body
     assert "def complex_action" in tmpl.content
     assert "ACTION6 = 6" in tmpl.content
+    assert "def to_png" not in tmpl.content  # the renderer is opt-in
+
+
+def test_helper_to_png_is_gated_and_game_library_free() -> None:
+    from regact.config.schema import HelperConfig
+
+    [on] = _problem().helper_templates("ls20", helper=HelperConfig(to_png=True))
+    assert "def to_png" in on.content
+    assert "from PIL import Image" in on.content  # lazy image import, not the game engine
+    for secret in ("import arcengine", "import arc_agi"):
+        assert secret not in on.content
+    compile(on.content, "arc_agi_helper.py", "exec")  # the concatenated helper is valid Python
 
 
 def test_build_prompt_informative_vs_minimal() -> None:
@@ -118,6 +156,13 @@ def test_build_prompt_informative_vs_minimal() -> None:
     assert "obs.available_actions" in info  # the Observation section names the field
     assert "Levels to win" in info  # the one metadata line kept (game id + human baseline removed)
     assert "Game id" not in info and "Human baseline" not in info
+    assert "{frame_desc}" not in info  # the obs-frame placeholder was substituted
+    assert "multiple frames" in info  # default obs_mode (raw) describes the full animation stack
+    # raw_last_frame_only swaps in the single-grid description instead
+    single = problem.build_prompt(
+        "ls20", info_mode=InfoMode.INFORMATIVE, obs_mode=ObsMode.RAW_LAST_FRAME_ONLY
+    )
+    assert "settled grid" in single and "multiple frames" not in single
     assert "How to read and solve" in info  # the ARC-approach advice block
     # actions are described live in the first observation (render_obs_text), not statically
     assert "## Actions" not in info
@@ -158,8 +203,10 @@ def test_render_obs_text_compact_grid() -> None:
     assert "ACTION5" not in text and "ACTION7" not in text
 
 
-def test_obs_renderer_rejects_non_raw_mode() -> None:
-    assert isinstance(_problem().obs_renderer("ls20", mode=ObsMode.RAW), ArcRenderer)
+def test_obs_renderer_maps_obs_mode_to_last_frame_only() -> None:
+    p = _problem()
+    assert p.obs_renderer("ls20", mode=ObsMode.RAW)._last_frame_only is False
+    assert p.obs_renderer("ls20", mode=ObsMode.RAW_LAST_FRAME_ONLY)._last_frame_only is True
 
 
 def test_compute_episode_metrics_from_obs() -> None:

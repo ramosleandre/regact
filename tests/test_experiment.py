@@ -38,7 +38,7 @@ class _TwoGameProblem(BaseProblem):
     def aggregate_episode_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
         return {"n_episodes": len(episodes)}
 
-    def build_prompt(self, task_name: str, *, info_mode: Any) -> str:
+    def build_prompt(self, task_name: str, *, info_mode: Any, obs_mode: Any = None) -> str:
         return f"# fake ({task_name})"
 
     def config_kwargs(self) -> dict[str, Any]:

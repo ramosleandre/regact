@@ -15,6 +15,7 @@ from regact.config.schema import (
     AgentConfig,
     AgentName,
     ControllerConfig,
+    HelperConfig,
     InfoMode,
     Lifecycle,
     LimitsConfig,
@@ -45,6 +46,12 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
+
+
+def _helper_from(raw: Any) -> HelperConfig:
+    """Build ``HelperConfig`` from the ``problem.helper`` block (empty/None -> all off)."""
+    d = dict(raw or {})
+    return HelperConfig(to_png=bool(d.get("to_png", False)))
 
 
 def _sandbox_bool(value: Any) -> bool:
@@ -100,6 +107,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             obs_mode=ObsMode(problem.get("obs_mode", ObsMode.RAW)),
             info_mode=InfoMode(problem.get("info_mode", InfoMode.INFORMATIVE)),
             seed=problem.get("seed"),
+            helper=_helper_from(problem.get("helper")),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
         controller=_controller_from(data.get("controller")),
