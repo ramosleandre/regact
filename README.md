@@ -28,9 +28,9 @@ score measures understanding, not memorization.
 
 <div align="center">
 
-[![regact — a ~60-second tour](assets/videos/regact_pres_poster.jpg)](assets/videos/regact_pres.mp4)
+![regact — a ~60-second tour](assets/videos/regact_pres.gif)
 
-<em>A code-writing agent probes an unknown game, writes an <code>act(obs)</code> controller, and gets scored — browsed in the visualizer. <b>Click the image to play.</b></em>
+<em>A code-writing agent probes an unknown game, writes an <code>act(obs)</code> controller, and gets scored — browsed in the visualizer (sped up 2x). <a href="assets/videos/regact_pres.mp4">Full-quality clip</a>.</em>
 
 </div>
 
