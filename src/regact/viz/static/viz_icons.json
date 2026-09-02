@@ -1,6 +1,11 @@
 {
   "_comment": "Editable icon registry for the viz 'who fights who' panels. `agents` maps an agent (experiment-leaf first token: claude/codex/alan) to its icon (static/icons_agents/). `families` maps a model FAMILY (leading letters of the model name: Qwen/GLM/Kimi/DeepSeek/Llama/MiniMax/SWE/Mistral/Gemma/sonnet/opus/gpt) to one logo (static/icons_models/) covering all its models. `models` can override a specific model's icon and give its params_b (billions). Icon lookup: models[name].icon -> families[family] -> text badge. Size: params_b, else parsed from the name (-235B-, -70B-), else mid; sized by `sigmoid`. Task previews are pre-rendered into static/icons_tasks/<task>.png by scripts/gen_task_previews.py (never at viz time).",
-  "sigmoid": { "min_px": 22, "max_px": 60, "midpoint_b": 100, "steepness": 1.6 },
+  "sigmoid": {
+    "min_px": 22,
+    "max_px": 60,
+    "midpoint_b": 100,
+    "steepness": 1.6
+  },
   "agents": {
     "claude": "static/icons_agents/claude.png",
     "alan": "static/icons_agents/alan.png",
@@ -22,13 +27,39 @@
   },
   "_params_note": "params_b for models whose name embeds no size (parseable ones like -70B-/-235B- are read from the name). Authoritative from ClusterControl docs/model_study.md; `estimate: true` = inferred from a same-family sibling (shown with a ~ in the viz), confirm with model_inspect.py on the served dir. DeepSeek-V4-Flash and MiniMax-M2.7 are intentionally omitted (no grounded size) -> mid-size icon until filled.",
   "models": {
-    "GLM-4.7": { "params_b": 355 },
-    "Kimi-K3": { "params_b": 1500 },
-    "Qwen3-Coder-Next": { "params_b": 80 },
-    "GLM-4.7-Flash": { "params_b": 106, "estimate": true },
-    "GLM-5.1": { "params_b": 355, "estimate": true },
-    "GLM-5.2": { "params_b": 355, "estimate": true },
-    "Kimi-K2.6": { "params_b": 1000, "estimate": true },
-    "Kimi-K2.7-Code": { "params_b": 1000, "estimate": true }
+    "GLM-4.7": {
+      "params_b": 355
+    },
+    "Kimi-K3": {
+      "params_b": 1500
+    },
+    "Qwen3-Coder-Next": {
+      "params_b": 80
+    },
+    "GLM-4.7-Flash": {
+      "params_b": 31
+    },
+    "GLM-5.1": {
+      "params_b": 744,
+      "estimate": true
+    },
+    "GLM-5.2": {
+      "params_b": 753
+    },
+    "Kimi-K2.6": {
+      "params_b": 1000,
+      "estimate": true
+    },
+    "Kimi-K2.7-Code": {
+      "params_b": 1000,
+      "estimate": true
+    },
+    "MiniMax-M2.7": {
+      "params_b": 230
+    },
+    "DeepSeek-V4-Flash": {
+      "params_b": 160,
+      "estimate": true
+    }
   }
 }
