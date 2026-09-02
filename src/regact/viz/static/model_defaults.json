@@ -1,0 +1,28 @@
+{
+  "_comment": "Checked-in viz defaults. `colors` maps a MODEL NAME (experiment leaf with the agent prefix and the -<quant>-<extra> suffix stripped, e.g. alan-MiniMax-M2.7-Q8-fo -> MiniMax-M2.7) to its default bar colour. `order_by: model_name` sorts experiments by model name (grouping families) when the interface has no saved order. Per-interface user overrides (colours, order, toggles) live in ~/.regact/viz_settings/ and take precedence over these.",
+  "order_by": "model_name",
+  "colors": {
+    "sonnet": "#eab308",
+    "opus": "#f97316",
+    "gpt-5.5": "#3b82f6",
+    "DeepSeek-V4-Flash": "#5aa9e6",
+    "GLM-5.2": "#000000",
+    "GLM-5.1": "#241f31",
+    "GLM-4.7": "#5e5c64",
+    "GLM-4.7-Flash": "#77767b",
+    "Kimi-K2.6": "#f9f06b",
+    "Kimi-K2.7-Code": "#e5a50a",
+    "Kimi-K3": "#c64600",
+    "Llama-3.3-70B-Instruct": "#d47db0",
+    "MiniMax-M2.7": "#865e3c",
+    "Qwen3-Coder-480B-A35B-Instruct": "#26a269",
+    "Qwen3-235B-A22B-Instruct-2507": "#2ec27e",
+    "Qwen3-Coder-Next": "#2ec27e",
+    "Qwen2.5-32B-Instruct": "#57e389",
+    "Qwen2.5-72B-Instruct": "#57e389",
+    "Qwen3-32B": "#8ff0a4",
+    "Qwen3.6-27B": "#8ff0a4",
+    "Qwen3.8-27B": "#57e389",
+    "SWE-agent-LM-32B": "#63452c"
+  }
+}

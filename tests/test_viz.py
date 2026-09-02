@@ -7,6 +7,8 @@ into turns, submissions are read, and the proxy metrics are computed.
 import json
 from pathlib import Path
 
+import pytest
+
 from regact.viz.metrics import game_metrics
 from regact.viz.reader import list_artifacts, list_games, load_game, load_logs
 
@@ -216,19 +218,32 @@ def test_games_endpoint_tags_experiment_and_task(tmp_path: Path) -> None:
     assert len(empties) == 2  # both timestamps surface, to be aggregated per (experiment, task)
 
 
-def test_task_preview_renders_png_and_404s_unknown(tmp_path: Path) -> None:
-    """/api/task_preview freshly renders a small PNG of a task's env (the Graphs x-axis
-    thumbnails) and 404s a task it can't build - the UI just hides the image on 404."""
+def test_task_preview_renders_png() -> None:
+    """render_task_png builds a small PNG of a task's env, offline. It runs from
+    scripts/gen_task_previews.py to pre-populate static/icons_tasks/ (never at viz time)."""
+    from regact.viz.task_preview import render_task_png
+
+    png = render_task_png("MiniGrid-Empty-5x5-v0")
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic
+
+
+def test_settings_persist_per_interface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """/api/settings saves + reloads a per-interface JSON (under REGACT_VIZ_SETTINGS_DIR), so the
+    graphs panel's colors/order/toggles persist across sessions, scoped by the graph `under`."""
     from fastapi.testclient import TestClient
 
     from regact.viz.app import build_app
 
+    monkeypatch.setenv("REGACT_VIZ_SETTINGS_DIR", str(tmp_path / "settings"))
     client = TestClient(build_app(str(tmp_path)))
-    ok = client.get("/api/task_preview", params={"task": "MiniGrid-Empty-5x5-v0"})
-    assert ok.status_code == 200
-    assert ok.headers["content-type"] == "image/png"
-    assert ok.content[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic
-    assert client.get("/api/task_preview", params={"task": "NoSuchTask-v9"}).status_code == 404
+    scope = "2026-08-29-bench-minigrid-01"
+    assert client.get("/api/settings", params={"scope": scope}).json() == {}  # none yet
+    blob = {"version": 1, "colors": {"alan-MiniMax-M2.7-Q8-fo": "#865e3c"}, "order": ["a", "b"]}
+    assert client.put("/api/settings", params={"scope": scope}, json=blob).status_code == 200
+    assert client.get("/api/settings", params={"scope": scope}).json() == blob  # round-trips
+    assert (
+        client.get("/api/settings", params={"scope": "other-bench"}).json() == {}
+    )  # isolated per interface
 
 
 def test_final_score_falls_back_past_errored_final_and_surfaces_both() -> None:

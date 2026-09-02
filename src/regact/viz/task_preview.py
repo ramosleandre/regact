@@ -1,8 +1,9 @@
-"""Render a small PNG preview of a task's environment, for the viz x-axis thumbnails.
+"""Render a small PNG preview of a task's environment.
 
-Freshly rendered from the env (not pulled from a run's artifacts): a MiniGrid task via its
-gym ``rgb_array`` render, an ARC task via its first frame painted with the ARC-AGI-3 palette.
-Downscaled to a thumbnail. The viz caches the result per task, so this runs once per task.
+Rendered from the env (not pulled from a run's artifacts): a MiniGrid task via its gym
+``rgb_array`` render, an ARC task via its first frame painted with the ARC-AGI-3 palette,
+downscaled to a thumbnail. Run OFFLINE by scripts/gen_task_previews.py to pre-populate
+static/icons_tasks/; the viz loads those PNGs as static files and never builds an env at serve time.
 """
 
 from __future__ import annotations

@@ -9,20 +9,45 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
+import os
+import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from regact.viz import reader
 from regact.viz.metrics import game_metrics
 
 _STATIC = Path(__file__).parent / "static"
-# Rendered task previews, keyed by task name (None = tried and can't render). Deterministic per
-# task, so this process-wide cache means each task renders at most once.
-_PREVIEW_CACHE: dict[str, bytes | None] = {}
+
+
+class _NoCacheStatic(StaticFiles):
+    """Serve the viz assets with ``Cache-Control: no-cache`` so the browser revalidates (ETag/304)
+    every request. The viz is edited live - app.js, the icon registry, and hand-added icon PNGs all
+    change under a running server; without this a heuristically-cached copy silently goes stale."""
+
+    async def get_response(self, path: str, scope: Any) -> Any:
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+def _settings_dir() -> Path:
+    # Per-interface viz settings (colors, order, toggles) live here, one JSON per graph scope, so
+    # they survive across sessions/browsers and viz updates. Overridable for tests via env var.
+    return Path(
+        os.environ.get("REGACT_VIZ_SETTINGS_DIR") or (Path.home() / ".regact" / "viz_settings")
+    )
+
+
+def _settings_path(scope: str) -> Path:
+    """Flat, traversal-safe filename for one interface's settings (the graph `under` scope)."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", scope) or "_root"
+    return _settings_dir() / (safe + ".json")
 
 
 def _experiment_of(game_relpath: str) -> str:
@@ -115,25 +140,30 @@ def build_app(experiment_dir: str) -> FastAPI:
             raise HTTPException(status_code=404, detail="video not found")
         return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
-    @app.get("/api/task_preview")
-    def task_preview(task: str) -> Response:
-        # Small rendered thumbnail of a task's env (the Graphs x-axis previews). Rendered on first
-        # request and cached; 404 for a task we can't render (the UI just hides the image then).
-        if task not in _PREVIEW_CACHE:
+    @app.get("/api/settings")
+    def get_settings(scope: str = "") -> dict[str, Any]:
+        # This interface's saved settings (empty dict if none yet). Scope = the graph `under` path.
+        path = _settings_path(scope)
+        if path.is_file():
             try:
-                from regact.viz.task_preview import render_task_png
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {}
+        return {}
 
-                _PREVIEW_CACHE[task] = render_task_png(task)
-            except Exception:
-                _PREVIEW_CACHE[task] = None
-        png = _PREVIEW_CACHE[task]
-        if png is None:
-            raise HTTPException(status_code=404, detail="no preview for this task")
-        return Response(
-            content=png, media_type="image/png", headers={"Cache-Control": "max-age=86400"}
-        )
+    @app.put("/api/settings")
+    async def put_settings(scope: str, request: Request) -> dict[str, str]:
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="settings must be a JSON object")
+        _settings_dir().mkdir(parents=True, exist_ok=True)
+        _settings_path(scope).write_text(json.dumps(body, indent=2), encoding="utf-8")
+        return {"status": "saved"}
 
-    app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+    app.mount("/static", _NoCacheStatic(directory=str(_STATIC)), name="static")
     return app
 
 

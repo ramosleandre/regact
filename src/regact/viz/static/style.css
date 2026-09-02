@@ -67,6 +67,12 @@ details.think pre { color: var(--think); opacity: .85; }
 .tool .res { padding: 6px 10px; border-top: 1px dashed var(--line); }
 .tool .res.err { color: var(--bad); }
 .tool .res pre { font-size: 12px; color: var(--muted); max-height: 220px; overflow: auto; }
+/* files extracted from a heredoc'd command: a collapsed block per written file */
+.tool .filedrop { margin: 0 10px 8px; }
+.tool .filedrop summary { cursor: pointer; color: var(--accent); font-size: 12px; font-family: ui-monospace, monospace; padding: 2px 0; }
+.tool .filedrop summary:hover { text-decoration: underline; }
+.tool .filedrop pre.filebody { font-family: ui-monospace, monospace; font-size: 12px; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; max-height: 360px; overflow: auto; margin: 4px 0 0; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
 th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
 th { color: var(--muted); }
@@ -115,10 +121,11 @@ h2.expsection { margin-top: 22px; font-size: 15px; }
   border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
 .aggbtn:hover { color: var(--fg); }
 .aggbtn.on { color: #0b0d11; background: var(--accent); border-color: var(--accent); font-weight: 700; }
-.graphlayout { display: grid; grid-template-columns: 1fr 190px; gap: 16px; align-items: start; }
+.graphlayout { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: start; }
 .charts { min-width: 0; }
+.gsidebar { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 64px; }
 .controls { border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
-  padding: 10px; position: sticky; top: 64px; }
+  padding: 10px; }
 .controls .h { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .ctl { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 13px; cursor: pointer; }
 .chartcard { border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
@@ -128,6 +135,28 @@ h2.expsection { margin-top: 22px; font-size: 15px; }
 .chart { display: block; }
 .chart .gridline { stroke: var(--line); stroke-width: 1; }
 .chart text.ylab, .chart text.xlab { fill: var(--muted); font-size: 11px; }
+.chart text.avglab { fill: var(--fg); font-weight: 700; }   /* the "Averaged" column label */
+
+/* "who fights who": agent + model -> task / problem */
+.matchup { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 2px 0 16px; }
+.matchup .matcharrow line { stroke: var(--muted); stroke-width: 2; }
+.matchup .matcharrow polygon { fill: var(--muted); }
+.avm { display: flex; align-items: center; gap: 12px; }
+.avm .mplus { font-size: 20px; color: var(--muted); }
+.modelblock, .agentblock { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.modelblock .mname, .agentblock .aname { font-size: 12px; color: var(--fg); max-width: 130px; text-align: center; word-break: break-word; }
+.modelblock .mparams { font-size: 11px; color: var(--muted); }
+.exphead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.exphead .exptitle { font-weight: 600; }
+.cardhead { display: flex; align-items: center; gap: 8px; }
+.cardhead h3 { margin: 0; }
+.vicon { border-radius: 6px; object-fit: contain; }
+.ibadge { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--fg); font-weight: 700; }
+.taskthumb { border: 1px solid var(--line); border-radius: 6px; image-rendering: pixelated; }
+.problembox { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 5px; margin-bottom: 14px;
+  border: 2px solid var(--good); border-radius: 8px; }
+.problembox .taskthumb { image-rendering: pixelated; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 6px 0; font-size: 12px; color: var(--muted); }
 .leg { display: inline-flex; align-items: center; }
 .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
@@ -137,10 +166,19 @@ h2.expsection { margin-top: 22px; font-size: 15px; }
 .controlbar { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-bottom: 12px; }
 .seg { display: inline-flex; align-items: center; gap: 6px; }
 .maskctl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.widthctl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.widthctl input[type=range] { width: 120px; accent-color: var(--accent); cursor: pointer; }
 .exp-leg { display: inline-flex; align-items: center; }
 .leg-label { cursor: pointer; }
 .exp-leg:hover .leg-label { color: var(--fg); }
 .exp-leg.off .leg-label { opacity: .45; text-decoration: line-through; }
+/* Experiments panel (sidebar, below Metrics): reorderable rows */
+.exprow { display: flex; align-items: center; gap: 4px; padding: 3px 2px; font-size: 12px; }
+.exprow.off .leg-label { opacity: .45; text-decoration: line-through; }
+.ordbtn { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 3px;
+  cursor: pointer; font-size: 11px; line-height: 1; padding: 1px 3px; }
+.ordbtn:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
+.ordbtn:disabled { opacity: .3; cursor: default; }
 .sw-pick { width: 14px; height: 14px; padding: 0; margin-right: 5px; border: 1px solid var(--line);
   border-radius: 3px; background: none; cursor: pointer; vertical-align: middle;
   -webkit-appearance: none; appearance: none; }
