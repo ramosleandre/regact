@@ -24,6 +24,16 @@ Everything is agnostic behind three seams — the **agent**, the **environment**
 environment only over a localhost **HTTP boundary** and never imports the game, so the
 score measures understanding, not memorization.
 
+## Demo
+
+<div align="center">
+
+<video src="https://github.com/ramosleandre/regact/raw/main/assets/videos/regact_pres.mp4" poster="https://github.com/ramosleandre/regact/raw/main/assets/videos/regact_pres_poster.jpg" controls muted width="720"></video>
+
+<em>A ~60-second tour: a code-writing agent probes an unknown game, writes an <code>act(obs)</code> controller, and gets scored — browsed in the visualizer. Not playing inline? <a href="assets/videos/regact_pres.mp4">Open the clip</a>.</em>
+
+</div>
+
 ## Install
 
 Python **3.11 or 3.12** (not 3.13). Create a venv, install the core, then add only the
