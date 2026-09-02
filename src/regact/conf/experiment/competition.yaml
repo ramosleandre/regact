@@ -39,6 +39,8 @@ problem:
   lifecycle: single_instance     # one Arcade.make() per game; RESET = level reset
   obs_mode: raw_last_frame_only   # show only the settled final grid of each step (`raw` = full stack)
   info_mode: informative
+  helper:
+    to_png: null                  # obs->PNG renderer; null = auto (on for vision agents, off for Alan)
   kwargs:
     operation_mode: ${oc.env:ARC_OPERATION_MODE,offline}
     environments_dir: ${oc.env:ARC_ENVIRONMENTS_DIR,environnement}

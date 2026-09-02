@@ -53,6 +53,25 @@ def test_mapping_defaults() -> None:
     assert config.first_obs_in_prompt is False  # the first message carries no obs by default
 
 
+def test_helper_to_png_defaults_to_agent_vision() -> None:
+    def to_png(agent: str, helper: object = "unset") -> bool:
+        problem: dict = {"name": "arc_agi"}
+        if helper != "unset":
+            problem["helper"] = helper
+        return run_config_from_mapping(
+            {"agent": {"name": agent}, "problem": problem}
+        ).problem.helper.to_png
+
+    # unset -> auto: on for vision agents (Claude/Codex), off for text-only Alan / scripted
+    assert to_png("claude") is True
+    assert to_png("codex") is True
+    assert to_png("alan") is False
+    assert to_png("claude", {"to_png": None}) is True  # null is also "auto"
+    # an explicit value always wins over the vision default
+    assert to_png("alan", {"to_png": True}) is True
+    assert to_png("claude", {"to_png": False}) is False
+
+
 def test_mapping_carries_first_obs_in_prompt() -> None:
     config = run_config_from_mapping(
         {

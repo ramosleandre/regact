@@ -5,7 +5,7 @@ obs_mode: raw_last_frame_only   # show only the settled final grid of each step 
 info_mode: informative
 seed: null              # ignored by deterministic ARC; here so the override composes
 helper:
-  to_png: false         # obs->PNG renderer in code_library; enable for VISION agents (Claude/Codex), off for Alan
+  to_png: null          # obs->PNG renderer; null = auto (on for vision agents Claude/Codex, off for text-only Alan)
 kwargs:
   operation_mode: offline
   environments_dir: environnement

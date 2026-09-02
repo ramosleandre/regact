@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from regact.agent.capabilities import is_vision_agent
 from regact.config.schema import (
     AgentConfig,
     AgentName,
@@ -48,10 +49,17 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
     return LimitsConfig(**fields)
 
 
-def _helper_from(raw: Any) -> HelperConfig:
-    """Build ``HelperConfig`` from the ``problem.helper`` block (empty/None -> all off)."""
+def _helper_from(raw: Any, agent_name: AgentName) -> HelperConfig:
+    """Build ``HelperConfig`` from the ``problem.helper`` block.
+
+    ``to_png`` unset (absent or null) defaults to the agent's vision capability, so an ad-hoc
+    ``agent=claude problem=arc_agi`` run gets the obs->PNG helper without a bench-script override,
+    while a text-only Alan run does not. An explicit true/false always wins.
+    """
     d = dict(raw or {})
-    return HelperConfig(to_png=bool(d.get("to_png", False)))
+    to_png = d.get("to_png")
+    resolved = is_vision_agent(agent_name) if to_png is None else bool(to_png)
+    return HelperConfig(to_png=resolved)
 
 
 def _sandbox_bool(value: Any) -> bool:
@@ -107,7 +115,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             obs_mode=ObsMode(problem.get("obs_mode", ObsMode.RAW)),
             info_mode=InfoMode(problem.get("info_mode", InfoMode.INFORMATIVE)),
             seed=problem.get("seed"),
-            helper=_helper_from(problem.get("helper")),
+            helper=_helper_from(problem.get("helper"), AgentName(agent["name"])),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
         controller=_controller_from(data.get("controller")),
