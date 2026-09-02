@@ -37,7 +37,7 @@ problem:
   name: arc_agi
   tasks: []                    # empty = all games exposed by the selected operation mode
   lifecycle: single_instance     # one Arcade.make() per game; RESET = level reset
-  obs_mode: raw
+  obs_mode: raw_last_frame_only   # show only the settled final grid of each step (`raw` = full stack)
   info_mode: informative
   kwargs:
     operation_mode: ${oc.env:ARC_OPERATION_MODE,offline}
