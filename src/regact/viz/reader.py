@@ -72,6 +72,7 @@ class SubmissionView:
     error: str | None
     videos: list[str]  # relative file names under the submission dir
     aggregate_unverified: dict[str, Any] | None = None  # direct score, when shadow-replay also ran
+    features: dict[str, Any] = field(default_factory=dict)  # per-feature metrics, {"cwm": {...}}
 
 
 @dataclass
@@ -354,6 +355,7 @@ def _load_submissions(submissions_dir: Path) -> list[SubmissionView]:
                 error=results.get("error"),
                 videos=videos,
                 aggregate_unverified=results.get("aggregate_unverified"),
+                features=results.get("features") or {},
             )
         )
     return out

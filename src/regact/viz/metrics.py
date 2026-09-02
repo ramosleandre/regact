@@ -39,6 +39,9 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         # The same submission's un-replayed (direct) score, when shadow-replay also ran; empty
         # otherwise. A gap vs final_aggregate flags cheating OR a replay/scoring bug.
         "final_aggregate_unverified": _final_aggregate_unverified(game),
+        # The reported submission's per-feature metrics, opaque + game/feature-agnostic (each
+        # feature owns its keys), e.g. {"cwm": {"n_conflicting_transitions": 0, ...}}.
+        "feature_metrics": _final_features(game),
         "duration_s": game.state.get("duration_s", 0),
         # Cumulative real env.step calls this task made (exploration + eval rollouts). None for runs
         # recorded before it was tracked, so the viz shows "-" rather than a wrong 0.
@@ -137,6 +140,12 @@ def _final_aggregate_unverified(game: GameView) -> dict[str, Any]:
     """The reported submission's un-replayed (direct) score, when shadow-replay also ran."""
     sub = _scored_submission(game)
     return dict(sub.aggregate_unverified) if sub and sub.aggregate_unverified else {}
+
+
+def _final_features(game: GameView) -> dict[str, Any]:
+    """The reported submission's per-feature metrics (e.g. CWM data-integrity), opaque."""
+    sub = _scored_submission(game)
+    return dict(sub.features) if sub and sub.features else {}
 
 
 def _final_metric(game: GameView, key: str) -> Any:
