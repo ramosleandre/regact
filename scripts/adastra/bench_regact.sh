@@ -48,7 +48,25 @@ TASK_NAMES=${TASK_NAMES:?comma-separated task list required}
 SEED=${SEED:-0}
 AGENT=${AGENT:-alan}
 SANDBOX=${SANDBOX:-false}
-WALLTIME_S=${WALLTIME_S:-3600}
+# Deployment policy: cap the per-task budget EVAL_MARGIN_S below the Slurm hard-kill so regact
+# stops the task itself (gracefully) with time left for a final eval, instead of being SIGKILL'd
+# mid-run. `auto`/`null` derive the budget from the job's Slurm end time; an explicit integer is
+# honored as-is; off-Slurm (local) falls back to 3600s.
+EVAL_MARGIN_S=${EVAL_MARGIN_S:-120}
+WALLTIME_S=${WALLTIME_S:-auto}
+if [ "$WALLTIME_S" = auto ] || [ "$WALLTIME_S" = null ]; then
+    _end="${SLURM_JOB_END_TIME:-}"
+    case "$_end" in
+        ''|*[!0-9]*) _end=$(scontrol show job "${SLURM_JOB_ID:-x}" -o 2>/dev/null | sed -n 's/.*EndTime=\([0-9T:-]*\).*/\1/p')
+                     [ -n "$_end" ] && _end=$(date -d "$_end" +%s 2>/dev/null);;
+    esac
+    if [ -n "$_end" ] && [ "$_end" -gt 0 ] 2>/dev/null; then
+        WALLTIME_S=$(( _end - $(date +%s) - EVAL_MARGIN_S ))
+    else
+        WALLTIME_S=3600
+    fi
+    [ "$WALLTIME_S" -lt 60 ] && WALLTIME_S=60
+fi
 N_EPISODES=${N_EPISODES:-1}
 CONTEXT_WINDOW=${CONTEXT_WINDOW:-30000}
 TOOL_CALL_FORMAT=${TOOL_CALL_FORMAT:-}
