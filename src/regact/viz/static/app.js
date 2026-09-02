@@ -310,6 +310,16 @@ function metricSpecs(games) {
           specs.push({ key: "feat:" + feat + "." + k, label: feat + "." + k,
             get: (m) => m.feature_metrics && m.feature_metrics[feat] && m.feature_metrics[feat][k] });
         }
+  // Problem-derived metrics (ARC RHAE/LRHAE): no def and not an "agg:" key, so they land under
+  // "Other" rather than in the main game score. Same dynamic, viz-agnostic treatment.
+  const seenDrv = new Set();
+  for (const g of games)
+    for (const [k, v] of Object.entries(g.metrics.derived_metrics || {}))
+      if (typeof v === "number" && !seenDrv.has(k)) {
+        seenDrv.add(k);
+        specs.push({ key: "derived:" + k, label: k.toUpperCase(),
+          get: (m) => m.derived_metrics && m.derived_metrics[k] });
+      }
   specs.push(STATUS_METRIC);
   return specs;
 }
