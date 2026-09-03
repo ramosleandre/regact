@@ -31,9 +31,11 @@ class ExperimentState:
     last_error_category: str | None = None
     exit_reason: str | None = None  # set at teardown; None while the run is still going
     flagged_tool_calls: int = 0
+    tool_calls_total: int = 0  # tool calls emitted this run; << turn => agent spinning
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
-    schema_version: int = 1
+    turn: int = 0  # 1-indexed turn in progress (0 before the first)
+    schema_version: int = 2
 
     def save(self, path: str) -> None:
         """Atomic write (tmpfile + os.replace) so a poller never sees a partial file."""

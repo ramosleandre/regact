@@ -124,6 +124,8 @@ async def test_full_pipeline_submit_then_exit(tmp_path: Path) -> None:
     assert reason == "agent_exit"
     assert stack.experiment.exit_requested is True
     assert stack.experiment.submission_count == 1
+    assert stack.experiment.tool_calls_total == 2  # SubmitSolution + ExitTask
+    assert stack.experiment.turn == 2  # both turns ran
 
     # All three canonical artifacts on disk.
     assert Path(stack.state_path).exists()
@@ -240,6 +242,9 @@ async def test_pipeline_is_stable_over_many_turns(tmp_path: Path) -> None:
     assert reason == "loop_limit"  # clean stop, not loop_crash
     assert len(agent.sent) == 200  # every turn actually ran
     assert Path(stack.state_path).exists()
+    # Spinning detector: 200 turns, zero tool calls -> tool_calls_total << turn.
+    assert stack.experiment.turn == 200
+    assert stack.experiment.tool_calls_total == 0
 
 
 async def test_pipeline_survives_tool_crash(tmp_path: Path) -> None:

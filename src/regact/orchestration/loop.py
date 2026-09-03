@@ -158,6 +158,7 @@ async def run_session(
             if reason is not None:
                 break
 
+            experiment.turn = turns + 1  # 1-indexed: the turn now starting
             outcome = await _run_turn(message, ctx)
 
             budget = limits.max_seconds_per_task
@@ -320,6 +321,7 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
     """Route one event: execute framework tools, record backend errors, else observe."""
     if isinstance(event, ToolCall):
         outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
+        ctx.experiment.tool_calls_total += 1
         await _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution
