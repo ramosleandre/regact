@@ -71,6 +71,10 @@ N_EPISODES=${N_EPISODES:-1}
 CONTEXT_WINDOW=${CONTEXT_WINDOW:-30000}
 TOOL_CALL_FORMAT=${TOOL_CALL_FORMAT:-}
 CONCURRENCY=${CONCURRENCY:-4}
+# Cross-cluster convention: set CLUSTER=adastra|jz to nest runs as
+# <output_root>/<cluster>-<model>/<stamp>/<task>, so both clusters' results merge
+# into one viz tree (the model column comes from config.json, so names must match).
+CLUSTER=${CLUSTER:-}
 
 PID=""
 if [ -z "${BASE_URL:-}" ]; then
@@ -112,7 +116,14 @@ WORK_DIR="$(mktemp -d)"  # per-task exit codes + unique Hydra run dirs (outside 
 # outputs/<timestamp>/ dir; it lives outside experiments/ so it never looks like a run stamp.
 run_task_bench() {
     local task="$1"
-    local exp="${EXPERIMENT_NAME:-exp_${task}_${AGENT}-${MODEL_NAME}_seed${SEED}}"
+    local exp="${EXPERIMENT_NAME:-}"
+    if [ -z "${exp}" ]; then
+        if [ -n "${CLUSTER}" ]; then
+            exp="${CLUSTER}-${MODEL_NAME}"  # tasks nest under one cluster-model dir
+        else
+            exp="exp_${task}_${AGENT}-${MODEL_NAME}_seed${SEED}"
+        fi
+    fi
     local oroot="${OUTPUT_ROOT:-experiments/bench_${BENCH_DATE}}"
     echo "[bench] start task=${task} -> ${oroot}/${exp}"
     python -m regact.run_exp \
