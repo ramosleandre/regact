@@ -57,6 +57,32 @@ def test_decide_stop_walltime_limit() -> None:
     assert reason == "walltime_limit"
 
 
+def test_decide_stop_tool_call_limit() -> None:
+    limits = LimitsConfig(max_turns=100, max_tool_calls=5)
+    # under the budget: keep going
+    assert (
+        _decide_stop(
+            exit_requested=False,
+            interrupted=False,
+            turns=0,
+            elapsed_s=0.0,
+            limits=limits,
+            tool_calls_total=4,
+        )
+        is None
+    )
+    # at the budget: stop
+    reason = _decide_stop(
+        exit_requested=False,
+        interrupted=False,
+        turns=0,
+        elapsed_s=0.0,
+        limits=limits,
+        tool_calls_total=5,
+    )
+    assert reason == "tool_call_limit"
+
+
 def test_acted_without_submitting_is_the_shape3_signature() -> None:
     # Acted (tool calls), never submitted, exited on walltime = unbound channel / doom loop.
     assert _acted_without_submitting("walltime_limit", 0, 43) is True

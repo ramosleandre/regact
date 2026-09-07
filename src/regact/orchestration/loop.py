@@ -152,6 +152,7 @@ async def run_session(
                 exit_requested=experiment.exit_requested,
                 interrupted=stop.is_set() if stop is not None else False,
                 turns=turns,
+                tool_calls_total=experiment.tool_calls_total,
                 elapsed_s=time.monotonic() - start,
                 limits=limits,
             )
@@ -280,6 +281,7 @@ def _decide_stop(
     turns: int,
     elapsed_s: float,
     limits: LimitsConfig,
+    tool_calls_total: int = 0,
 ) -> str | None:
     """Pure stop decision, checked before each turn. ``None`` means keep going."""
     if interrupted:
@@ -288,6 +290,8 @@ def _decide_stop(
         return "agent_exit"
     if turns >= limits.max_turns:
         return "loop_limit"
+    if limits.max_tool_calls is not None and tool_calls_total >= limits.max_tool_calls:
+        return "tool_call_limit"
     if limits.max_seconds_per_task is not None and elapsed_s >= limits.max_seconds_per_task:
         return "walltime_limit"
     return None

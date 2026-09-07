@@ -216,6 +216,19 @@ async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     assert stack.experiment.submission_count == 0
 
 
+async def test_pipeline_stops_on_tool_call_limit(tmp_path: Path) -> None:
+    """max_tool_calls caps TOTAL tool calls across the run - agent-agnostic, turn-independent."""
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
+    # One Bash call per turn (never submits/exits); the loop counts every ToolCall event.
+    agent = ScriptedAgent([[ToolCall("c", "Bash", {}), TurnComplete()] for _ in range(6)])
+    reason = await stack.run(agent)
+
+    assert reason == "tool_call_limit"
+    assert stack.experiment.tool_calls_total == 3  # stopped exactly at the budget
+    assert len(agent.sent) == 3  # three turns ran; the cap fired before the fourth
+
+
 async def test_doom_loop_breaker_stops_a_no_tool_agent(tmp_path: Path) -> None:
     """A degenerate agent that never calls a tool (e.g. a temp0 model emitting the same
     unparseable garbage each turn) is cut off after max_consecutive_no_tool_turns, not left to

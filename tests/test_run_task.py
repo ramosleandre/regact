@@ -24,7 +24,7 @@ from regact.config.schema import (
 )
 from regact.env.renderer import RawRenderer
 from regact.envclient.obs import Obs
-from regact.orchestration.task import run_task
+from regact.orchestration.task import _seed_alan_iteration_budget, run_task
 from regact.problems.base import BaseProblem
 from regact.security.runtime import SandboxRuntime
 from regact.testing.fakes import FakeNativeEnv
@@ -225,3 +225,25 @@ def test_workdir_on_pythonpath_lets_subdir_scripts_import_framework(tmp_path: Pa
         text=True,
     )
     assert ok.returncode == 0 and ok.stdout.strip() == "ok"
+
+
+def test_seed_alan_iteration_budget() -> None:
+    """Layer 2 of limits.max_tool_calls: seed alancode's inner cap, alan path only."""
+    alan = AgentConfig(name=AgentName.ALAN, args={})
+    _seed_alan_iteration_budget(alan, LimitsConfig(max_tool_calls=300))
+    assert alan.args["max_iterations_per_turn"] == 300
+
+    # An explicit inner cap wins over the seeded budget.
+    explicit = AgentConfig(name=AgentName.ALAN, args={"max_iterations_per_turn": 50})
+    _seed_alan_iteration_budget(explicit, LimitsConfig(max_tool_calls=300))
+    assert explicit.args["max_iterations_per_turn"] == 50
+
+    # Non-alan agents are untouched (their inner cap is a CLI flag, wired separately).
+    claude = AgentConfig(name=AgentName.CLAUDE, args={})
+    _seed_alan_iteration_budget(claude, LimitsConfig(max_tool_calls=300))
+    assert "max_iterations_per_turn" not in claude.args
+
+    # No budget set: nothing seeded.
+    unbudgeted = AgentConfig(name=AgentName.ALAN, args={})
+    _seed_alan_iteration_budget(unbudgeted, LimitsConfig(max_tool_calls=None))
+    assert "max_iterations_per_turn" not in unbudgeted.args

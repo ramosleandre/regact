@@ -25,8 +25,10 @@ from regact.agent.base import CodeAgent, build_agent
 from regact.agent.capabilities import uses_control_cli
 from regact.agent.events import SystemPrompt, UserMessage
 from regact.config.schema import (
+    AgentConfig,
     AgentName,
     Lifecycle,
+    LimitsConfig,
     RunConfig,
     redacted_config_dict,
 )
@@ -128,6 +130,15 @@ def _bridged(wrapper: Wrapper, mirror: LoopbackMirror | None, ports: Sequence[in
         return wrapper
     prefix = mirror.argv_prefix(ports)
     return lambda argv: wrapper([*prefix, *argv])
+
+
+def _seed_alan_iteration_budget(agent: AgentConfig, limits: LimitsConfig) -> None:
+    """limits.max_tool_calls Layer 2: on the alan path, seed alancode's inner cap
+    (``max_iterations_per_turn``) from the tool-call budget so a single ``query()`` yields near it,
+    rather than running to walltime. The loop's ``_decide_stop`` stays the hard cap across turns;
+    this only bounds one invocation (iterations ~= tool calls). An explicit override wins."""
+    if agent.name is AgentName.ALAN and limits.max_tool_calls is not None:
+        agent.args.setdefault("max_iterations_per_turn", limits.max_tool_calls)
 
 
 def _requested_runtime(config: RunConfig) -> SandboxRuntime:
@@ -372,6 +383,7 @@ async def run_task(
             tools: list[Tool] = [LoggingTool(tool, logger) for tool in tool_specs]
             hooks = [*controller.hooks(deps), *(h for f in features for h in f.hooks(deps))]
 
+            _seed_alan_iteration_budget(config.agent, config.limits)
             agent = agent or build_agent(config.agent)
             caps = agent.capabilities()
             # Every non-native protocol reaches the framework tools over the workdir control CLI, so

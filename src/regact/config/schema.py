@@ -83,6 +83,10 @@ class LimitsConfig:
     """Per-task run limits; each name states its scope."""
 
     max_turns: int = 150  # agent turns per task before the loop gives up
+    # Total tool calls across the whole run (all turns), agent-agnostic + walltime-independent -
+    # the primary budget. None = off. Enforced by the loop between sends; on the alan path the
+    # agent's own inner cap is set from it so a single query returns near the budget (see task.py).
+    max_tool_calls: int | None = None
     max_seconds_per_task: int | None = None  # wall-clock per task, from session start
     max_actions_per_env: int | None = None  # env.step cap per env instance (from its make)
     # Doom-loop breaker: end the loop after N consecutive turns with no tool call (a degenerate
