@@ -317,6 +317,7 @@ async def run_task(
                 problem_name=problem.name,
                 task_name=task_name,
                 problem_kwargs=dict(config.problem.kwargs),
+                base_url=config.agent.base_url,  # record which endpoint the run used
             )
             src_dir = _regact_src_dir()
             deny_read = _secret_module_paths(problem.secret_modules())

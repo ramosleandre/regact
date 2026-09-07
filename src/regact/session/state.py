@@ -27,6 +27,11 @@ class ExperimentState:
     submission_count: int = 0
     exit_requested: bool = False
     agent_session_id: str | None = None  # locates the native transcript dir
+    base_url: str | None = None  # the model endpoint this run used (None = the agent's default)
+    # What the agent ACTUALLY ran at (alan path). source=="fallback" is a CONFIG ERROR: the served
+    # window was unknown, so a conservative default was used silently - a 32k agent on a big serve.
+    context_window: int | None = None
+    context_window_source: str | None = None
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
     exit_reason: str | None = None  # set at teardown; None while the run is still going
@@ -35,7 +40,7 @@ class ExperimentState:
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
     turn: int = 0  # 1-indexed turn in progress (0 before the first)
-    schema_version: int = 2
+    schema_version: int = 3
 
     def save(self, path: str) -> None:
         """Atomic write (tmpfile + os.replace) so a poller never sees a partial file."""

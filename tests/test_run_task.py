@@ -247,3 +247,27 @@ def test_seed_alan_iteration_budget() -> None:
     unbudgeted = AgentConfig(name=AgentName.ALAN, args={})
     _seed_alan_iteration_budget(unbudgeted, LimitsConfig(max_tool_calls=None))
     assert "max_iterations_per_turn" not in unbudgeted.args
+
+
+async def test_run_task_records_endpoint_and_resolved_window(tmp_path: Path) -> None:
+    """base_url (parent-known) + resolved context window/source (agent-reported) land in state."""
+    config = _config()
+    config.agent.base_url = "http://127.0.0.1:8080/v1"
+
+    class _InfoAgent(_WritingAgent):
+        def resolved_model_info(self) -> dict[str, Any] | None:
+            return {"context_window": 32768, "context_window_source": "fallback"}
+
+    agent = _InfoAgent(
+        [
+            [ToolCall("c1", "SubmitSolution", {}), TurnComplete()],
+            [ToolCall("c2", "ExitTask", {}), TurnComplete()],
+        ]
+    )
+    await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent)
+
+    state = json.loads((tmp_path / "logs" / "experiment_state.json").read_text())
+    assert state["base_url"] == "http://127.0.0.1:8080/v1"
+    assert state["context_window"] == 32768
+    assert state["context_window_source"] == "fallback"  # the silent-32k tell, now in the artifact
+    assert state["schema_version"] == 3

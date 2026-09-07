@@ -13,6 +13,7 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 from regact.agent.capabilities import Capabilities
 from regact.agent.events import AgentEvent
@@ -92,6 +93,13 @@ class CodeAgent(ABC):
         from the canonical experiment state, so audits can correlate the two. Backends
         without a discoverable id keep the default.
         """
+        return None
+
+    def resolved_model_info(self) -> dict[str, Any] | None:
+        """What the backend RESOLVED for the model, once known - e.g. ``{"context_window": int,
+        "context_window_source": str}``. ``source == "fallback"`` means the served window was
+        unknown and a conservative default was used (a silent under-resourcing worth recording).
+        ``None`` for backends that don't expose it (only the alan subprocess does today)."""
         return None
 
     def host_read_paths(self) -> list[str]:

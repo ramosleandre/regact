@@ -222,6 +222,11 @@ def _save_state(ctx: _LoopContext) -> None:
         ctx.experiment.env_moves = ctx.move_count()
     if ctx.experiment.agent_session_id is None:
         ctx.experiment.agent_session_id = ctx.agent.session_id()
+    if ctx.experiment.context_window is None:
+        info = ctx.agent.resolved_model_info()
+        if info:
+            ctx.experiment.context_window = info.get("context_window")
+            ctx.experiment.context_window_source = info.get("context_window_source")
     ctx.experiment.save(ctx.state_path)
 
 

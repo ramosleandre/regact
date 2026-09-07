@@ -18,6 +18,7 @@ so this sandboxed child never holds a Python handle to the orchestrator's tools.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 from typing import Any
@@ -68,8 +69,22 @@ def _build(frame: dict[str, Any]) -> Any:
     )
 
 
+def _model_info(agent: Any) -> dict[str, Any]:
+    """alancode's RESOLVED context window + source (available after the first probe). Read
+    tolerantly - a backend that can't report it must never break a turn, and an older alancode
+    without ``context_window_source`` still yields the window."""
+    try:
+        info: dict[str, Any] = {"context_window": int(agent.context_window)}
+    except Exception:
+        return {}  # no resolved window yet -> nothing to report on this turn
+    with contextlib.suppress(Exception):  # older alancode: a window but no source field
+        info["context_window_source"] = str(agent.context_window_source)
+    return info
+
+
 async def _run_turn(agent: Any, message: str) -> None:
-    """Stream one turn's events, then close it with a ``_turn_end`` frame."""
+    """Stream one turn's events, then close it with a ``_turn_end`` frame (carrying the resolved
+    model info, so the parent can record what window the run actually got)."""
     from regact.agent.alan_adapter import map_alan_events
 
     try:
@@ -81,7 +96,7 @@ async def _run_turn(agent: Any, message: str) -> None:
         if not isinstance(exc, Exception):
             raise  # SystemExit/KeyboardInterrupt still terminate the child, now reported
     finally:
-        _write({"type": TURN_END})
+        _write({"type": TURN_END, **_model_info(agent)})
 
 
 async def _serve() -> int:

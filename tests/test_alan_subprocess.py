@@ -13,7 +13,7 @@ import sys
 import pytest
 
 import regact.agent.alan_subprocess as alan_subprocess
-from regact.agent.alan_runner import FATAL, READY, TURN_END, _run_turn
+from regact.agent.alan_runner import FATAL, READY, TURN_END, _model_info, _run_turn
 from regact.agent.alan_subprocess import _STDERR_TAIL_LINES, AlanSubprocessAgent
 from regact.agent.base import build_agent
 from regact.agent.events import (
@@ -255,6 +255,40 @@ async def test_runner_reports_systemexit_as_fatal(capsys) -> None:  # type: igno
     frames = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
     assert {"type": FATAL, "message": "SystemExit: 3"} in frames
     assert frames[-1] == {"type": TURN_END}
+
+
+def test_model_info_reads_resolved_window_tolerantly() -> None:
+    class _Resolved:
+        context_window = 96000
+        context_window_source = "server"
+
+    assert _model_info(_Resolved()) == {"context_window": 96000, "context_window_source": "server"}
+    assert _model_info(object()) == {}  # no context_window -> nothing to report
+
+    class _WindowOnly:  # older alancode: a window but no source field
+        context_window = 32768
+
+    assert _model_info(_WindowOnly()) == {"context_window": 32768}
+
+
+async def test_run_turn_carries_resolved_window_in_turn_end(capsys) -> None:  # type: ignore[no-untyped-def]
+    """The child folds the resolved window into _turn_end so the parent can record it."""
+
+    class _Quiet:
+        context_window = 96000
+        context_window_source = "fallback"
+
+        async def query_events_async(self, message):  # type: ignore[no-untyped-def]
+            return
+            yield  # async generator that yields nothing
+
+    await _run_turn(_Quiet(), "go")
+    frames = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert frames[-1] == {
+        "type": TURN_END,
+        "context_window": 96000,
+        "context_window_source": "fallback",
+    }
 
 
 @pytest.mark.live

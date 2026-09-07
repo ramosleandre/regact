@@ -78,6 +78,7 @@ class AlanSubprocessAgent(CodeAgent):
         self._stderr_tail: collections.deque[str] = collections.deque(maxlen=_STDERR_TAIL_LINES)
         self._stderr_task: asyncio.Task[None] | None = None
         self._needs_drain = False  # a prior turn's stream was abandoned before its _turn_end
+        self._model_info: dict[str, Any] | None = None  # resolved window/source, from _turn_end
 
     async def start(
         self,
@@ -138,6 +139,12 @@ class AlanSubprocessAgent(CodeAgent):
         self._needs_drain = True
         async for frame in self._read_frames():
             if frame.get("type") == TURN_END:
+                if "context_window" in frame:  # the child resolved it this turn; keep the latest
+                    self._model_info = {
+                        k: frame[k]
+                        for k in ("context_window", "context_window_source")
+                        if k in frame
+                    }
                 self._needs_drain = False
                 return
             event = self._to_event(frame)
@@ -148,6 +155,11 @@ class AlanSubprocessAgent(CodeAgent):
     async def inject(self, message: str) -> None:
         """Queue a message; it is prepended to the next turn (mirrors the CLI agents)."""
         self._pending.append(message)
+
+    def resolved_model_info(self) -> dict[str, Any] | None:
+        """alancode's resolved context window + source, captured from the child's ``_turn_end``
+        (available after the first turn's probe). ``None`` until then."""
+        return self._model_info
 
     async def abort(self) -> None:
         """Kill the child's process group; the loop's walltime watchdog calls this."""
