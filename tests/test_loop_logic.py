@@ -7,7 +7,12 @@ from typing import Any
 
 from regact.agent.events import ToolCall
 from regact.config.schema import LimitsConfig
-from regact.orchestration.loop import _decide_stop, _execute_framework_tool, _LoopContext
+from regact.orchestration.loop import (
+    _acted_without_submitting,
+    _decide_stop,
+    _execute_framework_tool,
+    _LoopContext,
+)
 from regact.security.policy import default_policy
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -50,6 +55,18 @@ def test_decide_stop_walltime_limit() -> None:
         exit_requested=False, interrupted=False, turns=0, elapsed_s=6.0, limits=limits
     )
     assert reason == "walltime_limit"
+
+
+def test_acted_without_submitting_is_the_shape3_signature() -> None:
+    # Acted (tool calls), never submitted, exited on walltime = unbound channel / doom loop.
+    assert _acted_without_submitting("walltime_limit", 0, 43) is True
+    # Submitted at least once -> scored normally, not this failure.
+    assert _acted_without_submitting("walltime_limit", 1, 43) is False
+    # Never executed a tool -> a different (dropped-calls) failure, not this one.
+    assert _acted_without_submitting("walltime_limit", 0, 0) is False
+    # Clean exit or a turn-cap stop is not the walltime-with-no-submit signature.
+    assert _acted_without_submitting("agent_exit", 0, 43) is False
+    assert _acted_without_submitting("loop_limit", 0, 43) is False
 
 
 class _OkTool(Tool):

@@ -200,6 +200,14 @@ async def run_session(
 
     await _run_teardown_hooks(hooks or [], reason, ctx)
     experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
+    if _acted_without_submitting(reason, experiment.submission_count, experiment.tool_calls_total):
+        logger.log(
+            LogComponent.ORCHESTRATOR,
+            "WARNING",
+            "acted_without_submitting",
+            tool_calls_total=experiment.tool_calls_total,
+            env_moves=experiment.env_moves,
+        )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_end", phase="teardown", reason=reason)
     _save_state(ctx)
     return reason
@@ -283,6 +291,16 @@ def _decide_stop(
     if limits.max_seconds_per_task is not None and elapsed_s >= limits.max_seconds_per_task:
         return "walltime_limit"
     return None
+
+
+def _acted_without_submitting(
+    reason: str | None, submission_count: int, tool_calls_total: int
+) -> bool:
+    """Shape-3 tell: the agent ran tools but never submitted and exited on walltime - an unbound
+    control channel (native protocol on a subprocess agent -> submit/exit 503s) or a doom loop,
+    scoring only via the teardown re-score. turn/tool_calls ratio look healthy, so submission_count
+    with env_moves is the only signal - the failure the spinning detector cannot see."""
+    return reason == "walltime_limit" and submission_count == 0 and tool_calls_total > 0
 
 
 async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
