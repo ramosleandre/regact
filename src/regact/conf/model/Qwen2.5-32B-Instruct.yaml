@@ -1,11 +1,14 @@
 # @package _global_
 # Per-model hyperparameters for a SERVED model on the alan path. Compose as
 # `agent=alan model=Qwen2.5-32B-Instruct`. Holds only model-intrinsic facts; the per-serve knobs
-# (base_url, context_window) are launch overrides - the PJ injects the serve's real KV pool.
+# (base_url, context_window) are launch overrides.
 agent:
   model: openai/Qwen2.5-32B-Instruct
   args:
-    # Instructed compliance, not native preference, decides this: models follow a taught
-    # bash-family dialect regardless of what they emit unprompted (measured 2026-09-08).
-    tool_protocol: hermes_xml
+    # NOT hermes_xml: this model emits hermes JSON args, <tool_call>{"name":..,"arguments":{..}}
+    # </tool_call>, while hermes_xml is the Qwen3-CODER <function=..><parameter=..> form. Taught
+    # hermes_xml it emitted its native JSON instead and the calls were dropped (turn 9, 3 calls, 0
+    # submissions). bash_block asks for a fenced shell block rather than a competing tool-call
+    # protocol, so it does not fight the chat template's own tool machinery.
+    tool_protocol: bash_block
     tool_call_format: auto
