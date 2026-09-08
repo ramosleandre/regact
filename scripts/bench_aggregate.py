@@ -81,12 +81,40 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
         )
     if all_stamps:
         return rows
+    # Latest-stamp-wins collapses RERUNS of one cell. But a fan-out that launches one job per
+    # (task, attempt) uses n_attempts_per_task=1, which writes no attempt_N dir - so its attempts are
+    # distinguished ONLY by stamp and this would silently keep one and discard the rest. Nothing on
+    # disk separates "a rerun" from "another attempt", so when there is no attempt marker the stamp
+    # IS the identity: count them all. Over-counting a rerun is visible as a raised n; dropping
+    # attempts is not visible at all.
     latest: dict[tuple[str, str, Any], dict[str, Any]] = {}
     for row in rows:
-        key = (row["experiment"], row["task"], row["attempt"])
+        identity = row["attempt"] if row["attempt"] is not None else row["stamp"]
+        key = (row["experiment"], row["task"], identity)
         if key not in latest or row["stamp"] > latest[key]["stamp"]:
             latest[key] = row
-    return list(latest.values())
+    kept = list(latest.values())
+    _warn_ambiguous_stamps(kept)
+    return kept
+
+
+def _warn_ambiguous_stamps(rows: list[dict[str, Any]]) -> None:
+    """Name the cells whose repeats cannot be classified, instead of quietly picking a meaning."""
+    seen: dict[tuple[str, str], int] = collections.Counter()
+    for row in rows:
+        if row["attempt"] is None:
+            seen[(row["experiment"], row["task"])] += 1
+    repeated = sorted(cell for cell, n in seen.items() if n > 1)
+    if not repeated:
+        return
+    print(
+        f"warning: {len(repeated)} cell(s) have several timestamped runs and no attempt_N marker, "
+        "so a repeat cannot be told from an attempt; ALL are counted. If these are reruns rather "
+        "than attempts, remove the superseded directories.",
+        file=sys.stderr,
+    )
+    for experiment, task in repeated[:5]:
+        print(f"  ambiguous: {experiment}/{task} x{seen[(experiment, task)]}", file=sys.stderr)
 
 
 _RANK = {"stub": 0, "trivial": 1, "reasoned": 2}

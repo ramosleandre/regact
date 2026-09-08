@@ -181,16 +181,30 @@ def test_collect_runs_flat_and_model_grouped_layouts(tmp_path: Path) -> None:
     assert by_model["Grouped-70B"]["task"] == "TaskY"
 
 
-def test_collect_runs_keeps_latest_stamp_unless_all(tmp_path: Path) -> None:
-    """Two reruns of the same (experiment, task): default keeps the newest stamp only."""
+def test_repeats_without_an_attempt_marker_are_all_kept(tmp_path: Path) -> None:
+    """Two timestamped runs of one (experiment, task) and NO attempt_N dir are indistinguishable on
+    disk: a fan-out launching one job per (task, attempt) writes exactly this, and so does a rerun.
+    Keep both. Dropping one is invisible and silently discards attempts; counting a rerun twice
+    shows up as a raised n and is warned about on stderr."""
     exp = tmp_path / "exp_A"
-    _mk_run(exp / "2026-01-01_00-00-00" / "TaskX", model="M", success=0.0)  # older
-    _mk_run(exp / "2026-01-02_00-00-00" / "TaskX", model="M", success=1.0)  # newer
+    _mk_run(exp / "2026-01-01_00-00-00" / "TaskX", model="M", success=0.0)
+    _mk_run(exp / "2026-01-02_00-00-00" / "TaskX", model="M", success=1.0)
 
-    latest = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
-    assert len(latest) == 1
-    assert latest[0]["stamp"] == "2026-01-02_00-00-00"
-    assert latest[0]["success_rate"] == 1.0
+    kept = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert len(kept) == 2
+    assert {row["success_rate"] for row in kept} == {0.0, 1.0}
 
     both = bench_aggregate.collect_runs(tmp_path, all_stamps=True)
     assert len(both) == 2
+
+
+def test_latest_stamp_still_wins_for_a_rerun_of_the_same_attempt(tmp_path: Path) -> None:
+    """With an attempt_N marker the repeat IS classifiable - it is the same attempt run twice - so
+    the newest stamp wins and the superseded one does not inflate the cell."""
+    exp = tmp_path / "exp_A"
+    _mk_run(exp / "2026-01-01_00-00-00" / "TaskX" / "attempt_0", model="M", success=0.0)
+    _mk_run(exp / "2026-01-02_00-00-00" / "TaskX" / "attempt_0", model="M", success=1.0)
+
+    kept = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert len(kept) == 1
+    assert kept[0]["success_rate"] == 1.0
