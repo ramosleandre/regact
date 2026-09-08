@@ -275,6 +275,31 @@ def _run_row(
     }
 
 
+def coverage_markdown(rows: list[dict[str, Any]]) -> str:
+    """Per-model coverage, because incomplete columns here are NOT missing at random.
+
+    A slow serve finishes the easy tasks and times out on the hard ones, so the cells a model does
+    have are biased toward the ones every model passes. Averaging such a column reports the bias as
+    capability. This table exists so that skew is visible next to the pivots rather than inferred.
+    """
+    tasks = {row["task"] for row in rows}
+    models = sorted({row["model"] for row in rows})
+    lines = [
+        "| model | tasks | solved | budget-capped | walltime-cut | missing |",
+        "|---|---|---|---|---|---|",
+    ]
+    for model in models:
+        mine = [row for row in rows if row["model"] == model]
+        covered = {row["task"] for row in mine}
+        reasons = collections.Counter(row.get("exit_reason") for row in mine)
+        lines.append(
+            f"| {model} | {len(covered)}/{len(tasks)} | {reasons.get('solved', 0)} "
+            f"| {reasons.get('tool_call_limit', 0)} | {reasons.get('walltime_limit', 0)} "
+            f"| {len(tasks) - len(covered)} |"
+        )
+    return "\n".join(lines)
+
+
 def _fmt(value: Any) -> str:
     if value is None:
         return "n/a"
@@ -364,7 +389,14 @@ def main(argv: list[str] | None = None) -> int:
     print("Controller states: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
     outcomes = collections.Counter(row["outcome"] for row in rows)
     print("Outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())) + "\n")
-    print("## Outcome - is the score trustworthy? (task x model)\n")
+    print("## Coverage - which cells exist, and why some do not\n")
+    print(
+        "Incomplete columns are NOT missing at random: a slow serve completes the EASY tasks and "
+        "times out on the hard ones, so a model's visible cells skew toward the tasks every model "
+        "passes. Read per-task cells; never average a column into a per-model score.\n"
+    )
+    print(coverage_markdown(rows))
+    print("\n## Outcome - is the score trustworthy? (task x model)\n")
     print("`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response) and "
           "`walltime` must be discounted / re-run.\n")
     print(outcome_pivot_markdown(rows))
