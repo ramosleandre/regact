@@ -4,6 +4,7 @@ No LLM, no real game: a registered fake problem (FakeNativeEnv) + the scripted
 backend, driven through run_experiment end-to-end.
 """
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -183,3 +184,19 @@ async def test_dry_run_records_the_prompt_and_skips_the_agent(tmp_path: Path) ->
         assert "ToolCall" not in types  # the agent never ran
         state = json.loads((tmp_path / task / "logs" / "experiment_state.json").read_text())
         assert state["exit_reason"] == "dry_run"
+
+
+def test_claim_run_dir_gives_every_concurrent_run_its_own_dir(tmp_path):
+    """A Slurm fan-out starts many runs of one experiment name in the same second; each must own
+    a distinct dir, or siblings overwrite each other's logs and scaffold."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from regact.orchestration.experiment import _claim_run_dir
+
+    target = str(tmp_path / "2026-01-01_00-00-00")
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        claimed = list(pool.map(lambda _: _claim_run_dir(target), range(16)))
+
+    assert len(set(claimed)) == 16
+    assert all(os.path.isdir(d) for d in claimed)
+    assert target in claimed  # the winner keeps the plain stamp

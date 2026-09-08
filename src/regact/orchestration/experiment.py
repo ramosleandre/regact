@@ -9,6 +9,7 @@ the task list, and runs :func:`run_task` per task through the :class:`Scheduler`
 from __future__ import annotations
 
 import os
+import uuid
 from collections import Counter
 from datetime import datetime
 from urllib.parse import quote
@@ -56,6 +57,27 @@ def resolve_run_dir(config: RunConfig, *, output_root: str | None = None) -> str
     return os.path.abspath(os.path.join(config.output_root, config.experiment_name or "run", stamp))
 
 
+def _claim_run_dir(path: str) -> str:
+    """Create ``path`` and return the dir this run exclusively owns.
+
+    The stamp resolves to one second, so runs of one experiment name started concurrently (a
+    Slurm fan-out of one job per task) can compute the same path. The dir is claimed with
+    ``exist_ok=False`` so the filesystem arbitrates a single winner and every loser moves to
+    ``<stamp>-2``, ``-3``, ...; sharing a dir would let siblings overwrite each other's logs and
+    scaffold, since both open ``"w"`` and reset ``submission_count``.
+    """
+    for n in range(1, 1000):
+        candidate = path if n == 1 else f"{path}-{n}"
+        try:
+            os.makedirs(candidate, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            continue
+    unique = f"{path}-{uuid.uuid4().hex[:8]}"
+    os.makedirs(unique, exist_ok=True)
+    return unique
+
+
 def _link_latest(run_dir: str) -> None:
     """Point ``<parent>/latest`` at this run, so tooling can name it without the stamp."""
     link = os.path.join(os.path.dirname(run_dir), "latest")
@@ -84,7 +106,11 @@ def _run_label(task: str, attempt: int, n_attempts: int) -> str:
 async def run_experiment(config: RunConfig, *, output_root: str | None = None) -> dict[str, str]:
     """Run every task ``n_attempts_per_task`` times; return ``{run_label: exit_reason}``."""
     root = resolve_run_dir(config, output_root=output_root)
-    os.makedirs(root, exist_ok=True)
+    # An explicit output_root names one exact dir (tests); a stamped path is claimed exclusively.
+    if output_root is not None:
+        os.makedirs(root, exist_ok=True)
+    else:
+        root = _claim_run_dir(root)
     # Silence third-party INFO noise AND tee the terminal narration to <run>/run.log, so the whole
     # experiment is reviewable from the run folder (live or after it finishes).
     configure_console_logging(run_log_path=os.path.join(root, "run.log"))
