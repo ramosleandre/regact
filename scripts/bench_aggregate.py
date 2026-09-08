@@ -21,9 +21,12 @@ import ast
 import collections
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
+
+_ATTEMPT_RE = re.compile(r"attempt_\d+")
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -62,19 +65,25 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     """
     rows: list[dict[str, Any]] = []
     for config_path in sorted(root.rglob("config.json")):
-        task_dir = config_path.parent
-        if not ((task_dir / "logs").is_dir() or (task_dir / "workdir").is_dir()):
+        run_dir = config_path.parent
+        if not ((run_dir / "logs").is_dir() or (run_dir / "workdir").is_dir()):
             continue  # a stray config.json, not a run dir
         config = _read_json(config_path)
         if config is None:
             continue
+        # n_attempts_per_task>1 nests each run one level deeper, as <task>/attempt_N: the run dir
+        # holds the artifacts, but the task name is its parent's.
+        task_dir = run_dir.parent if _ATTEMPT_RE.fullmatch(run_dir.name) else run_dir
+        attempt = int(run_dir.name.removeprefix("attempt_")) if task_dir is not run_dir else None
         stamp = task_dir.parent
-        rows.append(_run_row(stamp.parent.name, stamp.name, task_dir, config))
+        rows.append(
+            _run_row(stamp.parent.name, stamp.name, task_dir.name, run_dir, config, attempt)
+        )
     if all_stamps:
         return rows
-    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    latest: dict[tuple[str, str, Any], dict[str, Any]] = {}
     for row in rows:
-        key = (row["experiment"], row["task"])
+        key = (row["experiment"], row["task"], row["attempt"])
         if key not in latest or row["stamp"] > latest[key]["stamp"]:
             latest[key] = row
     return list(latest.values())
@@ -218,7 +227,14 @@ def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> st
     return "no-final"  # no exit reason recorded: still running / killed before teardown
 
 
-def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
+def _run_row(
+    experiment: str,
+    stamp: str,
+    task: str,
+    task_dir: Path,
+    config: dict[str, Any],
+    attempt: int | None = None,
+) -> dict[str, Any]:
     agent = config.get("agent", {})
     model = str(agent.get("model") or "?").removeprefix("openai/")
     state = _read_json(task_dir / "logs" / "experiment_state.json") or {}
@@ -237,7 +253,8 @@ def _run_row(experiment: str, stamp: str, task_dir: Path, config: dict[str, Any]
     return {
         "experiment": experiment,
         "stamp": stamp,
-        "task": task_dir.name,
+        "task": task,
+        "attempt": attempt,
         "agent": agent.get("name", "?"),
         "model": model,
         "seed": (config.get("problem") or {}).get("seed"),
@@ -266,14 +283,30 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _cell(values: list[Any]) -> str:
+    """One cell from every attempt of a (task, model): the point of running N attempts is to
+    aggregate them, so numbers average and labels collapse to the majority (``value n/N`` when
+    the attempts disagree)."""
+    present = [v for v in values if v is not None]
+    if not present:
+        return "-"
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in present):
+        mean = sum(present) / len(present)
+        return _fmt(mean) if len(present) == 1 else f"{mean:.2f} ({len(present)})"
+    top, count = collections.Counter(str(v) for v in present).most_common(1)[0]
+    return top if count == len(present) else f"{top} {count}/{len(present)}"
+
+
 def _pivot(rows: list[dict[str, Any]], field: str) -> str:
-    """One row per task, one column per model, cells = ``field`` of that run."""
+    """One row per task, one column per model; each cell aggregates that pair's attempts."""
     models = sorted({row["model"] for row in rows})
     tasks = sorted({row["task"] for row in rows})
-    by_key = {(row["task"], row["model"]): row for row in rows}
+    grouped: dict[tuple[str, str], list[Any]] = {}
+    for row in rows:
+        grouped.setdefault((row["task"], row["model"]), []).append(row.get(field))
     lines = ["| task | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
     for task in tasks:
-        cells = [_fmt(by_key[(task, m)][field]) if (task, m) in by_key else "-" for m in models]
+        cells = [_cell(grouped.get((task, m), [])) for m in models]
         lines.append(f"| {task} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
