@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Callable
 
 from regact.agent.base import CodeAgent
 from regact.agent.capabilities import Capabilities
-from regact.agent.events import AgentEvent, TurnComplete
+from regact.agent.events import AgentEvent, IterationComplete
 from regact.tools.base import Tool
 
 
@@ -48,7 +48,7 @@ class ScriptedAgent(CodeAgent):
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
         self.sent.append(message)
-        events = self._turns[self._turn] if self._turn < len(self._turns) else [TurnComplete()]
+        events = self._turns[self._turn] if self._turn < len(self._turns) else [IterationComplete()]
         self._turn += 1
         for event in events:
             yield event

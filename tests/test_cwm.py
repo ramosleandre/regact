@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from regact.agent.events import TextDelta, ToolCall, TurnComplete
+from regact.agent.events import IterationComplete, TextDelta, ToolCall
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.loader import run_config_from_mapping
 from regact.config.schema import (
@@ -553,14 +553,14 @@ async def test_run_task_with_cwm_records_and_verifies(tmp_path: Path) -> None:
     )
     agent = _WritingAgent(
         [
-            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), TurnComplete()],
-            [ToolCall("c2", "ExitTask", {}), TurnComplete()],
+            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), IterationComplete()],
+            [ToolCall("c2", "ExitTask", {}), IterationComplete()],
         ]
     )
     reason = await run_task(
         config, _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent
     )
-    assert reason == "agent_exit"
+    assert reason == "solved"  # the perfect submission ends the run before the agent's ExitTask
 
     workdir = tmp_path / "workdir"
     assert (workdir / "world_model" / "verify.py").exists()

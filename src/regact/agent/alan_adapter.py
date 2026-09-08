@@ -16,11 +16,11 @@ from typing import Any
 from regact.agent.events import (
     AgentError,
     AgentEvent,
+    IterationComplete,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
 )
 from regact.obs.errors import ErrorCategory
 
@@ -129,8 +129,8 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
       re-carried verbatim by the assembled message — dropped here so text and
       thinking appear exactly once;
     - assembled ``AssistantMessage`` (a ``.content`` list of TextBlock/ThinkingBlock/
-      ToolUseBlock) - unpacked into its events and closed with a ``TurnComplete`` that
-      marks the completion boundary (one completion = one turn) and carries its usage;
+      ToolUseBlock) - unpacked into its events and closed with an ``IterationComplete`` that
+      marks the completion boundary (one completion = one iteration) and carries its usage;
     - ``UserMessage`` — tool results come back as a ``.content`` list holding
       ``ToolResultBlock`` items, unpacked into ``ToolResult`` events; plain-string
       user messages are model-facing context and map to nothing.
@@ -173,13 +173,13 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
                         input=getattr(block, "input", {}) or {},
                     )
                 )
-        # One completion = one turn: close every assembled message with a TurnComplete
-        # (carrying its own usage), so the viewer groups per completion and per-turn usage
-        # is accurate. A bash-only agent calls a tool every turn, so gating this on
+        # One completion = one iteration: close every assembled message with an IterationComplete
+        # (carrying its own usage), so the viewer groups per completion and per-iteration usage
+        # is accurate. A bash-only agent calls a tool every completion, so gating this on
         # "no tool call" (the old behaviour) emitted almost none and the viewer collapsed
-        # the whole run into a single "turn".
+        # the whole run into a single group.
         events.append(
-            TurnComplete(
+            IterationComplete(
                 final_text="".join(texts),
                 usage=_usage_dict(getattr(native, "usage", None)),
             )
@@ -226,8 +226,8 @@ def _map_legacy(native: Any) -> AgentEvent | None:
             output=_result_text(getattr(native, "content", "")),
             is_error=bool(getattr(native, "is_error", False)),
         )
-    if kind in ("ResultMessage", "TurnComplete"):
-        return TurnComplete(
+    if kind in ("ResultMessage", "TurnComplete"):  # native alancode terminal-message class names
+        return IterationComplete(
             final_text=getattr(native, "result", getattr(native, "final_text", "")) or "",
             usage=_usage_dict(getattr(native, "usage", None)),
         )

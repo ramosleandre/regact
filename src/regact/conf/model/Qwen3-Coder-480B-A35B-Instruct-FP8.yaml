@@ -1,0 +1,21 @@
+# @package _global_
+# Per-model hyperparameters for a SERVED model on the alan path. Compose as
+# `agent=alan model=Qwen3-Coder-480B-A35B-Instruct-FP8`. Holds only model-intrinsic facts; the
+# per-serve knobs (base_url, and context_window when the deployment differs) are launch overrides.
+agent:
+  model: openai/Qwen3-Coder-480B-A35B-Instruct-FP8
+  # Tool-call dialect is model-intrinsic (Magos measured on JZ, 2026-09-08): served parser-less, the
+  # model returns raw <tool_call><function=..><parameter=..> markup = hermes_xml. tool_protocol
+  # teaches the regact prompt that markup + routes framework tools over the control CLI; the client
+  # extractor (tool_call_format=auto) parses it. This exact pair is E2E-verified on the JZ stack
+  # (18 real tool calls, a SubmitSolution + ExitTask, success_rate 1.0). auto also handles a
+  # parser-ful serve (it detects structured calls), so it needs no launch override either way.
+  args:
+    tool_protocol: hermes_xml
+    tool_call_format: auto
+    # Hard input ceiling measured on the JZ serve (Magos, 2026-09-08): the server returns HTTP 400
+    # "Input length exceeds the maximum allowed length (220643)" past this - NOT the advertised
+    # 262144. alancode reserves max_output_tokens from this, so prompt+output stay under the pool.
+    # Deployment-specific: a different TP/node count gives a different pool - the PJ overrides it.
+    context_window: 220643
+    max_output_tokens: 16000

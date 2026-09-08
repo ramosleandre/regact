@@ -295,7 +295,7 @@ def _load_events(path: Path) -> list[dict[str, Any]]:
 
 
 def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
-    """Fold the flat event stream into turns (one per TurnComplete / error)."""
+    """Fold the flat event stream into groups (one per IterationComplete / error)."""
     turns: list[TurnView] = []
     current = TurnView()
     by_id: dict[str, ToolCallView] = {}
@@ -305,8 +305,8 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
         if current.items or current.usage or current.error:
             turns.append(current)
         current = TurnView()
-        # by_id is NOT reset: the alan adapter emits a TurnComplete per completion, so a
-        # ToolResult can arrive a turn after its ToolCall and must still pair to it (ids
+        # by_id is NOT reset: the alan adapter emits an IterationComplete per completion, so a
+        # ToolResult can arrive a group after its ToolCall and must still pair to it (ids
         # are unique per call, so a persistent map cannot mis-pair).
 
     for event in events:
@@ -332,7 +332,7 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
             if target is not None:
                 target.result = str(event.get("output", ""))
                 target.is_error = bool(event.get("is_error", False))
-        elif kind == "TurnComplete":
+        elif kind in ("IterationComplete", "TurnComplete"):  # "TurnComplete" = pre-rename bench 01
             current.usage = event.get("usage")
             flush()
         elif kind == "AgentError":

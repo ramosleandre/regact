@@ -15,12 +15,12 @@ from typing import IO, Any
 from regact.agent.events import (
     AgentError,
     AgentEvent,
+    IterationComplete,
     SystemPrompt,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
     UserMessage,
 )
 from regact.obs.errors import ErrorCategory
@@ -62,12 +62,14 @@ _EVENT_TYPES: dict[str, type] = {
         ThinkingDelta,
         ToolCall,
         ToolResult,
-        TurnComplete,
+        IterationComplete,
         AgentError,
         SystemPrompt,
         UserMessage,
     )
 }
+# Back-compat: pre-rename transcripts (bench 01) tagged the per-completion event "TurnComplete".
+_EVENT_TYPES["TurnComplete"] = IterationComplete
 
 
 def event_from_json(obj: dict[str, Any]) -> AgentEvent | None:

@@ -19,12 +19,12 @@ from regact.agent.base import build_agent
 from regact.agent.events import (
     AgentError,
     AgentEvent,
+    IterationComplete,
     SystemPrompt,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
     UserMessage,
 )
 from regact.config.schema import AgentConfig, AgentName
@@ -36,7 +36,7 @@ _EVENTS: list[AgentEvent] = [
     ThinkingDelta(text="hmm"),
     ToolCall(id="1", name="Bash", input={"command": "ls"}),
     ToolResult(id="1", output="files", is_error=False),
-    TurnComplete(final_text="done", usage={"output_tokens": 3}),
+    IterationComplete(final_text="done", usage={"output_tokens": 3}),
     AgentError(category=ErrorCategory.AGENT_API, message="boom"),
     SystemPrompt(text="brief"),
     UserMessage(text="go"),

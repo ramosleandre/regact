@@ -19,10 +19,14 @@ _TRANSCRIPT = [
     {"type": "ToolResult", "id": "t1", "output": "files", "is_error": False},
     {"type": "ToolCall", "id": "t2", "name": "SubmitSolution", "input": {}},
     {"type": "ToolResult", "id": "t2", "output": "scored", "is_error": False},
-    {"type": "TurnComplete", "final_text": "", "usage": {"output_tokens": 12, "input_tokens": 100}},
+    {
+        "type": "IterationComplete",
+        "final_text": "",
+        "usage": {"output_tokens": 12, "input_tokens": 100},
+    },
     {"type": "ToolCall", "id": "t3", "name": "Bash", "input": {"command": "echo"}},
     {"type": "ToolResult", "id": "t3", "output": "ok", "is_error": False},
-    {"type": "TurnComplete", "usage": {"output_tokens": 5}},
+    {"type": "IterationComplete", "usage": {"output_tokens": 5}},
 ]
 
 
@@ -93,16 +97,34 @@ def test_transcript_folds_into_turns(tmp_path: Path) -> None:
     assert first.thinkings == ["let me probe"] and first.texts == ["Exploring."]
 
 
+def test_legacy_turn_complete_tag_still_folds(tmp_path: Path) -> None:
+    """A pre-rename transcript (bench 01) tags completions 'TurnComplete'; the viewer folds it."""
+    legacy = [
+        {"type": "ToolCall", "id": "a", "name": "Bash", "input": {"command": "ls"}},
+        {"type": "TurnComplete", "usage": {"output_tokens": 3}},
+        {"type": "ToolCall", "id": "b", "name": "Bash", "input": {"command": "echo"}},
+        {"type": "TurnComplete", "usage": {"output_tokens": 4}},
+    ]
+    game = tmp_path / "exp" / "g"
+    (game / "logs").mkdir(parents=True)
+    (game / "logs" / "experiment_state.json").write_text(
+        json.dumps({"problem_name": "arc_agi", "task_name": "g"})
+    )
+    (game / "logs" / "transcript.jsonl").write_text("\n".join(json.dumps(e) for e in legacy))
+    view = load_game(str(tmp_path / "exp"), "g")
+    assert len(view.turns) == 2  # both legacy TurnComplete markers flushed a group
+
+
 def test_result_pairs_across_a_turn_boundary(tmp_path: Path) -> None:
     # Per-completion pattern (the alan adapter closes every completion with a
-    # TurnComplete): a ToolResult arrives AFTER its call's turn was flushed, and must
+    # IterationComplete): a ToolResult arrives AFTER its call's turn was flushed, and must
     # still pair to that call (persistent id map). Each completion is its own turn.
     transcript = [
         {"type": "ToolCall", "id": "a", "name": "Bash", "input": {"command": "ls"}},
-        {"type": "TurnComplete", "usage": {"output_tokens": 3}},
+        {"type": "IterationComplete", "usage": {"output_tokens": 3}},
         {"type": "ToolResult", "id": "a", "output": "files", "is_error": False},
         {"type": "ToolCall", "id": "b", "name": "Bash", "input": {"command": "cat x"}},
-        {"type": "TurnComplete", "usage": {"output_tokens": 4}},
+        {"type": "IterationComplete", "usage": {"output_tokens": 4}},
         {"type": "ToolResult", "id": "b", "output": "boom", "is_error": True},
     ]
     game = tmp_path / "exp" / "g"
@@ -159,7 +181,7 @@ def test_cheat_call_is_tagged(tmp_path: Path) -> None:
     events = [
         {"type": "ToolCall", "id": "c1", "name": "Bash", "input": cheat},
         {"type": "ToolResult", "id": "c1", "output": "x", "is_error": False},
-        {"type": "TurnComplete", "usage": {}},
+        {"type": "IterationComplete", "usage": {}},
     ]
     (game_dir / "logs" / "transcript.jsonl").write_text("\n".join(json.dumps(e) for e in events))
     game = load_game(str(tmp_path / "exp"), "g")

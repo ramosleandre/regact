@@ -12,11 +12,11 @@ from regact.agent.claude_adapter import ClaudeAgent
 from regact.agent.codex_adapter import CodexAgent
 from regact.agent.events import (
     AgentError,
+    IterationComplete,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
 )
 from regact.config.schema import AgentConfig, AgentName
 
@@ -138,7 +138,7 @@ def test_claude_parses_tool_result_and_result() -> None:
     assert agent._parse_events(user) == [ToolResult("t1", "ok", False)]
 
     done = {"type": "result", "subtype": "success", "result": "all done", "usage": {"in": 5}}
-    assert agent._parse_events(done) == [TurnComplete("all done", {"in": 5})]
+    assert agent._parse_events(done) == [IterationComplete("all done", {"in": 5})]
 
 
 def test_claude_result_error_becomes_agent_error() -> None:
@@ -199,7 +199,7 @@ def test_codex_parses_message_reasoning_command_and_completion() -> None:
         == []
     )
     assert agent._parse_events({"type": "turn.completed", "item": {"text": "fin"}}) == [
-        TurnComplete("fin")
+        IterationComplete("fin")
     ]
 
 

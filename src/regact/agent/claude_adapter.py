@@ -22,11 +22,11 @@ from regact.agent.cli_agent import _CliAgent
 from regact.agent.events import (
     AgentError,
     AgentEvent,
+    IterationComplete,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
 )
 from regact.obs.errors import ErrorCategory
 from regact.security.policy import SecurityPolicy, default_policy
@@ -247,7 +247,7 @@ class ClaudeAgent(_CliAgent):
                 return [AgentError(ErrorCategory.AGENT_API, _text_of(obj.get("result")))]
             usage = obj.get("usage")
             return [
-                TurnComplete(
+                IterationComplete(
                     final_text=_text_of(obj.get("result")),
                     usage=usage if isinstance(usage, dict) else None,
                 )

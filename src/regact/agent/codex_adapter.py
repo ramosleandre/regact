@@ -22,11 +22,11 @@ from regact.agent.capabilities import Capabilities
 from regact.agent.cli_agent import _CliAgent
 from regact.agent.events import (
     AgentEvent,
+    IterationComplete,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
 )
 
 
@@ -177,7 +177,7 @@ class CodexAgent(_CliAgent):
             return []  # item.updated and other intermediate frames
 
         if kind.endswith("turn.completed") or kind.endswith("turn_complete"):
-            return [TurnComplete(final_text=_text_of(item.get("text")))]
+            return [IterationComplete(final_text=_text_of(item.get("text")))]
         message = item.get("message")
         text = item.get("text") or (message if isinstance(message, str) else None)
         if text:

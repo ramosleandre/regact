@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from regact.agent.events import TextDelta, ToolCall, TurnComplete
+from regact.agent.events import IterationComplete, TextDelta, ToolCall
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import (
     AgentConfig,
@@ -97,15 +97,15 @@ def _config() -> RunConfig:
 async def test_run_task_end_to_end(tmp_path: Path) -> None:
     agent = _WritingAgent(
         [
-            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), TurnComplete()],
-            [ToolCall("c2", "ExitTask", {}), TurnComplete()],
+            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), IterationComplete()],
+            [ToolCall("c2", "ExitTask", {}), IterationComplete()],
         ]
     )
     reason = await run_task(
         _config(), _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent
     )
 
-    assert reason == "agent_exit"
+    assert reason == "solved"  # the perfect submission ends the run before the agent's ExitTask
     assert agent.started and agent.closed
 
     logs = tmp_path / "logs"
@@ -135,7 +135,7 @@ async def test_run_task_end_to_end(tmp_path: Path) -> None:
     # Framework actions and finalization land in the operational log.
     events = [json.loads(line) for line in (logs / "events.jsonl").read_text().splitlines()]
     executed = [e["detail"]["tool"] for e in events if e["event"] == "tool_executed"]
-    assert "SubmitSolution" in executed and "ExitTask" in executed
+    assert "SubmitSolution" in executed  # ExitTask never runs: the perfect submission ends the run
     assert any(e["event"] == "hook_executed" for e in events)
 
 
@@ -260,8 +260,8 @@ async def test_run_task_records_endpoint_and_resolved_window(tmp_path: Path) -> 
 
     agent = _InfoAgent(
         [
-            [ToolCall("c1", "SubmitSolution", {}), TurnComplete()],
-            [ToolCall("c2", "ExitTask", {}), TurnComplete()],
+            [ToolCall("c1", "SubmitSolution", {}), IterationComplete()],
+            [ToolCall("c2", "ExitTask", {}), IterationComplete()],
         ]
     )
     await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent)
@@ -271,3 +271,22 @@ async def test_run_task_records_endpoint_and_resolved_window(tmp_path: Path) -> 
     assert state["context_window"] == 32768
     assert state["context_window_source"] == "fallback"  # the silent-32k tell, now in the artifact
     assert state["schema_version"] == 3
+
+
+async def test_run_task_records_configured_window_when_agent_reports_none(tmp_path: Path) -> None:
+    """When the agent surfaces no resolved window (_WritingAgent.resolved_model_info -> None, as a
+    run ending inside its first turn does - the turn-end frame is never consumed), the PASSED window
+    is recorded as the baseline, reserving null for a genuinely unconfigured window (silent-32k)."""
+    config = _config()
+    config.agent.args["context_window"] = 65536
+    agent = _WritingAgent(
+        [
+            [ToolCall("c1", "SubmitSolution", {}), IterationComplete()],
+            [ToolCall("c2", "ExitTask", {}), IterationComplete()],
+        ]
+    )
+    await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent)
+
+    state = json.loads((tmp_path / "logs" / "experiment_state.json").read_text())
+    assert state["context_window"] == 65536
+    assert state["context_window_source"] == "config"

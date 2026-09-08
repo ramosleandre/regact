@@ -132,6 +132,16 @@ def _bridged(wrapper: Wrapper, mirror: LoopbackMirror | None, ports: Sequence[in
     return lambda argv: wrapper([*prefix, *argv])
 
 
+def _as_int(value: Any) -> int | None:
+    """Coerce a config value to int (Hydra/env interpolation can yield a str); None if it can't."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _seed_alan_iteration_budget(agent: AgentConfig, limits: LimitsConfig) -> None:
     """limits.max_tool_calls Layer 2: on the alan path, seed alancode's inner cap
     (``max_iterations_per_turn``) from the tool-call budget so a single ``query()`` yields near it,
@@ -290,6 +300,8 @@ async def run_task(
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
+    # Before config.json is written, so the artifact records the inner cap the run used.
+    _seed_alan_iteration_budget(config.agent, config.limits)
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
         json.dump(redacted_config_dict(config), handle, indent=2, default=str)
 
@@ -317,7 +329,11 @@ async def run_task(
                 problem_name=problem.name,
                 task_name=task_name,
                 problem_kwargs=dict(config.problem.kwargs),
-                base_url=config.agent.base_url,  # record which endpoint the run used
+                base_url=config.agent.base_url,
+                context_window=_as_int(config.agent.args.get("context_window")),
+                context_window_source=(
+                    "config" if config.agent.args.get("context_window") is not None else None
+                ),
             )
             src_dir = _regact_src_dir()
             deny_read = _secret_module_paths(problem.secret_modules())
@@ -384,7 +400,6 @@ async def run_task(
             tools: list[Tool] = [LoggingTool(tool, logger) for tool in tool_specs]
             hooks = [*controller.hooks(deps), *(h for f in features for h in f.hooks(deps))]
 
-            _seed_alan_iteration_budget(config.agent, config.limits)
             agent = agent or build_agent(config.agent)
             caps = agent.capabilities()
             # Every non-native protocol reaches the framework tools over the workdir control CLI, so
@@ -535,6 +550,8 @@ async def run_task(
                     move_count=lambda: server.total_action_count(task_name),
                     stop=stop,
                     flagging_warning_cap=config.flagging_warning_cap,
+                    exit_task_enabled=config.controller.exit_task_enabled,
+                    is_perfect=problem.is_perfect,
                 )
             finally:  # always release the agent subprocess + network plumbing, even on a crash
                 await agent.close()

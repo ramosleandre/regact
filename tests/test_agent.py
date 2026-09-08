@@ -8,10 +8,10 @@ from regact.agent.base import CodeAgent, build_agent
 from regact.agent.capabilities import Capabilities
 from regact.agent.events import (
     AgentError,
+    IterationComplete,
     TextDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
 )
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import AgentConfig, AgentName
@@ -24,8 +24,8 @@ async def _drain(agent: CodeAgent, message: str) -> list[object]:
 
 async def test_scripted_agent_replays_turns() -> None:
     turns = [
-        [TextDelta("thinking out loud"), ToolCall("t1", "make_env", {}), TurnComplete("done")],
-        [TextDelta("second turn"), TurnComplete("bye")],
+        [TextDelta("thinking out loud"), ToolCall("t1", "make_env", {}), IterationComplete("done")],
+        [TextDelta("second turn"), IterationComplete("bye")],
     ]
     agent = ScriptedAgent(turns)
     await agent.start(
@@ -47,7 +47,7 @@ async def test_scripted_agent_replays_turns() -> None:
 async def test_scripted_agent_default_turn_when_exhausted() -> None:
     agent = ScriptedAgent([])
     events = await _drain(agent, "go")
-    assert len(events) == 1 and isinstance(events[0], TurnComplete)
+    assert len(events) == 1 and isinstance(events[0], IterationComplete)
 
 
 async def test_scripted_agent_records_inject_abort_close() -> None:
@@ -123,7 +123,7 @@ def test_alan_event_mapping() -> None:
     assert m(TextBlock()) == TextDelta("hi")
     assert m(ToolUseBlock()) == ToolCall("t1", "submit_solution", {"path": "c.py"})
     assert m(ToolResultBlock()) == ToolResult("t1", "scored", False)
-    assert m(ResultMessage()) == TurnComplete("final", {"in": 10})
+    assert m(ResultMessage()) == IterationComplete("final", {"in": 10})
     assert m(APIError()) == AgentError(ErrorCategory.AGENT_API, "rate limited")
     assert m(Unknown()) is None
 

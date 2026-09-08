@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from regact.agent.events import AgentError, TextDelta, ToolCall, TurnComplete
+from regact.agent.events import AgentError, IterationComplete, TextDelta, ToolCall
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import Lifecycle, LimitsConfig
 from regact.env.lifecycle import MultiInstancePolicy
@@ -87,7 +87,9 @@ class _Stack:
         self.state_path = str(self.logs / "experiment_state.json")
         self.limits = LimitsConfig(max_turns=10)
 
-    async def run(self, agent: ScriptedAgent, *, stop: StopSignal | None = None) -> str:
+    async def run(
+        self, agent: ScriptedAgent, *, stop: StopSignal | None = None, is_perfect=None
+    ) -> str:  # type: ignore[no-untyped-def]
         try:
             return await run_session(
                 agent,
@@ -101,6 +103,7 @@ class _Stack:
                 cwd=str(self.workdir),
                 hooks=self.hooks,
                 stop=stop,
+                is_perfect=is_perfect,
             )
         finally:
             self.transcript.close()
@@ -115,8 +118,8 @@ async def test_full_pipeline_submit_then_exit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     agent = ScriptedAgent(
         [
-            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), TurnComplete()],
-            [ToolCall("c2", "ExitTask", {}), TurnComplete()],
+            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), IterationComplete()],
+            [ToolCall("c2", "ExitTask", {}), IterationComplete()],
         ]
     )
     reason = await stack.run(agent)
@@ -141,7 +144,7 @@ async def test_full_pipeline_submit_then_exit(tmp_path: Path) -> None:
 async def test_teardown_finalizes_when_agent_exits_without_resubmitting(tmp_path: Path) -> None:
     """The agent exits having never called SubmitSolution; finalize still scores solution.py."""
     stack = _Stack(tmp_path)
-    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), TurnComplete()]])
+    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), IterationComplete()]])
     reason = await stack.run(agent)
 
     assert reason == "agent_exit"
@@ -157,7 +160,13 @@ async def test_exit_mid_turn_stops_before_later_calls(tmp_path: Path) -> None:
     wait for the next send to honor the exit. Guards the ARC hang (28min post-ExitTask)."""
     stack = _Stack(tmp_path)
     agent = ScriptedAgent(
-        [[ToolCall("c1", "ExitTask", {}), ToolCall("c2", "SubmitSolution", {}), TurnComplete()]]
+        [
+            [
+                ToolCall("c1", "ExitTask", {}),
+                ToolCall("c2", "SubmitSolution", {}),
+                IterationComplete(),
+            ]
+        ]
     )
     reason = await stack.run(agent)
 
@@ -170,7 +179,7 @@ async def test_graceful_stop_still_finalizes(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stop = StopSignal()
     stop.set()  # pre-armed: the loop stops at the first safe point
-    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), TurnComplete()]])
+    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), IterationComplete()]])
     reason = await stack.run(agent, stop=stop)
 
     assert reason == "interrupted"
@@ -181,7 +190,7 @@ async def test_graceful_stop_still_finalizes(tmp_path: Path) -> None:
 async def test_pipeline_stops_on_persistent_backend_error(tmp_path: Path) -> None:
     """Only a wall of consecutive backend errors ends the run (transient ones retry)."""
     stack = _Stack(tmp_path)
-    error_turn = [AgentError(ErrorCategory.AGENT_API, "429"), TurnComplete()]
+    error_turn = [AgentError(ErrorCategory.AGENT_API, "429"), IterationComplete()]
     agent = ScriptedAgent([list(error_turn), list(error_turn), list(error_turn)])
     reason = await stack.run(agent)
 
@@ -195,8 +204,8 @@ async def test_pipeline_survives_a_transient_backend_error(tmp_path: Path) -> No
     stack = _Stack(tmp_path)
     agent = ScriptedAgent(
         [
-            [AgentError(ErrorCategory.AGENT_API, "500"), TurnComplete()],
-            [ToolCall("c1", "ExitTask", {}), TurnComplete()],
+            [AgentError(ErrorCategory.AGENT_API, "500"), IterationComplete()],
+            [ToolCall("c1", "ExitTask", {}), IterationComplete()],
         ]
     )
     reason = await stack.run(agent)
@@ -209,7 +218,7 @@ async def test_pipeline_survives_a_transient_backend_error(tmp_path: Path) -> No
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(max_turns=2)
-    agent = ScriptedAgent([])  # never calls ExitTask: each turn defaults to TurnComplete
+    agent = ScriptedAgent([])  # never calls ExitTask: each turn defaults to IterationComplete
     reason = await stack.run(agent)
 
     assert reason == "loop_limit"
@@ -221,12 +230,43 @@ async def test_pipeline_stops_on_tool_call_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
     # One Bash call per turn (never submits/exits); the loop counts every ToolCall event.
-    agent = ScriptedAgent([[ToolCall("c", "Bash", {}), TurnComplete()] for _ in range(6)])
+    agent = ScriptedAgent([[ToolCall("c", "Bash", {}), IterationComplete()] for _ in range(6)])
     reason = await stack.run(agent)
 
     assert reason == "tool_call_limit"
     assert stack.experiment.tool_calls_total == 3  # stopped exactly at the budget
     assert len(agent.sent) == 3  # three turns ran; the cap fired before the fourth
+
+
+async def test_pipeline_aborts_mid_send_at_the_tool_call_budget(tmp_path: Path) -> None:
+    """The budget is enforced MID-send: one send() emitting more calls than the budget is cut off at
+    it, not after (the CLI agents run their whole loop in one send() with no inner tool knob)."""
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
+    # A single send() emitting five Bash calls: the loop must stop after the third, not run all 5.
+    calls = [ToolCall(f"c{i}", "Bash", {}) for i in range(5)]
+    agent = ScriptedAgent([[*calls, IterationComplete()]])
+    reason = await stack.run(agent)
+
+    assert reason == "tool_call_limit"
+    assert stack.experiment.tool_calls_total == 3  # cut off mid-send, not the 5 it would have run
+    assert len(agent.sent) == 1  # it all happened inside the first (and only) send
+
+
+async def test_pipeline_stops_when_a_submission_is_perfect(tmp_path: Path) -> None:
+    """With is_perfect, a perfect submission ends the run at once - no ExitTask, budget to spare."""
+    stack = _Stack(tmp_path)
+    agent = ScriptedAgent(
+        [
+            [ToolCall("c1", "SubmitSolution", {}), IterationComplete()],  # _FORWARD solves -> 1.0
+            [ToolCall("c2", "Bash", {}), IterationComplete()],  # must NOT run: the run stops first
+        ]
+    )
+    reason = await stack.run(agent, is_perfect=lambda agg: agg.get("success_rate", 0) >= 1.0)
+
+    assert reason == "solved"
+    assert stack.experiment.submission_count == 1
+    assert len(agent.sent) == 1  # stopped right after the perfect submission
 
 
 async def test_doom_loop_breaker_stops_a_no_tool_agent(tmp_path: Path) -> None:
@@ -278,7 +318,7 @@ async def test_pipeline_survives_tool_crash(tmp_path: Path) -> None:
             raise RuntimeError("kaboom")
 
     stack = _Stack(tmp_path, tools=[_BoomTool()])
-    agent = ScriptedAgent([[ToolCall("c1", "Boom", {}), TurnComplete()]])
+    agent = ScriptedAgent([[ToolCall("c1", "Boom", {}), IterationComplete()]])
     reason = await stack.run(agent)
 
     assert reason == "loop_crash"
@@ -290,7 +330,7 @@ async def test_pipeline_stops_on_interrupt(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stop = StopSignal()
     stop.set()  # interrupted before the first turn
-    agent = ScriptedAgent([[ToolCall("c1", "SubmitSolution", {}), TurnComplete()]])
+    agent = ScriptedAgent([[ToolCall("c1", "SubmitSolution", {}), IterationComplete()]])
     reason = await stack.run(agent, stop=stop)
 
     assert reason == "interrupted"

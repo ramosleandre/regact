@@ -83,6 +83,46 @@ def test_decide_stop_tool_call_limit() -> None:
     assert reason == "tool_call_limit"
 
 
+def test_decide_stop_solved_beats_exit_and_limits() -> None:
+    limits = LimitsConfig(max_turns=100)
+    # A perfect submission stops successfully even with budget left and an exit pending.
+    assert (
+        _decide_stop(
+            exit_requested=True,
+            interrupted=False,
+            turns=0,
+            elapsed_s=0.0,
+            limits=limits,
+            solved=True,
+        )
+        == "solved"
+    )
+    # ...but a hard interrupt still wins over it.
+    assert (
+        _decide_stop(
+            exit_requested=False,
+            interrupted=True,
+            turns=0,
+            elapsed_s=0.0,
+            limits=limits,
+            solved=True,
+        )
+        == "interrupted"
+    )
+    # Not solved -> keep going.
+    assert (
+        _decide_stop(
+            exit_requested=False,
+            interrupted=False,
+            turns=0,
+            elapsed_s=0.0,
+            limits=limits,
+            solved=False,
+        )
+        is None
+    )
+
+
 def test_acted_without_submitting_is_the_shape3_signature() -> None:
     # Acted (tool calls), never submitted, exited on walltime = unbound channel / doom loop.
     assert _acted_without_submitting("walltime_limit", 0, 43) is True

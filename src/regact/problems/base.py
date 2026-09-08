@@ -118,6 +118,12 @@ class BaseProblem(ABC):
         """Roll per-episode metrics into a run aggregate."""
         ...
 
+    def is_perfect(self, aggregate: dict[str, Any]) -> bool:
+        """Whether a submission's aggregate is a PERFECT solve - the loop may then stop the run
+        early. Default: ``success_rate >= 1.0``. Override where 'perfect' is a different metric
+        (e.g. ARC's full level-completion)."""
+        return float(aggregate.get("success_rate", 0.0)) >= 1.0
+
     def derived_submission_metrics(
         self, task_name: str, raw_episodes: list[dict[str, Any]]
     ) -> dict[str, Any]:

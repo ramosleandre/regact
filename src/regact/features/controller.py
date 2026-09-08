@@ -130,6 +130,20 @@ def get_controller() -> Controller:
 # (like the system + game prompts), so prose is edited without touching code.
 _PROMPT_MD = Path(__file__).parent / "prompts" / "controller.md"
 
+# Fills {{FINISH_INSTRUCTIONS}} in controller.md, per ControllerConfig.exit_task_enabled.
+_FINISH_WITH_EXIT = (
+    "`SubmitSolution` and `ExitTask` are NOT callable tools - they are run from your working "
+    "directory as `python framework/control.py <ToolName>`. When you have finished - your best "
+    "controller is in `solution.py` and you do not wish to improve it further - end the run with "
+    "`python framework/control.py ExitTask`."
+)
+_FINISH_NO_EXIT = (
+    "`SubmitSolution` is NOT a callable tool - it is run from your working directory as "
+    "`python framework/control.py SubmitSolution`. You cannot end the run yourself: keep improving "
+    "`solution.py` and re-submitting your best controller. The run ends automatically when your "
+    "controller reaches a perfect score or you exhaust your tool-call budget - so use the budget."
+)
+
 
 def _make_executor(deps: RunDeps, *, shadow_replay: bool) -> ControllerExecutor | SandboxedExecutor:
     """Pick how the controller is evaluated: a sandboxed subprocess for real runs (a
@@ -237,11 +251,13 @@ class Controller:
         max_moves: int = 2500,
         n_videos: int = 2,
         shadow_replay: bool = False,
+        exit_task_enabled: bool = True,
     ) -> None:
         self._n_episodes = int(n_episodes)
         self._max_moves = int(max_moves)
         self._n_videos = int(n_videos)
         self._shadow_replay = bool(shadow_replay)
+        self._exit_task_enabled = bool(exit_task_enabled)
 
     @classmethod
     def from_config(cls, config: ControllerConfig) -> Controller:
@@ -251,6 +267,7 @@ class Controller:
             max_moves=config.max_moves,
             n_videos=config.n_videos,
             shadow_replay=config.shadow_replay,
+            exit_task_enabled=config.exit_task_enabled,
         )
 
     def templates(self, ctx: FeatureContext) -> list[TemplateFile]:
@@ -262,7 +279,8 @@ class Controller:
         ]
 
     def prompt_fragment(self, ctx: FeatureContext) -> str | None:
-        return _PROMPT_MD.read_text(encoding="utf-8")
+        finish = _FINISH_WITH_EXIT if self._exit_task_enabled else _FINISH_NO_EXIT
+        return _PROMPT_MD.read_text(encoding="utf-8").replace("{{FINISH_INSTRUCTIONS}}", finish)
 
     def tools(self, deps: RunDeps) -> list[Tool]:
         # This feature owns the eval, so it also owns the eval fields of the state.
@@ -280,7 +298,7 @@ class Controller:
             n_videos=self._n_videos,
             feature_metrics=deps.feature_metrics,
         )
-        return [submit, ExitTask(deps.experiment)]
+        return [submit, ExitTask(deps.experiment)] if self._exit_task_enabled else [submit]
 
     def hooks(self, deps: RunDeps) -> list[Hook]:
         # ShadowReplayHook (anti-cheat) joins this list in Block 10.

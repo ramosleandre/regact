@@ -28,10 +28,8 @@ class ExperimentState:
     exit_requested: bool = False
     agent_session_id: str | None = None  # locates the native transcript dir
     base_url: str | None = None  # the model endpoint this run used (None = the agent's default)
-    # What the agent ACTUALLY ran at (alan path). source=="fallback" is a CONFIG ERROR: the served
-    # window was unknown, so a conservative default was used silently - a 32k agent on a big serve.
-    context_window: int | None = None
-    context_window_source: str | None = None
+    context_window: int | None = None  # the window this run used; null = unconfigured
+    context_window_source: str | None = None  # "config" = passed; else alancode's, e.g. "fallback"
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
     exit_reason: str | None = None  # set at teardown; None while the run is still going

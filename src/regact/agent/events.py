@@ -46,8 +46,8 @@ class ToolResult:
 
 
 @dataclass
-class TurnComplete:
-    """The agent finished one turn."""
+class IterationComplete:
+    """The agent finished one iteration - one completion and its tool cycle."""
 
     final_text: str = ""
     usage: dict[str, Any] | None = None
@@ -80,7 +80,7 @@ AgentEvent = (
     | ThinkingDelta
     | ToolCall
     | ToolResult
-    | TurnComplete
+    | IterationComplete
     | AgentError
     | SystemPrompt
     | UserMessage

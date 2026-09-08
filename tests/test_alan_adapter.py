@@ -3,7 +3,7 @@
 The load-bearing invariants: ``query_events_async`` yields whole messages, not blocks —
 streaming display deltas (``AssistantMessage`` with ``hide_in_api=True``) must be dropped
 so text appears exactly once; the assembled ``AssistantMessage`` must be unpacked into
-its events, deriving ``TurnComplete`` when it ends the turn (no tool call); and tool
+its events, deriving ``IterationComplete`` when it ends the turn (no tool call); and tool
 results, which come back wrapped in a ``UserMessage`` content list, must be unpacked into
 ``ToolResult`` events. These tests pin that mapping with stand-ins that mimic alancode's
 classes by name (the adapter dispatches on class name).
@@ -16,11 +16,11 @@ import types
 from regact.agent.alan_adapter import build_alan_agent, map_alan_events
 from regact.agent.events import (
     AgentError,
+    IterationComplete,
     TextDelta,
     ThinkingDelta,
     ToolCall,
     ToolResult,
-    TurnComplete,
 )
 
 
@@ -104,7 +104,7 @@ def test_hidden_streaming_message_dropped() -> None:
 def test_terminal_message_derives_turn_complete() -> None:
     msg = AssistantMessage([TextBlock("done.")], usage=Usage(input_tokens=10, output_tokens=2))
     events = map_alan_events(msg)
-    assert [type(e).__name__ for e in events] == ["TextDelta", "TurnComplete"]
+    assert [type(e).__name__ for e in events] == ["TextDelta", "IterationComplete"]
     turn = events[-1]
     assert turn.final_text == "done."
     assert turn.usage == {"input_tokens": 10, "output_tokens": 2}
@@ -112,16 +112,16 @@ def test_terminal_message_derives_turn_complete() -> None:
 
 def test_message_with_tool_call_ends_with_turn_complete() -> None:
     # Every completion is a turn boundary (one completion = one viz turn), so a tool-call
-    # message also closes with a TurnComplete carrying that completion's usage.
+    # message also closes with a IterationComplete carrying that completion's usage.
     msg = AssistantMessage([TextBlock("running"), ToolUseBlock("i", "Bash", {})])
     events = map_alan_events(msg)
-    assert [type(e).__name__ for e in events] == ["TextDelta", "ToolCall", "TurnComplete"]
+    assert [type(e).__name__ for e in events] == ["TextDelta", "ToolCall", "IterationComplete"]
 
 
 def test_assistant_thinking_only() -> None:
     events = map_alan_events(AssistantMessage([ThinkingBlock("hmm")]))
     assert isinstance(events[0], ThinkingDelta)
-    assert isinstance(events[-1], TurnComplete)  # no tool call: the turn ends here
+    assert isinstance(events[-1], IterationComplete)  # no tool call: the turn ends here
 
 
 def test_empty_text_block_dropped() -> None:
@@ -164,10 +164,10 @@ def test_full_turn_event_order() -> None:
     assert [type(e).__name__ for e in events] == [
         "TextDelta",
         "ToolCall",
-        "TurnComplete",  # the tool-call completion closes its own turn
+        "IterationComplete",  # the tool-call completion closes its own turn
         "ToolResult",
         "TextDelta",
-        "TurnComplete",
+        "IterationComplete",
     ]
     assert events[0].text == "I'll run X"  # once, not once per delta plus once assembled
     assert events[3].id == "t1" and events[3].output == "ok"

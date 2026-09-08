@@ -109,6 +109,7 @@ class ControllerConfig:
     # Record a video of the FIRST min(n_videos, n_episodes) eval episodes; 0 = no video.
     n_videos: int = 2
     shadow_replay: bool = False  # re-score by replaying actions on a trusted env (anti-cheat)
+    exit_task_enabled: bool = True  # False = agent cannot ExitTask; run ends on framework terms
 
 
 @dataclass

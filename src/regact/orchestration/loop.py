@@ -24,6 +24,7 @@ import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from regact.agent.base import CodeAgent
 from regact.agent.events import (
@@ -51,6 +52,12 @@ _KEEP_ALIVE_MESSAGE = (
     "Keep-alive reminder - continue working or finish your work: 1) produce a controller in "
     "solution.py, 2) submit it by running `python framework/control.py SubmitSolution`, 3) if you "
     "are satisfied with your solution, end the task with `python framework/control.py ExitTask`."
+)
+# Used when the agent cannot end its own run (exit_task_enabled=False): no ExitTask mention.
+_KEEP_ALIVE_MESSAGE_NO_EXIT = (
+    "Keep-alive reminder - keep improving your controller: 1) refine the controller in "
+    "solution.py, 2) submit it via `python framework/control.py SubmitSolution`, 3) keep "
+    "iterating until fully solving the task."
 )
 
 # Injected on the agent's next turn when a tool call is flagged (see config.flagging_warning_cap),
@@ -93,6 +100,7 @@ class _LoopContext:
     move_count: Callable[[], int] | None = None  # polls the env's step count, for the live state
     flagging_warning_cap: int = 0  # max flagging warnings to inject this task (0 = never)
     warnings_injected: int = 0  # how many have been injected so far (mutated as they fire)
+    max_tool_calls: int | None = None  # hard tool-call budget, enforced mid-send (None = off)
 
 
 @dataclass
@@ -120,9 +128,12 @@ async def run_session(
     stop: StopSignal | None = None,
     move_count: Callable[[], int] | None = None,
     flagging_warning_cap: int = 0,
+    exit_task_enabled: bool = True,
+    is_perfect: Callable[[dict[str, Any]], bool] | None = None,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
+    keep_alive = _KEEP_ALIVE_MESSAGE if exit_task_enabled else _KEEP_ALIVE_MESSAGE_NO_EXIT
     ctx = _LoopContext(
         agent=agent,
         experiment=experiment,
@@ -135,6 +146,7 @@ async def run_session(
         start=start,
         move_count=move_count,
         flagging_warning_cap=flagging_warning_cap,
+        max_tool_calls=limits.max_tool_calls,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -148,6 +160,8 @@ async def run_session(
     watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
     try:
         while True:
+            last = experiment.last_submission_results
+            solved = bool(is_perfect and last and is_perfect(last.get("aggregate", {})))
             reason = _decide_stop(
                 exit_requested=experiment.exit_requested,
                 interrupted=stop.is_set() if stop is not None else False,
@@ -155,6 +169,7 @@ async def run_session(
                 tool_calls_total=experiment.tool_calls_total,
                 elapsed_s=time.monotonic() - start,
                 limits=limits,
+                solved=solved,
             )
             if reason is not None:
                 break
@@ -194,7 +209,7 @@ async def run_session(
             if 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns:
                 reason = "no_tool_progress"
                 break
-            message = _KEEP_ALIVE_MESSAGE
+            message = keep_alive
     finally:
         if watchdog is not None:
             watchdog.cancel()
@@ -222,11 +237,11 @@ def _save_state(ctx: _LoopContext) -> None:
         ctx.experiment.env_moves = ctx.move_count()
     if ctx.experiment.agent_session_id is None:
         ctx.experiment.agent_session_id = ctx.agent.session_id()
-    if ctx.experiment.context_window is None:
-        info = ctx.agent.resolved_model_info()
-        if info:
-            ctx.experiment.context_window = info.get("context_window")
-            ctx.experiment.context_window_source = info.get("context_window_source")
+    info = ctx.agent.resolved_model_info()
+    resolved = info.get("context_window") if info else None
+    if resolved is not None:  # alancode's resolved window, when reported, wins over the baseline
+        ctx.experiment.context_window = resolved
+        ctx.experiment.context_window_source = info.get("context_window_source") or "alancode"
     ctx.experiment.save(ctx.state_path)
 
 
@@ -287,10 +302,13 @@ def _decide_stop(
     elapsed_s: float,
     limits: LimitsConfig,
     tool_calls_total: int = 0,
+    solved: bool = False,
 ) -> str | None:
     """Pure stop decision, checked before each turn. ``None`` means keep going."""
     if interrupted:
         return "interrupted"
+    if solved:  # a perfect submission - stop successfully, no need to burn the rest of the budget
+        return "solved"
     if exit_requested:
         return "agent_exit"
     if turns >= limits.max_turns:
@@ -330,6 +348,14 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
                 # itself - which it may never do before walltime (an ARC run spun 28min post-exit).
                 # abort() ends the send cleanly (backend synthesizes error results, transcript stays
                 # valid); the loop's next _decide_stop returns agent_exit.
+                await ctx.agent.abort()
+                break
+            if (
+                ctx.max_tool_calls is not None
+                and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
+            ):
+                # The CLI agents run their whole loop in one send() with no inner tool cap, so the
+                # budget must bind mid-send. abort() ends the send; the next _decide_stop stops.
                 await ctx.agent.abort()
                 break
     except Exception as exc:  # an unexpected fault in a tool or the adapter

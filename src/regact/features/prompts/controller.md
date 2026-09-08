@@ -9,6 +9,6 @@ We advise you follow this approach to solve the game:
 - 1.b) When needing to create/edit an exploration script, do it in `code_library/`.
 - 2) When needing to run a controller in an exploration script, edit the script to import the controller, and execute the script.
 - 3) After a script result, observe its output to understand the environment, and iterate on (1) on the controllers/scripts. Balance exploration and exploitation.
-- 4) Once you have a performing controller, submit it by importing it into `solution.py`'s `get_controller` function and running `python framework/control.py SubmitSolution`.
+- 4) Submit EARLY: as soon as your controller makes any progress at all, import it into `solution.py`'s `get_controller` function and run `python framework/control.py SubmitSolution` - do not wait until it performs well. Every submission is scored and the result is reported back to you, so it is your main feedback signal; keep iterating and re-submitting as it improves.
 
-`SubmitSolution` and `ExitTask` are NOT callable tools - they are run from your working directory as `python framework/control.py <ToolName>`. When you have finished - your best controller is in `solution.py` and you do not wish to improve it further - end the run with `python framework/control.py ExitTask`.
+{{FINISH_INSTRUCTIONS}}
