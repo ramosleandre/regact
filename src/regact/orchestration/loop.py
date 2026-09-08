@@ -60,6 +60,25 @@ _KEEP_ALIVE_MESSAGE_NO_EXIT = (
     "iterating until fully solving the task."
 )
 
+# Repeating one sentence does not convert a non-submitter: over 43 runs, submitters and
+# non-submitters got the same number of reminders (29.1 vs 27.9) and two ignored it 57 times.
+_ESCALATE_AFTER_REMINDERS = 10
+_KEEP_ALIVE_MESSAGE_ESCALATED = (
+    "You have now received {n} reminders and have not submitted anything. Submit NOW, even if "
+    "your controller is unfinished: run `python framework/control.py SubmitSolution`. Every "
+    "submission is scored and the result is returned to you, so submitting is how you find out "
+    "whether your controller works - keep improving it afterwards."
+)
+
+
+def _keep_alive_message(base: str, reminders: int, submissions: int) -> str:
+    """The reminder to send. Escalates once a run has been reminded repeatedly and still submitted
+    nothing - firing early only costs a stronger sentence, never the run."""
+    if submissions == 0 and reminders >= _ESCALATE_AFTER_REMINDERS:
+        return _KEEP_ALIVE_MESSAGE_ESCALATED.format(n=reminders)
+    return base
+
+
 # Injected on the agent's next turn when a tool call is flagged (see config.flagging_warning_cap),
 # so a model reaching for a sandboxed action learns why it failed and stops wasting budget on it.
 _FLAGGING_WARNING = (
@@ -159,6 +178,7 @@ async def run_session(
     turns = 0
     error_turns = 0  # consecutive turns that ended in a backend error
     no_tool_turns = 0  # consecutive turns that produced no tool call (doom-loop breaker)
+    reminders = 0
     watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
     try:
         while True:
@@ -209,7 +229,8 @@ async def run_session(
             if 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns:
                 reason = "no_tool_progress"
                 break
-            message = keep_alive
+            reminders += 1
+            message = _keep_alive_message(keep_alive, reminders, experiment.submission_count)
     finally:
         if watchdog is not None:
             watchdog.cancel()

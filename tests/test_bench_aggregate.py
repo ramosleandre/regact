@@ -208,3 +208,38 @@ def test_latest_stamp_still_wins_for_a_rerun_of_the_same_attempt(tmp_path: Path)
     kept = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
     assert len(kept) == 1
     assert kept[0]["success_rate"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("exit_reason", "success_rate", "submissions", "expected"),
+    [
+        ("walltime_limit", 0.4, 12, "capped"),  # iterated, earned its score
+        ("walltime_limit", 0.0, 1, "capped"),  # a scored zero is still the model's own
+        ("walltime_limit", 0.0, 0, "teardown"),  # scored only by FinalizeControllerHook
+        ("walltime_limit", 0.0, None, "teardown"),  # missing count reads as no submission
+        ("walltime_limit", None, 0, "starved"),
+        ("walltime_limit", None, 5, "starved"),  # submitted, but nothing scoreable came back
+        ("agent_exit", 0.4, 3, None),  # not a walltime cut at all
+        ("solved", 1.0, 2, None),
+    ],
+)
+def test_walltime_bucket(exit_reason, success_rate, submissions, expected) -> None:
+    row = {
+        "exit_reason": exit_reason,
+        "success_rate": success_rate,
+        "submissions": submissions,
+    }
+    assert bench_aggregate._walltime_bucket(row) == expected
+
+
+def test_walltime_buckets_partition_every_walltime_run() -> None:
+    """No walltime run may fall outside the three columns - a dropped run is invisible."""
+    rows = [
+        {"exit_reason": "walltime_limit", "success_rate": s, "submissions": n}
+        for s in (None, 0.0, 0.5)
+        for n in (None, 0, 7)
+    ]
+    buckets = [bench_aggregate._walltime_bucket(row) for row in rows]
+    assert None not in buckets
+    assert set(buckets) == {"capped", "teardown", "starved"}
+    assert len(buckets) == len(rows)

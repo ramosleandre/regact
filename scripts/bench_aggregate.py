@@ -303,6 +303,24 @@ def _run_row(
     }
 
 
+def _walltime_bucket(row: dict[str, Any]) -> str | None:
+    """Which kind of walltime cut this run was, or ``None`` if it did not hit the walltime.
+
+    One ``exit_reason`` covers two opposite outcomes. A run capped after genuinely iterating
+    carries a score the model earned; one that never submitted was scored only by
+    ``FinalizeControllerHook``, so the number is ours, not the model's - measured 0.003 mean
+    against 0.042 for the iterating group. Reporting them in one column credits a model for a
+    measurement we performed on its behalf. ``starved`` takes everything with no usable score,
+    including the few that submitted something unscoreable, so the three buckets partition
+    every walltime run.
+    """
+    if row.get("exit_reason") != "walltime_limit":
+        return None
+    if row.get("success_rate") is None:
+        return "starved"
+    return "capped" if (row.get("submissions") or 0) > 0 else "teardown"
+
+
 def coverage_markdown(rows: list[dict[str, Any]]) -> str:
     """Per-model coverage, because incomplete columns here are NOT missing at random.
 
@@ -313,8 +331,9 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
     tasks = {row["task"] for row in rows}
     models = sorted({row["model"] for row in rows})
     lines = [
-        "| model | tasks | attempts/task | shape | solved | budget-capped | walltime-cut | missing |",
-        "|---|---|---|---|---|---|---|---|",
+        "| model | tasks | attempts/task | shape | solved | budget-capped "
+        "| wt-capped | wt-teardown | wt-starved | missing |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for model in models:
         mine = [row for row in rows if row["model"] == model]
@@ -328,10 +347,12 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
         shape = "uniform" if low == high else "RAGGED"
         attempts = str(low) if low == high else f"{low}-{high}"
         reasons = collections.Counter(row.get("exit_reason") for row in mine)
+        walltime = collections.Counter(filter(None, (_walltime_bucket(row) for row in mine)))
         lines.append(
             f"| {model} | {len(covered)}/{len(tasks)} | {attempts} | {shape} "
             f"| {reasons.get('solved', 0)} | {reasons.get('tool_call_limit', 0)} "
-            f"| {reasons.get('walltime_limit', 0)} | {len(tasks) - len(covered)} |"
+            f"| {walltime['capped']} | {walltime['teardown']} | {walltime['starved']} "
+            f"| {len(tasks) - len(covered)} |"
         )
     return "\n".join(lines)
 
