@@ -285,17 +285,25 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
     tasks = {row["task"] for row in rows}
     models = sorted({row["model"] for row in rows})
     lines = [
-        "| model | tasks | solved | budget-capped | walltime-cut | missing |",
-        "|---|---|---|---|---|---|",
+        "| model | tasks | attempts/task | shape | solved | budget-capped | walltime-cut | missing |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for model in models:
         mine = [row for row in rows if row["model"] == model]
         covered = {row["task"] for row in mine}
+        per_task = collections.Counter(row["task"] for row in mine)
+        # Count every benchmark task, missing ones as 0: that is what exposes raggedness.
+        spread = sorted(per_task.get(task, 0) for task in tasks)
+        low, high = spread[0], spread[-1]
+        # A uniform reduced n is a clean smaller sample; a ragged n is a BIASED subset, because the
+        # cells that survive are the fast ones. Averaging them the same way hides that difference.
+        shape = "uniform" if low == high else "RAGGED"
+        attempts = str(low) if low == high else f"{low}-{high}"
         reasons = collections.Counter(row.get("exit_reason") for row in mine)
         lines.append(
-            f"| {model} | {len(covered)}/{len(tasks)} | {reasons.get('solved', 0)} "
-            f"| {reasons.get('tool_call_limit', 0)} | {reasons.get('walltime_limit', 0)} "
-            f"| {len(tasks) - len(covered)} |"
+            f"| {model} | {len(covered)}/{len(tasks)} | {attempts} | {shape} "
+            f"| {reasons.get('solved', 0)} | {reasons.get('tool_call_limit', 0)} "
+            f"| {reasons.get('walltime_limit', 0)} | {len(tasks) - len(covered)} |"
         )
     return "\n".join(lines)
 
