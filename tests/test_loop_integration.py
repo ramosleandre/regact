@@ -269,6 +269,21 @@ async def test_pipeline_stops_when_a_submission_is_perfect(tmp_path: Path) -> No
     assert len(agent.sent) == 1  # stopped right after the perfect submission
 
 
+async def test_pipeline_stops_at_the_perfect_submission_not_the_turn_end(tmp_path: Path) -> None:
+    """Solved must stop at the SUBMISSION, not when the turn ends. alancode submits many times
+    inside one send(), so a turn-granular check keeps re-scoring the winning controller: a live run
+    paid for six identical perfect submissions before its turn closed."""
+    stack = _Stack(tmp_path)
+    # ONE send: a perfect submission followed by more calls that must never be dispatched.
+    rest = [ToolCall(f"x{i}", "Bash", {}) for i in range(5)]
+    agent = ScriptedAgent([[ToolCall("c1", "SubmitSolution", {}), *rest, IterationComplete()]])
+    reason = await stack.run(agent, is_perfect=lambda agg: agg.get("success_rate", 0) >= 1.0)
+
+    assert reason == "solved"
+    assert stack.experiment.submission_count == 1  # not re-scored for the rest of the turn
+    assert stack.experiment.tool_calls_total == 1  # aborted at the submission; the 5 never ran
+
+
 async def test_doom_loop_breaker_stops_a_no_tool_agent(tmp_path: Path) -> None:
     """A degenerate agent that never calls a tool (e.g. a temp0 model emitting the same
     unparseable garbage each turn) is cut off after max_consecutive_no_tool_turns, not left to

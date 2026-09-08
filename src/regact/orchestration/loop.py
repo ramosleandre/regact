@@ -101,6 +101,7 @@ class _LoopContext:
     flagging_warning_cap: int = 0  # max flagging warnings to inject this task (0 = never)
     warnings_injected: int = 0  # how many have been injected so far (mutated as they fire)
     max_tool_calls: int | None = None  # hard tool-call budget, enforced mid-send (None = off)
+    is_perfect: Callable[[dict[str, Any]], bool] | None = None  # perfect-score test, mid-send
 
 
 @dataclass
@@ -147,6 +148,7 @@ async def run_session(
         move_count=move_count,
         flagging_warning_cap=flagging_warning_cap,
         max_tool_calls=limits.max_tool_calls,
+        is_perfect=is_perfect,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -160,8 +162,6 @@ async def run_session(
     watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
     try:
         while True:
-            last = experiment.last_submission_results
-            solved = bool(is_perfect and last and is_perfect(last.get("aggregate", {})))
             reason = _decide_stop(
                 exit_requested=experiment.exit_requested,
                 interrupted=stop.is_set() if stop is not None else False,
@@ -169,7 +169,7 @@ async def run_session(
                 tool_calls_total=experiment.tool_calls_total,
                 elapsed_s=time.monotonic() - start,
                 limits=limits,
-                solved=solved,
+                solved=_solved(experiment, is_perfect),
             )
             if reason is not None:
                 break
@@ -320,6 +320,14 @@ def _decide_stop(
     return None
 
 
+def _solved(
+    experiment: ExperimentState, is_perfect: Callable[[dict[str, Any]], bool] | None
+) -> bool:
+    """Whether the latest submission scored perfect, so the run has nothing left to do."""
+    last = experiment.last_submission_results
+    return bool(is_perfect and last and is_perfect(last.get("aggregate", {})))
+
+
 def _acted_without_submitting(
     reason: str | None, submission_count: int, tool_calls_total: int
 ) -> bool:
@@ -356,6 +364,12 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
             ):
                 # The CLI agents run their whole loop in one send() with no inner tool cap, so the
                 # budget must bind mid-send. abort() ends the send; the next _decide_stop stops.
+                await ctx.agent.abort()
+                break
+            if _solved(ctx.experiment, ctx.is_perfect):
+                # Solved: stop at the SUBMISSION, not at the end of the turn. alancode submits many
+                # times inside one send(), so a turn-granular check re-scores the winning controller
+                # for the rest of the turn (measured: 6 identical perfect submissions, 5 redundant).
                 await ctx.agent.abort()
                 break
     except Exception as exc:  # an unexpected fault in a tool or the adapter
