@@ -1,0 +1,12 @@
+# @package _global_
+# Per-model hyperparameters for a SERVED model on the alan path. Compose as
+# `agent=alan model=GLM-4.7-Flash`. Holds only model-intrinsic facts; the per-serve knobs
+# (base_url, context_window) are launch overrides - the PJ injects the serve's real KV pool.
+agent:
+  model: openai/GLM-4.7-Flash
+  args:
+    # glm, not hermes_xml: the two share the <tool_call> opener and differ only in argument
+    # encoding (arg_key/arg_value tags vs JSON), so an opener-only match reads glm as hermes_xml.
+    # Verbatim emission: <tool_call>move<arg_key>direction</arg_key><arg_value>forward</arg_value>
+    tool_protocol: glm
+    tool_call_format: auto
