@@ -1,0 +1,11 @@
+# @package _global_
+# Per-model hyperparameters for a SERVED model on the alan path. Compose as
+# `agent=alan model=Llama-3.3-70B-Instruct`. Holds only model-intrinsic facts; the per-serve knobs
+# (base_url, context_window) are launch overrides - the PJ injects the serve's real KV pool.
+agent:
+  model: openai/Llama-3.3-70B-Instruct
+  args:
+    # Instructed compliance, not native preference, decides this: models follow a taught
+    # bash-family dialect regardless of what they emit unprompted (measured 2026-09-08).
+    tool_protocol: hermes_xml
+    tool_call_format: auto
