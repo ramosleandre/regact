@@ -339,3 +339,19 @@ def test_stability_shows_the_score_with_errored_episodes_counted() -> None:
     assert "1.00" in out
     assert "0.30" in out  # 3 successes over 10 attempted
     assert "3 of 10" in out
+
+
+def test_all_episodes_crashing_is_not_a_zero_score() -> None:
+    """A controller that raised on every episode never ran. The table otherwise renders it
+    identically to a policy that played and lost, and only the second is about ability."""
+    assert (
+        bench_aggregate._classify_outcome(None, "agent_exit", controller_crashed=True)
+        == "controller-crashed"
+    )
+    # A genuine 0.0 from episodes that actually ran keeps its meaning.
+    assert bench_aggregate._classify_outcome(0.0, "agent_exit") == "genuine-fail"
+    # Crashing outranks a solve threshold: a score computed off the survivors is not a solve.
+    assert (
+        bench_aggregate._classify_outcome(1.0, "solved", controller_crashed=True)
+        == "controller-crashed"
+    )

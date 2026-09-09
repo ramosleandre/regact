@@ -246,7 +246,11 @@ def _primary_score(aggregate: dict[str, Any]) -> float | None:
     return score if score is not None else aggregate.get("mean_levels_completion_rate")
 
 
-def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> str:
+def _classify_outcome(
+    success_rate: float | None,
+    exit_reason: str | None,
+    controller_crashed: bool = False,
+) -> str:
     """Whether a cell's score is a trustworthy capability signal.
 
     The 0.0s are not equal: a model that ended cleanly and genuinely failed is real
@@ -260,8 +264,13 @@ def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> st
     - ``harness-killed``: exited ``agent_api`` (the pre-nudge empty_response wall) - UNRELIABLE;
     - ``walltime``: hit the job walltime before finishing - UNRELIABLE;
     - ``no-final``: no scored result (still running, or killed before teardown);
+    - ``controller-crashed``: EVERY episode raised, so the controller never ran. Distinct
+      from a 0.0, which the table otherwise renders identically - one is a policy that
+      loses, the other is code that does not execute, and only the first is about ability;
     - the raw exit reason for any other terminal state.
     """
+    if controller_crashed:
+        return "controller-crashed"
     if success_rate is not None and success_rate >= _SOLVE_THRESHOLD:
         return "solve"
     if exit_reason == "agent_api":
@@ -307,7 +316,12 @@ def _run_row(
         "model": model,
         "seed": (config.get("problem") or {}).get("seed"),
         "controller": _classify_controller(task_dir / "workdir" / "solution.py"),
-        "outcome": _classify_outcome(_primary_score(aggregate), state.get("exit_reason")),
+        "outcome": _classify_outcome(
+            _primary_score(aggregate),
+            state.get("exit_reason"),
+            controller_crashed=bool(aggregate.get("n_errors"))
+            and not aggregate.get("n_episodes"),
+        ),
         "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
         "tail_mean": _tail_mean(task_dir)[0],  # the same controller's neighbourhood, for stability
         "episodes_asked": (config.get("controller") or {}).get("n_episodes"),
