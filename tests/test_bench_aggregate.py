@@ -208,3 +208,181 @@ def test_latest_stamp_still_wins_for_a_rerun_of_the_same_attempt(tmp_path: Path)
     kept = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
     assert len(kept) == 1
     assert kept[0]["success_rate"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("exit_reason", "success_rate", "submissions", "expected"),
+    [
+        ("walltime_limit", 0.4, 12, "capped"),  # iterated, earned its score
+        ("walltime_limit", 0.0, 1, "capped"),  # a scored zero is still the model's own
+        ("walltime_limit", 0.0, 0, "teardown"),  # scored only by FinalizeControllerHook
+        ("walltime_limit", 0.0, None, "teardown"),  # missing count reads as no submission
+        ("walltime_limit", None, 0, "starved"),
+        ("walltime_limit", None, 5, "starved"),  # submitted, but nothing scoreable came back
+        ("agent_exit", 0.4, 3, None),  # not a walltime cut at all
+        ("solved", 1.0, 2, None),
+    ],
+)
+def test_walltime_bucket(exit_reason, success_rate, submissions, expected) -> None:
+    row = {
+        "exit_reason": exit_reason,
+        "success_rate": success_rate,
+        "submissions": submissions,
+    }
+    assert bench_aggregate._walltime_bucket(row) == expected
+
+
+def test_walltime_buckets_partition_every_walltime_run() -> None:
+    """No walltime run may fall outside the three columns - a dropped run is invisible."""
+    rows = [
+        {"exit_reason": "walltime_limit", "success_rate": s, "submissions": n}
+        for s in (None, 0.0, 0.5)
+        for n in (None, 0, 7)
+    ]
+    buckets = [bench_aggregate._walltime_bucket(row) for row in rows]
+    assert None not in buckets
+    assert set(buckets) == {"capped", "teardown", "starved"}
+    assert len(buckets) == len(rows)
+
+
+def _sub(task_dir: Path, index: int, score: float) -> None:
+    d = task_dir / "workdir" / "submissions" / f"{index:03d}"
+    d.mkdir(parents=True)
+    (d / "results.json").write_text(json.dumps({"aggregate": {"success_rate": score}}))
+
+
+def test_tail_mean_averages_the_most_recent_submissions(tmp_path: Path) -> None:
+    """Ordering is numeric, not lexicographic: submission 100 must not sort before 99."""
+    task = tmp_path / "TaskX"
+    for i, score in enumerate([1.0] * 99 + [0.0]):  # the LAST one is the 100th
+        _sub(task, i + 1, score)
+    mean, n = bench_aggregate._tail_mean(task, k=2)
+    assert n == 2
+    assert mean == pytest.approx(0.5)  # submissions 99 (1.0) and 100 (0.0)
+
+
+def test_tail_mean_missing_submissions(tmp_path: Path) -> None:
+    assert bench_aggregate._tail_mean(tmp_path / "nope") == (None, 0)
+
+
+def test_stability_does_not_flag_a_clean_evaluation_that_beat_its_own_tail() -> None:
+    """A model that iterates ends BETTER than its earlier submissions, so a full-length
+    error-free evaluation far above its tail is improvement, not luck. The real 480B DoorKey
+    cell: 1.00 from ten clean episodes against a 0.28 tail - if 0.28 were true that is 3e-6."""
+    improved = {
+        "model": "M",
+        "task": "DoorKey",
+        "success_rate": 1.0,
+        "tail_mean": 0.28,
+        "n_episodes": 10,
+        "n_errors": 0,
+        "episodes_asked": 10,
+    }
+    agreeing = {
+        "model": "M",
+        "task": "MemoryS17",
+        "success_rate": 0.7,
+        "tail_mean": 0.69,
+        "n_episodes": 10,
+        "n_errors": 0,
+        "episodes_asked": 10,
+    }
+    out = bench_aggregate.stability_markdown([improved, agreeing])
+    assert "DoorKey" not in out
+    assert "MemoryS17" not in out
+    assert "full evaluation" in out
+
+
+def test_zero_episode_evaluation_is_not_a_score() -> None:
+    """A final that ran no episodes measured nothing; its 0.0 is a default. Reporting it as a
+    score puts a false zero in the table, reading exactly like a model that tried and failed."""
+    assert bench_aggregate._primary_score({"n_episodes": 0, "success_rate": 0.0}) is None
+    assert bench_aggregate._primary_score({"n_episodes": 10, "success_rate": 0.0}) == 0.0
+
+
+def test_stability_flags_a_short_evaluation_even_when_it_agrees() -> None:
+    """A 1.00 over 3 of 10 episodes is a coincidence, not a solve - flag it on episode count
+    alone, since a short run can agree with its own tail and still be weak evidence."""
+    short = {
+        "model": "M",
+        "task": "FourRooms",
+        "success_rate": 1.0,
+        "tail_mean": 0.95,
+        "n_episodes": 3,
+        "episodes_asked": 10,
+    }
+    out = bench_aggregate.stability_markdown([short])
+    assert "FourRooms" in out
+    assert "3 of 10" in out
+
+
+def test_episodes_shortfall() -> None:
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 3}, 10) == 7
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 10}, 10) is None
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 12}, 10) is None
+    assert bench_aggregate._episodes_shortfall({"n_episodes": None}, 10) is None
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 3}, None) is None
+
+
+def test_stability_shows_the_score_with_errored_episodes_counted() -> None:
+    """success_rate is computed over episodes that RAN, so a controller crashing on 7 of 10 and
+    succeeding on the 3 it survives reports 1.00. The real 480B FourRooms cell: 1.00 -> 0.30."""
+    row = {
+        "model": "Qwen3-Coder-480B",
+        "task": "FourRooms",
+        "success_rate": 1.0,
+        "tail_mean": 0.51,
+        "n_episodes": 3,
+        "n_errors": 7,
+        "episodes_asked": 10,
+    }
+    out = bench_aggregate.stability_markdown([row])
+    assert "1.00" in out
+    assert "0.30" in out  # 3 successes over 10 attempted
+    assert "3 of 10" in out
+
+
+def test_all_episodes_crashing_is_not_a_zero_score() -> None:
+    """A controller that raised on every episode never ran. The table otherwise renders it
+    identically to a policy that played and lost, and only the second is about ability."""
+    assert (
+        bench_aggregate._classify_outcome(None, "agent_exit", controller_crashed=True)
+        == "controller-crashed"
+    )
+    # A genuine 0.0 from episodes that actually ran keeps its meaning.
+    assert bench_aggregate._classify_outcome(0.0, "agent_exit") == "genuine-fail"
+    # Crashing outranks a solve threshold: a score computed off the survivors is not a solve.
+    assert (
+        bench_aggregate._classify_outcome(1.0, "solved", controller_crashed=True)
+        == "controller-crashed"
+    )
+
+
+def _transcript(path: Path, pairs: list[tuple[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for command, output in pairs:
+        lines.append(json.dumps({"type": "ToolCall", "input": {"command": command}}))
+        lines.append(json.dumps({"type": "ToolResult", "output": output}))
+    path.write_text("\n".join(lines))
+
+
+def test_uninformative_rate_counts_empty_and_repeated_results(tmp_path: Path) -> None:
+    """Both halves matter: the silent heredoc AND informative-looking repetition. A GLM run
+    issuing `ls -la` a hundred times for the same listing is not exploring."""
+    t = tmp_path / "logs" / "transcript.jsonl"
+
+    _transcript(t, [("ls", "a"), ("cat x", "b"), ("wc y", "c")])
+    assert bench_aggregate._uninformative_rate(t) == 0.0  # all novel
+
+    _transcript(t, [("w", "(no output)")] * 4)
+    assert bench_aggregate._uninformative_rate(t) == 1.0  # silent writes
+
+    _transcript(t, [("ls -la", "same listing")] * 5)
+    assert bench_aggregate._uninformative_rate(t) == pytest.approx(0.8)  # 1st is news, 4 repeats
+
+    # A repeated COMMAND whose output changes is informative - the run learned something.
+    _transcript(t, [("ls", "one"), ("ls", "two"), ("ls", "three")])
+    assert bench_aggregate._uninformative_rate(t) == 0.0
+
+    assert bench_aggregate._uninformative_rate(tmp_path / "nope.jsonl") is None

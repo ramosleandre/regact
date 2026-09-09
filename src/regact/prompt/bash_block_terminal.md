@@ -26,14 +26,17 @@ sed -i 's/return A_TOGGLE/return A_PICKUP/' code_library/doorkey_controller.py &
 
 The reasoning before it is your memory; the block is your action. Write only the prose and the one fenced block - no surrounding tag or envelope around them - and always end the block with its closing fence line, or it will not run.
 
+The block must be tagged `bash`. A block tagged `python`, or left untagged, is NOT executed: it is read as prose, your turn does nothing, and you receive no output - so if you write Python code in a ```python block, or put a shell command such as `python framework/control.py SubmitSolution` inside one, that action is silently lost. To run Python, use a `bash` block that either calls `python -c`, or writes a file with a heredoc and then runs it.
+
 ## Typical commands
 
-Create or overwrite a file:
+Create or overwrite a file, then immediately run it - a bare `cat > ... <<'EOF'` prints nothing, so on its own it leaves you unable to tell whether the file is correct, or even whether it was written:
 ```bash
 cat > code_library/explore.py <<'EOF'
 from framework.make_env import make_env
 # ... your code ...
 EOF
+python code_library/explore.py
 ```
 
 Edit a file in place with sed:

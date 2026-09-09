@@ -54,6 +54,43 @@ def _count_lines(path: Path, *predicates: tuple[str, str]) -> dict[str, int]:
     return counts
 
 
+def _uninformative_rate(path: Path) -> float | None:
+    """Share of a run's tool calls that taught it nothing, or None if it made none.
+
+    A call is uninformative when its result comes back EMPTY, or when its (command, result)
+    pair has already occurred in the run - same input, same output, no news. The empty half
+    catches the silent-heredoc loop; the duplicate half catches informative-LOOKING repetition,
+    which the empty test alone scores as healthy: a GLM run issuing ``ls -la`` a hundred times
+    for a byte-identical listing reads as 8% blind and 72% uninformative. Deliberately
+    parser-free - deciding from command text whether a call did anything defeats multi-line
+    shell, and cost two people a night of contradictory numbers.
+    """
+    if not path.exists():
+        return None
+    seen: set[tuple[str, str]] = set()
+    calls = uninformative = 0
+    pending: str | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = record.get("type")
+        if kind == "ToolCall":
+            pending = json.dumps(record.get("input") or {}, sort_keys=True)
+        elif kind == "ToolResult" and pending is not None:
+            output = record.get("output") or record.get("content") or ""
+            if isinstance(output, (dict, list)):
+                output = json.dumps(output, sort_keys=True)
+            output = str(output).strip()
+            calls += 1
+            if output in ("(no output)", "") or (pending, output) in seen:
+                uninformative += 1
+            seen.add((pending, output))
+            pending = None
+    return uninformative / calls if calls else None
+
+
 def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     """One row per (experiment, stamp, task) run dir found under ``root``.
 
@@ -218,15 +255,39 @@ def _classify_controller(solution_path: Path) -> str:
 _SOLVE_THRESHOLD = 0.6
 
 
+def _episodes_shortfall(row: dict[str, Any], configured: int | None) -> int | None:
+    """How many episodes the reported cell is short of what the run asked for, if any.
+
+    A final evaluation can end early, and the count it actually managed is what its error bar
+    is built from - a 1.00 over 3 episodes is a 12% coincidence when the true rate is 0.5, not
+    a solve. Measured in this round: 158 finals ran the configured 10, 15 ran fewer, and 8 ran
+    ZERO while still recording success_rate 0.0 - a false zero indistinguishable from failure.
+    """
+    ran = row.get("n_episodes")
+    if ran is None or configured is None or ran >= configured:
+        return None
+    return configured - ran
+
+
 def _primary_score(aggregate: dict[str, Any]) -> float | None:
     """A cell's headline score, problem-agnostic: MiniGrid's ``success_rate``, or - for ARC, which
     renamed that away - ``mean_levels_completion_rate`` (graded mean fraction of levels cleared), so
-    the pivot and outcome classification stay meaningful across both problem families."""
+    the pivot and outcome classification stay meaningful across both problem families.
+
+    An evaluation that ran ZERO episodes measured nothing, and the 0.0 it records is a default
+    rather than a result - reporting it as a score puts a false zero in the table, where it reads
+    exactly like a model that tried and failed."""
+    if aggregate.get("n_episodes") == 0:
+        return None
     score = aggregate.get("success_rate")
     return score if score is not None else aggregate.get("mean_levels_completion_rate")
 
 
-def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> str:
+def _classify_outcome(
+    success_rate: float | None,
+    exit_reason: str | None,
+    controller_crashed: bool = False,
+) -> str:
     """Whether a cell's score is a trustworthy capability signal.
 
     The 0.0s are not equal: a model that ended cleanly and genuinely failed is real
@@ -240,8 +301,13 @@ def _classify_outcome(success_rate: float | None, exit_reason: str | None) -> st
     - ``harness-killed``: exited ``agent_api`` (the pre-nudge empty_response wall) - UNRELIABLE;
     - ``walltime``: hit the job walltime before finishing - UNRELIABLE;
     - ``no-final``: no scored result (still running, or killed before teardown);
+    - ``controller-crashed``: EVERY episode raised, so the controller never ran. Distinct
+      from a 0.0, which the table otherwise renders identically - one is a policy that
+      loses, the other is code that does not execute, and only the first is about ability;
     - the raw exit reason for any other terminal state.
     """
+    if controller_crashed:
+        return "controller-crashed"
     if success_rate is not None and success_rate >= _SOLVE_THRESHOLD:
         return "solve"
     if exit_reason == "agent_api":
@@ -287,20 +353,76 @@ def _run_row(
         "model": model,
         "seed": (config.get("problem") or {}).get("seed"),
         "controller": _classify_controller(task_dir / "workdir" / "solution.py"),
-        "outcome": _classify_outcome(_primary_score(aggregate), state.get("exit_reason")),
+        "outcome": _classify_outcome(
+            _primary_score(aggregate),
+            state.get("exit_reason"),
+            controller_crashed=bool(aggregate.get("n_errors"))
+            and not aggregate.get("n_episodes"),
+        ),
         "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
-        "n_episodes": aggregate.get("n_episodes"),
+        "tail_mean": _tail_mean(task_dir)[0],  # the same controller's neighbourhood, for stability
+        "episodes_asked": (config.get("controller") or {}).get("n_episodes"),
+        "n_episodes": aggregate.get("n_episodes"),  # episodes SCORED; errored ones are excluded
+        "n_errors": aggregate.get("n_errors"),
         "mean_levels_completed": aggregate.get("mean_levels_completed"),
         "exit_reason": state.get("exit_reason"),
         "last_error_category": state.get("last_error_category"),
         "submissions": state.get("submission_count"),
         "duration_s": state.get("duration_s"),
         "env_moves": state.get("env_moves"),
+        "uninformative_rate": _uninformative_rate(task_dir / "logs" / "transcript.jsonl"),
         "tool_calls": transcript["tool_calls"],
         "turns": transcript["turns"],
         "agent_errors": events["agent_errors"],
         "error_retries": events["error_retries"],
     }
+
+
+_TAIL_SUBMISSIONS = 20
+
+
+def _tail_mean(task_dir: Path, k: int = _TAIL_SUBMISSIONS) -> tuple[float | None, int]:
+    """Mean score of the last ``k`` numbered submissions, and how many were averaged.
+
+    The reported cell is one evaluation of one controller, and at ``n_episodes=10`` a
+    success_rate carries a standard error near 0.15 - so a cell can land high or low by luck.
+    Averaging the run's own recent submissions gives a second, independent reading of the same
+    controller's neighbourhood; where the two agree the cell is trustworthy, and where they
+    diverge the reader can see it rather than having to remember which cells were lucky.
+    """
+    subs = task_dir / "workdir" / "submissions"
+    if not subs.is_dir():
+        return None, 0
+    scored: list[tuple[int, float]] = []
+    for entry in subs.iterdir():
+        if entry.name == "final" or not entry.is_dir():
+            continue
+        digits = "".join(ch for ch in entry.name if ch.isdigit())
+        score = _primary_score((_read_json(entry / "results.json") or {}).get("aggregate", {}))
+        if digits and score is not None:
+            scored.append((int(digits), score))
+    if not scored:
+        return None, 0
+    tail = [score for _, score in sorted(scored)[-k:]]
+    return sum(tail) / len(tail), len(tail)
+
+
+def _walltime_bucket(row: dict[str, Any]) -> str | None:
+    """Which kind of walltime cut this run was, or ``None`` if it did not hit the walltime.
+
+    One ``exit_reason`` covers two opposite outcomes. A run capped after genuinely iterating
+    carries a score the model earned; one that never submitted was scored only by
+    ``FinalizeControllerHook``, so the number is ours, not the model's - measured 0.003 mean
+    against 0.042 for the iterating group. Reporting them in one column credits a model for a
+    measurement we performed on its behalf. ``starved`` takes everything with no usable score,
+    including the few that submitted something unscoreable, so the three buckets partition
+    every walltime run.
+    """
+    if row.get("exit_reason") != "walltime_limit":
+        return None
+    if row.get("success_rate") is None:
+        return "starved"
+    return "capped" if (row.get("submissions") or 0) > 0 else "teardown"
 
 
 def coverage_markdown(rows: list[dict[str, Any]]) -> str:
@@ -313,8 +435,9 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
     tasks = {row["task"] for row in rows}
     models = sorted({row["model"] for row in rows})
     lines = [
-        "| model | tasks | attempts/task | shape | solved | budget-capped | walltime-cut | missing |",
-        "|---|---|---|---|---|---|---|---|",
+        "| model | tasks | attempts/task | shape | solved | budget-capped "
+        "| wt-capped | wt-teardown | wt-starved | missing |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for model in models:
         mine = [row for row in rows if row["model"] == model]
@@ -328,10 +451,61 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
         shape = "uniform" if low == high else "RAGGED"
         attempts = str(low) if low == high else f"{low}-{high}"
         reasons = collections.Counter(row.get("exit_reason") for row in mine)
+        walltime = collections.Counter(filter(None, (_walltime_bucket(row) for row in mine)))
         lines.append(
             f"| {model} | {len(covered)}/{len(tasks)} | {attempts} | {shape} "
             f"| {reasons.get('solved', 0)} | {reasons.get('tool_call_limit', 0)} "
-            f"| {reasons.get('walltime_limit', 0)} | {len(tasks) - len(covered)} |"
+            f"| {walltime['capped']} | {walltime['teardown']} | {walltime['starved']} "
+            f"| {len(tasks) - len(covered)} |"
+        )
+    return "\n".join(lines)
+
+
+def stability_markdown(rows: list[dict[str, Any]]) -> str:
+    """Cells whose evaluation was too short or too broken to support the score they report.
+
+    A cell is flagged when its final evaluation ran FEWER episodes than the run asked for -
+    because episodes that raised are dropped from the denominator, so a controller crashing on
+    seven of ten and succeeding on the three it survives reports 1.00 (the real 480B FourRooms
+    cell: honestly 0.30).
+
+    Divergence from the run's own recent submissions is REPORTED but does not by itself flag a
+    cell, and that distinction cost a real solve. A model that iterates successfully ends with a
+    controller BETTER than its earlier submissions, so a final far above the tail is what
+    improvement looks like, not what luck looks like: the 480B's DoorKey 1.00 came from ten
+    clean episodes, ten successes, while its tail averaged 0.28 - and if 0.28 were the true rate
+    that outcome has probability 3e-6. Flagging it would have talked us out of exactly the solve
+    the benchmark exists to find.
+    """
+    flagged = []
+    for row in rows:
+        final = row.get("success_rate")
+        if final is None:
+            continue
+        short = _episodes_shortfall(row, row.get("episodes_asked"))
+        tail = row.get("tail_mean")
+        deviation = 0.0
+        if tail is not None:
+            spread = (tail * (1.0 - tail) / (row.get("n_episodes") or 10)) ** 0.5
+            deviation = abs(final - tail) / spread if spread > 0 else 0.0
+        if short:  # divergence alone is improvement, not unreliability - see docstring
+            flagged.append((deviation, short, row, final, tail))
+    if not flagged:
+        return "Every reported cell ran its full evaluation.\n"
+    lines = [
+        "| model | task | reported | if errors counted | mean(last submissions) "
+        "| sigmas out | episodes scored |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for deviation, short, row, final, tail in sorted(flagged, key=lambda item: -item[0]):
+        episodes = f"{row.get('n_episodes')} of {row.get('episodes_asked')}" if short else ""
+        scored, errors = row.get("n_episodes") or 0, row.get("n_errors") or 0
+        attempted = scored + errors
+        honest = f"{final * scored / attempted:.2f}" if errors and attempted else ""
+        lines.append(
+            f"| {row['model']} | {row['task']} | {final:.2f} | {honest} "
+            f"| {'-' if tail is None else f'{tail:.2f}'} "
+            f"| {deviation:.1f} | {episodes} |"
         )
     return "\n".join(lines)
 
@@ -425,6 +599,23 @@ def main(argv: list[str] | None = None) -> int:
     print("Controller states: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
     outcomes = collections.Counter(row["outcome"] for row in rows)
     print("Outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())) + "\n")
+    rates = collections.defaultdict(list)
+    for row in rows:
+        if row.get("uninformative_rate") is not None:
+            rates[row["model"]].append(row["uninformative_rate"])
+    if rates:
+        print("## Uninformative calls - how much of a run taught it nothing\n")
+        print(
+            "A call is uninformative when its result is EMPTY or repeats a (command, result) "
+            "pair already seen. This is the acceptance test for the self-verifying write "
+            "example: it should FALL between rounds.\n"
+        )
+        print("| model | runs | mean uninformative |")
+        print("|---|---|---|")
+        for model in sorted(rates, key=lambda m: -sum(rates[m]) / len(rates[m])):
+            values = rates[model]
+            print(f"| {model} | {len(values)} | {100 * sum(values) / len(values):.0f}% |")
+        print()
     print("## Coverage - which cells exist, and why some do not\n")
     print(
         "Incomplete columns are NOT missing at random: a slow serve completes the EASY tasks and "
@@ -432,6 +623,15 @@ def main(argv: list[str] | None = None) -> int:
         "passes. Read per-task cells; never average a column into a per-model score.\n"
     )
     print(coverage_markdown(rows))
+    print("\n## Stability - cells whose evaluation did not finish\n")
+    print(
+        "Episodes that RAISED are dropped from the denominator, so a controller crashing on 7 of "
+        "10 and surviving 3 reports 1.00. These rows ran fewer episodes than asked; read them as "
+        "unsupported, not as achievement. A cell far above its own recent submissions is NOT "
+        "listed for that reason alone - after successful iteration a final controller SHOULD beat "
+        "them.\n"
+    )
+    print(stability_markdown(rows))
     print("\n## Outcome - is the score trustworthy? (task x model)\n")
     print("`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response) and "
           "`walltime` must be discounted / re-run.\n")

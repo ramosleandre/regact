@@ -8,9 +8,11 @@ from typing import Any
 from regact.agent.events import ToolCall
 from regact.config.schema import LimitsConfig
 from regact.orchestration.loop import (
+    _ESCALATE_AFTER_REMINDERS,
     _acted_without_submitting,
     _decide_stop,
     _execute_framework_tool,
+    _keep_alive_message,
     _LoopContext,
 )
 from regact.security.policy import default_policy
@@ -239,3 +241,20 @@ async def test_flagging_warning_injected_up_to_cap() -> None:
     ok, ok_agent = make(3)
     await _flag_suspicious_call(clean, ok)
     assert ok_agent.injected == []  # a clean call is not flagged -> no warning
+
+
+def test_keep_alive_escalates_only_for_a_run_that_never_submitted() -> None:
+    """A run that has submitted keeps the normal reminder however long it goes on; one that has
+    submitted nothing gets the explicit ask once it has been reminded repeatedly."""
+    base = "normal reminder"
+    below = _ESCALATE_AFTER_REMINDERS - 1
+    at = _ESCALATE_AFTER_REMINDERS
+
+    assert _keep_alive_message(base, below, 0) == base
+    assert _keep_alive_message(base, at, 0) != base
+    assert "Submit NOW" in _keep_alive_message(base, at, 0)
+    assert str(at) in _keep_alive_message(base, at, 0)
+
+    # A single submission is enough to stay on the normal message forever.
+    assert _keep_alive_message(base, at, 1) == base
+    assert _keep_alive_message(base, at * 10, 1) == base
