@@ -54,6 +54,43 @@ def _count_lines(path: Path, *predicates: tuple[str, str]) -> dict[str, int]:
     return counts
 
 
+def _uninformative_rate(path: Path) -> float | None:
+    """Share of a run's tool calls that taught it nothing, or None if it made none.
+
+    A call is uninformative when its result comes back EMPTY, or when its (command, result)
+    pair has already occurred in the run - same input, same output, no news. The empty half
+    catches the silent-heredoc loop; the duplicate half catches informative-LOOKING repetition,
+    which the empty test alone scores as healthy: a GLM run issuing ``ls -la`` a hundred times
+    for a byte-identical listing reads as 8% blind and 72% uninformative. Deliberately
+    parser-free - deciding from command text whether a call did anything defeats multi-line
+    shell, and cost two people a night of contradictory numbers.
+    """
+    if not path.exists():
+        return None
+    seen: set[tuple[str, str]] = set()
+    calls = uninformative = 0
+    pending: str | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = record.get("type")
+        if kind == "ToolCall":
+            pending = json.dumps(record.get("input") or {}, sort_keys=True)
+        elif kind == "ToolResult" and pending is not None:
+            output = record.get("output") or record.get("content") or ""
+            if isinstance(output, (dict, list)):
+                output = json.dumps(output, sort_keys=True)
+            output = str(output).strip()
+            calls += 1
+            if output in ("(no output)", "") or (pending, output) in seen:
+                uninformative += 1
+            seen.add((pending, output))
+            pending = None
+    return uninformative / calls if calls else None
+
+
 def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     """One row per (experiment, stamp, task) run dir found under ``root``.
 
@@ -333,6 +370,7 @@ def _run_row(
         "submissions": state.get("submission_count"),
         "duration_s": state.get("duration_s"),
         "env_moves": state.get("env_moves"),
+        "uninformative_rate": _uninformative_rate(task_dir / "logs" / "transcript.jsonl"),
         "tool_calls": transcript["tool_calls"],
         "turns": transcript["turns"],
         "agent_errors": events["agent_errors"],
@@ -553,6 +591,23 @@ def main(argv: list[str] | None = None) -> int:
     print("Controller states: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
     outcomes = collections.Counter(row["outcome"] for row in rows)
     print("Outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())) + "\n")
+    rates = collections.defaultdict(list)
+    for row in rows:
+        if row.get("uninformative_rate") is not None:
+            rates[row["model"]].append(row["uninformative_rate"])
+    if rates:
+        print("## Uninformative calls - how much of a run taught it nothing\n")
+        print(
+            "A call is uninformative when its result is EMPTY or repeats a (command, result) "
+            "pair already seen. This is the acceptance test for the self-verifying write "
+            "example: it should FALL between rounds.\n"
+        )
+        print("| model | runs | mean uninformative |")
+        print("|---|---|---|")
+        for model in sorted(rates, key=lambda m: -sum(rates[m]) / len(rates[m])):
+            values = rates[model]
+            print(f"| {model} | {len(values)} | {100 * sum(values) / len(values):.0f}% |")
+        print()
     print("## Coverage - which cells exist, and why some do not\n")
     print(
         "Incomplete columns are NOT missing at random: a slow serve completes the EASY tasks and "

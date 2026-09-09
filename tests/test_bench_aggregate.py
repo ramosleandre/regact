@@ -355,3 +355,33 @@ def test_all_episodes_crashing_is_not_a_zero_score() -> None:
         bench_aggregate._classify_outcome(1.0, "solved", controller_crashed=True)
         == "controller-crashed"
     )
+
+
+def _transcript(path: Path, pairs: list[tuple[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for command, output in pairs:
+        lines.append(json.dumps({"type": "ToolCall", "input": {"command": command}}))
+        lines.append(json.dumps({"type": "ToolResult", "output": output}))
+    path.write_text("\n".join(lines))
+
+
+def test_uninformative_rate_counts_empty_and_repeated_results(tmp_path: Path) -> None:
+    """Both halves matter: the silent heredoc AND informative-looking repetition. A GLM run
+    issuing `ls -la` a hundred times for the same listing is not exploring."""
+    t = tmp_path / "logs" / "transcript.jsonl"
+
+    _transcript(t, [("ls", "a"), ("cat x", "b"), ("wc y", "c")])
+    assert bench_aggregate._uninformative_rate(t) == 0.0  # all novel
+
+    _transcript(t, [("w", "(no output)")] * 4)
+    assert bench_aggregate._uninformative_rate(t) == 1.0  # silent writes
+
+    _transcript(t, [("ls -la", "same listing")] * 5)
+    assert bench_aggregate._uninformative_rate(t) == pytest.approx(0.8)  # 1st is news, 4 repeats
+
+    # A repeated COMMAND whose output changes is informative - the run learned something.
+    _transcript(t, [("ls", "one"), ("ls", "two"), ("ls", "three")])
+    assert bench_aggregate._uninformative_rate(t) == 0.0
+
+    assert bench_aggregate._uninformative_rate(tmp_path / "nope.jsonl") is None
