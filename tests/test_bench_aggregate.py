@@ -243,3 +243,99 @@ def test_walltime_buckets_partition_every_walltime_run() -> None:
     assert None not in buckets
     assert set(buckets) == {"capped", "teardown", "starved"}
     assert len(buckets) == len(rows)
+
+
+def _sub(task_dir: Path, index: int, score: float) -> None:
+    d = task_dir / "workdir" / "submissions" / f"{index:03d}"
+    d.mkdir(parents=True)
+    (d / "results.json").write_text(json.dumps({"aggregate": {"success_rate": score}}))
+
+
+def test_tail_mean_averages_the_most_recent_submissions(tmp_path: Path) -> None:
+    """Ordering is numeric, not lexicographic: submission 100 must not sort before 99."""
+    task = tmp_path / "TaskX"
+    for i, score in enumerate([1.0] * 99 + [0.0]):  # the LAST one is the 100th
+        _sub(task, i + 1, score)
+    mean, n = bench_aggregate._tail_mean(task, k=2)
+    assert n == 2
+    assert mean == pytest.approx(0.5)  # submissions 99 (1.0) and 100 (0.0)
+
+
+def test_tail_mean_missing_submissions(tmp_path: Path) -> None:
+    assert bench_aggregate._tail_mean(tmp_path / "nope") == (None, 0)
+
+
+def test_stability_flags_a_lucky_cell_but_not_an_agreeing_one() -> None:
+    """The real case: a FourRooms cell read 1.00 while its own recent submissions averaged 0.51."""
+    lucky = {
+        "model": "M",
+        "task": "FourRooms",
+        "success_rate": 1.0,
+        "tail_mean": 0.51,
+        "n_episodes": 10,
+    }
+    agreeing = {
+        "model": "M",
+        "task": "MemoryS17",
+        "success_rate": 0.7,
+        "tail_mean": 0.69,
+        "n_episodes": 10,
+    }
+    out = bench_aggregate.stability_markdown([lucky, agreeing])
+    assert "FourRooms" in out
+    assert "MemoryS17" not in out
+
+    assert "agree" in bench_aggregate.stability_markdown([agreeing])
+    # A run with no submissions to compare against must not be flagged.
+    assert "agree" in bench_aggregate.stability_markdown(
+        [{"model": "M", "task": "T", "success_rate": 1.0, "tail_mean": None}]
+    )
+
+
+def test_zero_episode_evaluation_is_not_a_score() -> None:
+    """A final that ran no episodes measured nothing; its 0.0 is a default. Reporting it as a
+    score puts a false zero in the table, reading exactly like a model that tried and failed."""
+    assert bench_aggregate._primary_score({"n_episodes": 0, "success_rate": 0.0}) is None
+    assert bench_aggregate._primary_score({"n_episodes": 10, "success_rate": 0.0}) == 0.0
+
+
+def test_stability_flags_a_short_evaluation_even_when_it_agrees() -> None:
+    """A 1.00 over 3 of 10 episodes is a coincidence, not a solve - flag it on episode count
+    alone, since a short run can agree with its own tail and still be weak evidence."""
+    short = {
+        "model": "M",
+        "task": "FourRooms",
+        "success_rate": 1.0,
+        "tail_mean": 0.95,
+        "n_episodes": 3,
+        "episodes_asked": 10,
+    }
+    out = bench_aggregate.stability_markdown([short])
+    assert "FourRooms" in out
+    assert "3 of 10" in out
+
+
+def test_episodes_shortfall() -> None:
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 3}, 10) == 7
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 10}, 10) is None
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 12}, 10) is None
+    assert bench_aggregate._episodes_shortfall({"n_episodes": None}, 10) is None
+    assert bench_aggregate._episodes_shortfall({"n_episodes": 3}, None) is None
+
+
+def test_stability_shows_the_score_with_errored_episodes_counted() -> None:
+    """success_rate is computed over episodes that RAN, so a controller crashing on 7 of 10 and
+    succeeding on the 3 it survives reports 1.00. The real 480B FourRooms cell: 1.00 -> 0.30."""
+    row = {
+        "model": "Qwen3-Coder-480B",
+        "task": "FourRooms",
+        "success_rate": 1.0,
+        "tail_mean": 0.51,
+        "n_episodes": 3,
+        "n_errors": 7,
+        "episodes_asked": 10,
+    }
+    out = bench_aggregate.stability_markdown([row])
+    assert "1.00" in out
+    assert "0.30" in out  # 3 successes over 10 attempted
+    assert "3 of 10" in out
