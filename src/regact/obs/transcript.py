@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import IO, Any
 
 from regact.agent.events import (
@@ -25,6 +26,9 @@ from regact.agent.events import (
 )
 from regact.obs.errors import ErrorCategory
 
+# Written by TranscriptWriter, not part of any event; readers must drop it before rebuilding.
+_TS_KEY = "ts"
+
 
 class TranscriptWriter:
     """Append normalized agent events to ``transcript.jsonl``."""
@@ -34,7 +38,13 @@ class TranscriptWriter:
         self._handle: IO[str] = open(path, "w", encoding="utf-8")  # noqa: SIM115
 
     def write(self, event: AgentEvent) -> None:
-        self._handle.write(json.dumps(event_to_json(event)) + "\n")
+        # Stamped at write time, so the stream carries WHEN as well as what. Without it the only
+        # timing signal is a file mtime, which dates the last write and nothing else - three
+        # separate questions about a slow serve (was a run degraded from the start, how long did
+        # one generation take, did a retry escalate) were unanswerable for exactly that reason.
+        payload = dict(event_to_json(event))
+        payload[_TS_KEY] = datetime.now(UTC).isoformat()
+        self._handle.write(json.dumps(payload) + "\n")
         self._handle.flush()
 
     def close(self) -> None:
@@ -81,7 +91,7 @@ def event_from_json(obj: dict[str, Any]) -> AgentEvent | None:
     cls = _EVENT_TYPES.get(str(obj.get("type", "")))
     if cls is None:
         return None
-    fields = {k: v for k, v in obj.items() if k != "type"}
+    fields = {k: v for k, v in obj.items() if k not in ("type", _TS_KEY)}
     if cls is AgentError and "category" in fields:
         try:
             fields["category"] = ErrorCategory(fields["category"])

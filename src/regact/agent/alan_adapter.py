@@ -25,12 +25,17 @@ from regact.agent.events import (
 from regact.obs.errors import ErrorCategory
 
 # Cap a truncation-recovery completion (alancode escalates the output budget to this on a
-# length-truncation; its own default is 64000). A TOKEN budget is only a TIME budget after
-# dividing by the serve's tok/s, so this number means ~17min at 12 tok/s but 100min at 2 -
-# and a slow serve then spends a large share of a task inside one generation that returns
-# nothing (measured on Adastra GLM: serve silences of 44-175min, py-spy parked in the decode
-# loop). Set ``agent.args.escalated_max_tokens`` per model for a slow serve; the trade is that
-# too low a cap fails to finish the turn the escalation exists to recover.
+# length-truncation; its own default is 64000). ONE value for every arm on purpose: the output
+# budget is part of the measurement, not a per-serve knob - an arm allowed 16000 and one allowed
+# 4096 differ in how often a turn dies truncated and in cost per call, so they are not running the
+# same benchmark. Hardware differences belong in the walltime, not here.
+#
+# The VALUE is an open trade-off, deliberately left at 12000 rather than tuned. Measured on a
+# 1.2 tok/s serve: 2.3% of completions ran to this cap and consumed 46% of ALL decode time, one
+# taking 142min, and 23 of those 24 still ended in finish_reason=length - so the escalation is
+# mostly failing at the job it exists for. But lowering it is not free: 79 completions across the
+# fleet SUCCEED above 6000 (one arm's median success is ~9000), and a cap truncates those too.
+# Cheaper serves make the waste affordable; the number cannot be chosen from one arm's data.
 _DEFAULT_ESCALATED_MAX_TOKENS = 12000
 
 

@@ -39,6 +39,39 @@ _WARNING_NOISY = ("imageio", "imageio_ffmpeg")
 _lock = threading.Lock()
 _run_log: TextIO | None = None  # the run-level tee; every console line also lands here
 
+# The agent loop logs its DECISIONS at INFO - which turn escalated its token budget, which tool
+# result was truncated, which recovery path ran. regact configures no root handler, so those
+# records reached Python's lastResort handler (floor WARNING) and were discarded: run.log is a
+# plain file that only console() writes to, not a logging handler. A whole benchmark ran with
+# the loop's reasoning switched off, and the absence of a line then proved nothing about whether
+# the event happened. Attached to the "alancode" logger and NOT the root, so the httpx/LiteLLM
+# request spam that _INFO_NOISY exists to suppress stays suppressed.
+_AGENT_LOGGER = "alancode"
+_agent_handler: logging.Handler | None = None
+
+
+def _attach_agent_log(stream: TextIO) -> None:
+    global _agent_handler
+    _agent_handler = logging.StreamHandler(stream)
+    _agent_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    logger = logging.getLogger(_AGENT_LOGGER)
+    logger.addHandler(_agent_handler)
+    logger.setLevel(logging.INFO)
+
+
+def _detach_agent_log() -> None:
+    """Drop the previous handler before the file it writes to is closed.
+
+    Tests and repeated experiments reuse the process, so a stale handler would write to a
+    closed file on the next run.
+    """
+    global _agent_handler
+    if _agent_handler is not None:
+        logging.getLogger(_AGENT_LOGGER).removeHandler(_agent_handler)
+        _agent_handler = None
+
 
 class _MinLevelFilter(logging.Filter):
     """Drop records below ``level``, regardless of the logger's own level or handlers.
@@ -81,9 +114,11 @@ def configure_console_logging(run_log_path: str | None = None) -> None:
     if _run_log is not None:
         _run_log.close()
         _run_log = None
+    _detach_agent_log()
     if run_log_path is not None:
         os.makedirs(os.path.dirname(run_log_path) or ".", exist_ok=True)
         _run_log = open(run_log_path, "a", encoding="utf-8")  # noqa: SIM115 - lives for the run
+        _attach_agent_log(_run_log)
 
 
 def console(message: str, *, task: str | None = None) -> None:

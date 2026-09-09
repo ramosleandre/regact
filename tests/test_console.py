@@ -41,3 +41,43 @@ def test_configure_is_idempotent_no_duplicate_filters() -> None:
     configure_console_logging()
     got = [f for f in logging.getLogger("arc_agi.base").filters if isinstance(f, _MinLevelFilter)]
     assert len(got) == 1
+
+
+def test_agent_decision_log_reaches_run_log_without_readmitting_http_noise(tmp_path) -> None:
+    """A whole benchmark ran with the agent loop's INFO decisions discarded: regact configures no
+    root handler, so they hit Python's lastResort floor of WARNING. The absence of a line then
+    proved nothing about whether the event happened."""
+    import logging
+
+    from regact.obs.console import configure_console_logging
+
+    run_log = tmp_path / "run.log"
+    configure_console_logging(str(run_log))
+    try:
+        logging.getLogger("alancode.query.loop").info("Escalating max_tokens to %d", 12000)
+        logging.getLogger("httpx").info("POST /v1/chat/completions 200 OK")
+    finally:
+        configure_console_logging(None)  # detaches before the file closes
+
+    written = run_log.read_text()
+    assert "Escalating max_tokens to 12000" in written
+    assert "httpx" not in written  # _INFO_NOISY must stay suppressed
+
+
+def test_reconfiguring_does_not_leave_a_handler_on_a_closed_file(tmp_path) -> None:
+    """Tests and repeated experiments reuse the process; a stale handler would write to a closed
+    file on the next run."""
+    import logging
+
+    from regact.obs.console import configure_console_logging
+
+    configure_console_logging(str(tmp_path / "first.log"))
+    configure_console_logging(str(tmp_path / "second.log"))
+    try:
+        logging.getLogger("alancode").info("after reconfigure")
+    finally:
+        configure_console_logging(None)
+
+    assert "after reconfigure" in (tmp_path / "second.log").read_text()
+    assert "after reconfigure" not in (tmp_path / "first.log").read_text()
+    assert len(logging.getLogger("alancode").handlers) == 0

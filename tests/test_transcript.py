@@ -1,6 +1,7 @@
 """Unit tests: TranscriptWriter + event serialization (transcript.jsonl)."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from regact.agent.events import AgentError, IterationComplete, ToolCall
@@ -35,3 +36,20 @@ def test_legacy_turn_complete_tag_reads_as_iteration_complete() -> None:
     """Pre-rename transcripts (bench 01) tagged this event 'TurnComplete'; readers still load it."""
     event = event_from_json({"type": "TurnComplete", "final_text": "done", "usage": None})
     assert event == IterationComplete("done")
+
+
+def test_written_events_carry_a_timestamp_and_still_round_trip(tmp_path) -> None:
+    """Every timing question about a slow serve died on events carrying only {text, type}. The
+    stamp is added at WRITE time - and the reader must drop it, or `cls(**fields)` raises TypeError
+    and every stamped event is silently skipped."""
+    import json as _json
+
+    path = tmp_path / "transcript.jsonl"
+    event = ToolCall("c1", "SubmitSolution", {"x": 1})
+    with TranscriptWriter(str(path)) as writer:
+        writer.write(event)
+
+    record = _json.loads(path.read_text().strip())
+    assert "ts" in record
+    datetime.fromisoformat(record["ts"])  # parseable, so arithmetic needs no assumed rate
+    assert event_from_json(record) == event  # the extra key must not drop the event
