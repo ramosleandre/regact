@@ -265,14 +265,18 @@ def test_tail_mean_missing_submissions(tmp_path: Path) -> None:
     assert bench_aggregate._tail_mean(tmp_path / "nope") == (None, 0)
 
 
-def test_stability_flags_a_lucky_cell_but_not_an_agreeing_one() -> None:
-    """The real case: a FourRooms cell read 1.00 while its own recent submissions averaged 0.51."""
-    lucky = {
+def test_stability_does_not_flag_a_clean_evaluation_that_beat_its_own_tail() -> None:
+    """A model that iterates ends BETTER than its earlier submissions, so a full-length
+    error-free evaluation far above its tail is improvement, not luck. The real 480B DoorKey
+    cell: 1.00 from ten clean episodes against a 0.28 tail - if 0.28 were true that is 3e-6."""
+    improved = {
         "model": "M",
-        "task": "FourRooms",
+        "task": "DoorKey",
         "success_rate": 1.0,
-        "tail_mean": 0.51,
+        "tail_mean": 0.28,
         "n_episodes": 10,
+        "n_errors": 0,
+        "episodes_asked": 10,
     }
     agreeing = {
         "model": "M",
@@ -280,16 +284,13 @@ def test_stability_flags_a_lucky_cell_but_not_an_agreeing_one() -> None:
         "success_rate": 0.7,
         "tail_mean": 0.69,
         "n_episodes": 10,
+        "n_errors": 0,
+        "episodes_asked": 10,
     }
-    out = bench_aggregate.stability_markdown([lucky, agreeing])
-    assert "FourRooms" in out
+    out = bench_aggregate.stability_markdown([improved, agreeing])
+    assert "DoorKey" not in out
     assert "MemoryS17" not in out
-
-    assert "agree" in bench_aggregate.stability_markdown([agreeing])
-    # A run with no submissions to compare against must not be flagged.
-    assert "agree" in bench_aggregate.stability_markdown(
-        [{"model": "M", "task": "T", "success_rate": 1.0, "tail_mean": None}]
-    )
+    assert "full evaluation" in out
 
 
 def test_zero_episode_evaluation_is_not_a_score() -> None:

@@ -461,13 +461,21 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def stability_markdown(rows: list[dict[str, Any]], sigmas: float = 2.0) -> str:
-    """Cells whose reported score disagrees with the run's own recent submissions.
+def stability_markdown(rows: list[dict[str, Any]]) -> str:
+    """Cells whose evaluation was too short or too broken to support the score they report.
 
-    Both numbers describe the same controller, so a large gap means the reported cell caught a
-    lucky or unlucky evaluation rather than a real difference in ability. Measured example: a
-    480B FourRooms cell read 1.00 - a solve - while its own last twenty submissions averaged
-    0.51, which is 3.1 standard errors out and would have been reported as "solves FourRooms".
+    A cell is flagged when its final evaluation ran FEWER episodes than the run asked for -
+    because episodes that raised are dropped from the denominator, so a controller crashing on
+    seven of ten and succeeding on the three it survives reports 1.00 (the real 480B FourRooms
+    cell: honestly 0.30).
+
+    Divergence from the run's own recent submissions is REPORTED but does not by itself flag a
+    cell, and that distinction cost a real solve. A model that iterates successfully ends with a
+    controller BETTER than its earlier submissions, so a final far above the tail is what
+    improvement looks like, not what luck looks like: the 480B's DoorKey 1.00 came from ten
+    clean episodes, ten successes, while its tail averaged 0.28 - and if 0.28 were the true rate
+    that outcome has probability 3e-6. Flagging it would have talked us out of exactly the solve
+    the benchmark exists to find.
     """
     flagged = []
     for row in rows:
@@ -480,10 +488,10 @@ def stability_markdown(rows: list[dict[str, Any]], sigmas: float = 2.0) -> str:
         if tail is not None:
             spread = (tail * (1.0 - tail) / (row.get("n_episodes") or 10)) ** 0.5
             deviation = abs(final - tail) / spread if spread > 0 else 0.0
-        if deviation >= sigmas or short:
+        if short:  # divergence alone is improvement, not unreliability - see docstring
             flagged.append((deviation, short, row, final, tail))
     if not flagged:
-        return "All reported cells agree with their run's recent submissions.\n"
+        return "Every reported cell ran its full evaluation.\n"
     lines = [
         "| model | task | reported | if errors counted | mean(last submissions) "
         "| sigmas out | episodes scored |",
@@ -615,11 +623,13 @@ def main(argv: list[str] | None = None) -> int:
         "passes. Read per-task cells; never average a column into a per-model score.\n"
     )
     print(coverage_markdown(rows))
-    print("\n## Stability - cells that disagree with their own run\n")
+    print("\n## Stability - cells whose evaluation did not finish\n")
     print(
-        "A cell is ONE evaluation of one controller; at n_episodes=10 its standard error is near "
-        "0.15, so a cell can land high or low by luck. These rows report a score far from the mean "
-        "of that same run's recent submissions - read them as uncertain, not as achievement.\n"
+        "Episodes that RAISED are dropped from the denominator, so a controller crashing on 7 of "
+        "10 and surviving 3 reports 1.00. These rows ran fewer episodes than asked; read them as "
+        "unsupported, not as achievement. A cell far above its own recent submissions is NOT "
+        "listed for that reason alone - after successful iteration a final controller SHOULD beat "
+        "them.\n"
     )
     print(stability_markdown(rows))
     print("\n## Outcome - is the score trustworthy? (task x model)\n")
