@@ -200,3 +200,40 @@ def test_claim_run_dir_gives_every_concurrent_run_its_own_dir(tmp_path):
     assert len(set(claimed)) == 16
     assert all(os.path.isdir(d) for d in claimed)
     assert target in claimed  # the winner keeps the plain stamp
+
+
+def test_preflight_rejects_an_unwritable_run_dir(tmp_path):
+    """A full filesystem must fail at startup, not hours in on whichever artifact wrote first."""
+    from regact.orchestration.experiment import _preflight_writable
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    try:
+        with pytest.raises(RegactError, match="cannot write artifacts"):
+            _preflight_writable(str(locked))
+    finally:
+        locked.chmod(0o755)
+
+
+def test_preflight_names_inodes_when_the_quota_is_exhausted(tmp_path, monkeypatch):
+    """EDQUOT on a cluster is usually the INODE quota with blocks still free, so the message has
+    to say so - the raw errno sent us looking at `df` while `lfs quota -g` held the answer."""
+    import builtins
+    import errno as _errno
+
+    from regact.orchestration.experiment import _preflight_writable
+
+    def _full(*args, **kwargs):
+        raise OSError(_errno.EDQUOT, "Disk quota exceeded")
+
+    monkeypatch.setattr(builtins, "open", _full)
+    with pytest.raises(RegactError, match="INODES"):
+        _preflight_writable(str(tmp_path))
+
+
+def test_preflight_passes_on_a_normal_dir_and_leaves_nothing_behind(tmp_path):
+    from regact.orchestration.experiment import _preflight_writable
+
+    _preflight_writable(str(tmp_path))
+    assert list(tmp_path.iterdir()) == []
