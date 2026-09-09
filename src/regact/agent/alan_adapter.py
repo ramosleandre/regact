@@ -25,9 +25,12 @@ from regact.agent.events import (
 from regact.obs.errors import ErrorCategory
 
 # Cap a truncation-recovery completion (alancode escalates the output budget to this on a
-# length-truncation). alancode's own default is 64000, window-clamped - ~85min on a 12 tok/s
-# model; 12000 caps it to ~17min, plenty to finish a cut-off turn. Override via
-# ``agent.args.escalated_max_tokens``.
+# length-truncation; its own default is 64000). A TOKEN budget is only a TIME budget after
+# dividing by the serve's tok/s, so this number means ~17min at 12 tok/s but 100min at 2 -
+# and a slow serve then spends a large share of a task inside one generation that returns
+# nothing (measured on Adastra GLM: serve silences of 44-175min, py-spy parked in the decode
+# loop). Set ``agent.args.escalated_max_tokens`` per model for a slow serve; the trade is that
+# too low a cap fails to finish the turn the escalation exists to recover.
 _DEFAULT_ESCALATED_MAX_TOKENS = 12000
 
 
