@@ -210,3 +210,17 @@ def test_bootstrap_with_controller_writes_solution(tmp_path: Path) -> None:
     assert (root / "code_library" / "base_controller.py").exists()
     assert (root / "code_library" / "example_controller.py").exists()
     assert (root / "framework" / "make_env.py").exists()  # base still there
+
+
+def test_only_the_final_rescore_records_video(tmp_path: Path) -> None:
+    """Per-submission video makes storage scale with thrash, not progress: one arm wrote 85
+    submissions in a single attempt. The final solution.py is still re-scored WITH video at
+    teardown, so the winning policy stays inspectable."""
+    controller = Controller(n_episodes=4, n_videos=3)
+    deps = _deps(tmp_path)
+
+    submit = controller.tools(deps)[0]
+    finalize = controller.hooks(deps)[0]
+
+    assert submit._n_videos == 0
+    assert finalize._n_videos == 3

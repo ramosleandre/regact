@@ -295,7 +295,12 @@ class Controller:
             lifecycle=deps.lifecycle,
             n_episodes=self._n_episodes,
             max_moves=self._max_moves,
-            n_videos=self._n_videos,
+            # No video per submission: an agent that resubmits without editing writes hundreds of
+            # them (one arm: 85 submissions in a single attempt, 170 videos of a policy that never
+            # solves), and storage then scales with thrash rather than with progress. The final
+            # solution.py IS re-scored with video at teardown by FinalizeControllerHook, including
+            # when a perfect submission ends the run - so the winning policy is still recorded.
+            n_videos=0,
             feature_metrics=deps.feature_metrics,
         )
         return [submit, ExitTask(deps.experiment)] if self._exit_task_enabled else [submit]

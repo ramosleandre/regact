@@ -8,6 +8,8 @@ the task list, and runs :func:`run_task` per task through the :class:`Scheduler`
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
 import uuid
 from collections import Counter
@@ -78,6 +80,34 @@ def _claim_run_dir(path: str) -> str:
     return unique
 
 
+def _artifact_write_error(path: str, exc: OSError) -> RegactError:
+    """A legible error for a filesystem that will not take this run's artifacts."""
+    hint = ""
+    if exc.errno in (errno.EDQUOT, errno.ENOSPC):
+        hint = " - filesystem or quota full; on a cluster check `lfs quota` for INODES too"
+    return RegactError(
+        ErrorCategory.EVAL_HARNESS, f"cannot write artifacts under {path}: {exc}{hint}"
+    )
+
+
+def _preflight_writable(path: str) -> None:
+    """Fail before any walltime is spent if ``path`` cannot take a new file.
+
+    A full filesystem otherwise surfaces hours into a run, as a raw ``OSError`` on whichever
+    artifact happened to write first - the traceback names ``experiment_state.json.tmp``, not the
+    quota. Creating a dir is one inode and writing to it is another, so both are probed.
+    """
+    probe = os.path.join(path, f".regact-probe-{uuid.uuid4().hex[:8]}")
+    try:
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("probe")
+    except OSError as exc:
+        raise _artifact_write_error(path, exc) from exc
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(probe)
+
+
 def _link_latest(run_dir: str) -> None:
     """Point ``<parent>/latest`` at this run, so tooling can name it without the stamp."""
     link = os.path.join(os.path.dirname(run_dir), "latest")
@@ -107,10 +137,14 @@ async def run_experiment(config: RunConfig, *, output_root: str | None = None) -
     """Run every task ``n_attempts_per_task`` times; return ``{run_label: exit_reason}``."""
     root = resolve_run_dir(config, output_root=output_root)
     # An explicit output_root names one exact dir (tests); a stamped path is claimed exclusively.
-    if output_root is not None:
-        os.makedirs(root, exist_ok=True)
-    else:
-        root = _claim_run_dir(root)
+    try:
+        if output_root is not None:
+            os.makedirs(root, exist_ok=True)
+        else:
+            root = _claim_run_dir(root)
+    except OSError as exc:
+        raise _artifact_write_error(root, exc) from exc
+    _preflight_writable(root)
     # Silence third-party INFO noise AND tee the terminal narration to <run>/run.log, so the whole
     # experiment is reviewable from the run folder (live or after it finishes).
     configure_console_logging(run_log_path=os.path.join(root, "run.log"))
