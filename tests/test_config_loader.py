@@ -269,3 +269,18 @@ def test_launch_section_is_copied_verbatim() -> None:
     # Absent section is an empty dict, never None - callers index it without guarding.
     bare = run_config_from_mapping({"agent": {"name": "alan"}, "problem": {"name": "minigrid"}})
     assert bare.launch == {}
+
+
+def test_launch_facts_from_env_records_only_what_is_set() -> None:
+    """The job id cannot come from the launcher - sbatch returns it only after submission - so the
+    running process records it. A field that is absent is OMITTED, never written as None: a
+    missing slurm_job_id must mean "not under Slurm", not "under Slurm and unreported"."""
+    from regact.config.loader import launch_facts_from_env
+
+    assert launch_facts_from_env({}) == {}  # a laptop run keeps an empty record
+    assert launch_facts_from_env({"SLURM_JOB_ID": "5416609"}) == {"slurm_job_id": "5416609"}
+    assert launch_facts_from_env(
+        {"SLURM_JOB_ID": "5416609", "SLURM_JOB_NODELIST": "nid[001-002]"}
+    ) == {"slurm_job_id": "5416609", "slurm_nodelist": "nid[001-002]"}
+    # An empty string is unset, not a value - Slurm exports blanks in some contexts.
+    assert launch_facts_from_env({"SLURM_JOB_ID": ""}) == {}

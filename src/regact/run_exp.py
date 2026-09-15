@@ -15,13 +15,16 @@ from typing import Any
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from regact.config.loader import run_config_from_mapping
+from regact.config.loader import launch_facts_from_env, run_config_from_mapping
 from regact.orchestration.experiment import run_experiment
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
     raw: Any = OmegaConf.to_container(cfg, resolve=True)
+    # Merged here rather than in the mapping: the process environment is an input of this
+    # entry point, not of the config schema, and a pure mapping stays testable off-cluster.
+    raw["launch"] = {**(raw.get("launch") or {}), **launch_facts_from_env()}
     config = run_config_from_mapping(raw)
     asyncio.run(run_experiment(config))  # progress + summary go to the console (see obs.console)
 

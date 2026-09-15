@@ -8,6 +8,7 @@ config) keeps it simple and avoids ``StrEnum`` round-trip surprises.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -94,6 +95,24 @@ def _controller_from(raw: Any) -> ControllerConfig:
         if fields.get(name) is not None:
             fields[name] = int(fields[name])
     return ControllerConfig(**fields)
+
+
+# Launch facts the LAUNCHER cannot pass: sbatch only returns a job id after submission, so the
+# running process is the first thing that knows it.
+_ENV_LAUNCH_FIELDS = {
+    "slurm_job_id": "SLURM_JOB_ID",
+    "slurm_nodelist": "SLURM_JOB_NODELIST",
+}
+
+
+def launch_facts_from_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The ``launch`` fields only the running process can see, omitting any that is unset.
+
+    Omitted rather than recorded as ``None`` so a laptop run's record stays empty and a missing
+    field always means "not under Slurm", never "under Slurm and unreported".
+    """
+    source = os.environ if env is None else env
+    return {key: source[var] for key, var in _ENV_LAUNCH_FIELDS.items() if source.get(var)}
 
 
 def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
