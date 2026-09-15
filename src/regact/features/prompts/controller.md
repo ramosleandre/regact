@@ -12,3 +12,8 @@ We advise you follow this approach to solve the game:
 - 4) Submit EARLY: as soon as your controller makes any progress at all, import it into `solution.py`'s `get_controller` function and run `python framework/control.py SubmitSolution` - do not wait until it performs well. Every submission is scored and the result is reported back to you, so it is your main feedback signal; keep iterating and re-submitting as it improves.
 
 {{FINISH_INSTRUCTIONS}}
+
+## Framework commands through `framework/control.py`
+
+Some framework actions run through the `framework/control.py` script, like any other shell command; each prints its result (for a submission, your score) to stdout:
+{control_commands}

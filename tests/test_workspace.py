@@ -5,6 +5,7 @@ from pathlib import Path
 
 from regact.config.schema import Lifecycle
 from regact.features.base import Feature, FeatureContext, Hook, RunDeps, TemplateFile
+from regact.features.controller import Controller
 from regact.obs.result import EvalResult
 from regact.prompt.builder import PromptBuilder
 from regact.session.state import ExperimentState
@@ -226,6 +227,9 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
             _StubProblem(),  # type: ignore[arg-type]
             "lvl1",
             [_StubFeature()],
+            # the always-on controller carries the control commands, so a prompt built without
+            # one teaches no way to invoke the tools it names
+            controller=Controller(exit_task_enabled=True),
             lifecycle=Lifecycle.MULTI_INSTANCE,
             tool_protocol=tool_protocol,  # type: ignore[arg-type]
             tool_names=["SubmitSolution", "ExitTask"],
@@ -233,7 +237,7 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
 
     bash = build("bash_block")
     assert "Working in the terminal" in bash and "cat > code_library" in bash
-    assert "framework/control.py SubmitSolution" in bash  # submit/exit folded in
+    assert "framework/control.py SubmitSolution" in bash  # taught by the controller section
     assert "# Framework tools" not in bash  # merged away
 
     # A bash-only dialect: hermes_xml teaches the same one-command-per-turn loop with the
@@ -241,7 +245,9 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
     hermes = build("hermes_xml")
     assert "<tool_call>" in hermes and "<function=Bash>" in hermes
     assert "framework/control.py SubmitSolution" in hermes
-    assert "```bash" not in hermes  # not the fenced-block dialect
+    # A <tool_call> dialect must never be shown a ```bash fence - it teaches the markup we need
+    # it NOT to emit, which is the imitation drift these per-dialect fragments exist to prevent.
+    assert "```bash" not in hermes
 
     # glm dialect: GLM's native <tool_call>Bash<arg_key>command</arg_key><arg_value>...
     # The example must PARSE under the same regex alancode's GLMFormat uses, or it re-teaches the
@@ -262,14 +268,67 @@ def test_prompt_builder_bash_block_merges_shell_examples_into_control_block() ->
 def test_control_cli_prompt_and_binding_agree_for_every_protocol() -> None:
     """The seam invariant behind the glm 503 bug: a protocol whose PROMPT teaches the workdir
     control CLI must be exactly one task.py BINDS the channel for - both key off uses_control_cli.
-    Guards every protocol so a new dialect cannot re-teach a channel that was never bound."""
-    from regact.agent.capabilities import TOOL_PROTOCOLS, uses_control_cli
-    from regact.prompt.builder import _control_channel_block
+    Guards every protocol so a new dialect cannot re-teach a channel that was never bound.
 
+    The commands moved out of the terminal fragment into the controller section, so both places
+    that can teach them are checked together.
+    """
+    from regact.agent.capabilities import TOOL_PROTOCOLS, uses_control_cli
+    from regact.prompt.builder import _fill_control_commands, _framework_tools_block
+
+    names = ["SubmitSolution", "ExitTask"]
+    stub = (
+        "# Controller\n\nbody\n\n"
+        "## Framework commands through `framework/control.py`\n\n{control_commands}\n"
+    )
     for protocol in TOOL_PROTOCOLS:
-        block = _control_channel_block(protocol, ["SubmitSolution", "ExitTask"])  # type: ignore[arg-type]
-        teaches_control_cli = "framework/control.py" in block
+        taught = _framework_tools_block(protocol, names) + _fill_control_commands(
+            stub, protocol, names
+        )
+        teaches_control_cli = "python framework/control.py" in taught
         assert teaches_control_cli == uses_control_cli(protocol), protocol  # prompt == binding
+
+
+def test_prompt_sections_are_ordered_for_reading() -> None:
+    """Act-then-observe: the terminal mechanics precede the environment and the game, so the
+    agent knows HOW to act before it is told what it acts on."""
+    system = PromptBuilder().build_system_prompt(
+        _StubProblem(),  # type: ignore[arg-type]
+        "lvl1",
+        [],
+        controller=Controller(exit_task_enabled=False),
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+        tool_protocol="bash_block",
+        tool_names=["SubmitSolution"],
+    )
+    order = [
+        system.index("# Role"),
+        system.index("# Your working directory"),
+        system.index("# Working in the terminal"),
+        system.index("# Environment interface"),
+        system.index("# Controller"),
+    ]
+    assert order == sorted(order), order
+    # The multi-instance lifecycle text restated make_env() semantics already given above.
+    assert "Measuring what an action does" not in system
+
+
+def test_prompt_never_invites_exit_when_exit_task_is_disabled() -> None:
+    """The benchmark runs with ExitTask off; the terminal fragment used to tell the agent to
+    "exit the task" anyway, contradicting the controller section in the same prompt."""
+    for protocol in ("bash_block", "glm", "hermes_xml"):
+        system = PromptBuilder().build_system_prompt(
+            _StubProblem(),  # type: ignore[arg-type]
+            "lvl1",
+            [],
+            controller=Controller(exit_task_enabled=False),
+            lifecycle=Lifecycle.MULTI_INSTANCE,
+            tool_protocol=protocol,  # type: ignore[arg-type]
+            tool_names=["SubmitSolution"],
+        )
+        assert "exit the task" not in system, protocol
+        assert "ExitTask" not in system, protocol
+        assert "{control_commands}" not in system, protocol
 
 
 def test_prompt_builder_drops_empty_feature_fragments() -> None:

@@ -15,19 +15,27 @@ If you are a thinking / reasoning model, verbalize in your answer the conclusion
 
 ## Correct answer format
 
-A well-formed answer is your reasoning as plain prose, then exactly ONE `Bash` tool call. The call is a `<tool_call>` block naming the `Bash` function with a single `command` parameter, and your answer ends at its closing `</tool_call>`. For example your whole answer would be:
-
-From the last run I confirmed `obs.available_actions` is `[0..6]`, that action 2 moves forward and action 5 toggles a door, and that my controller reaches the key but never picks it up - the pickup action is 3, not 5. Next I will make the controller pick up the key when it is adjacent, then re-test on the env.
+Your answer is your reasoning as plain prose, then exactly ONE `Bash` tool call in exactly this shape, ending at its closing `</tool_call>`:
 
 <tool_call>
 <function=Bash>
 <parameter=command>
-sed -i 's/return A_TOGGLE/return A_PICKUP/' code_library/doorkey_controller.py && python code_library/test_doorkey.py
+YOUR SHELL COMMAND
 </parameter>
 </function>
 </tool_call>
 
-The reasoning before it is your memory; the tool call is your action. Emit exactly one `<tool_call>` per answer and stop at its closing `</tool_call>` - do not add more calls, narrate the result you have not seen yet, or wrap the call in any extra tag.
+The prose is your memory for the next iteration; the call is your action. Any other shape is not executed. For example, your whole answer would be:
+
+From the last run I confirmed the action ids for moving and for interacting with the cell ahead, and that my controller reaches the target but never interacts with it. Next I will fix that step in the controller and re-run the test script.
+
+<tool_call>
+<function=Bash>
+<parameter=command>
+sed -i 's/return A_MOVE/return A_INTERACT/' code_library/my_controller.py && python code_library/test_controller.py
+</parameter>
+</function>
+</tool_call>
 
 ## Typical commands (the `command` value)
 
@@ -48,8 +56,3 @@ nl -ba solution.py | sed -n '1,40p'
 Run a script, or list a directory:
 python code_library/explore.py
 ls code_library
-
-## Special actions through `framework/control.py`
-
-Some framework actions are run through the `framework/control.py` script - each prints its result (e.g. your score) to stdout. Submit your solution once `solution.py` is correctly edited (you receive a score so you can check it works as expected), and exit the task once you are satisfied with your solution and do not want to improve it further. Run them as the `command` of a `Bash` tool call, exactly like any other shell command:
-{control_commands}

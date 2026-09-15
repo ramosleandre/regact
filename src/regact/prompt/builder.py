@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
 _PROMPT_DIR = Path(__file__).parent
 _SYSTEM_MD = _PROMPT_DIR / "system.md"
-_LIFECYCLE_MD = {
-    Lifecycle.SINGLE_INSTANCE: _PROMPT_DIR / "lifecycle_single.md",
-    Lifecycle.MULTI_INSTANCE: _PROMPT_DIR / "lifecycle_multi.md",
-}
+_ENVIRONMENT_MD = _PROMPT_DIR / "environment.md"
+# Only the single-instance lifecycle still contributes: the multi-instance text restated
+# make_env() semantics already given under "Environment interface".
+_LIFECYCLE_MD = {Lifecycle.SINGLE_INSTANCE: _PROMPT_DIR / "lifecycle_single.md"}
 # One fragment per bash-only dialect (native/client_cli read none - see _control_channel_block).
 # Each teaches the same one-command-per-turn loop; they differ only in the tool-call markup.
 _TERMINAL_MD = {
@@ -35,6 +35,7 @@ _TERMINAL_MD = {
     "hermes_xml": _PROMPT_DIR / "hermes_xml_terminal.md",  # Qwen/hermes <tool_call> markup
     "glm": _PROMPT_DIR / "glm_terminal.md",  # GLM <tool_call>Bash<arg_key>/<arg_value> markup
 }
+_CONTROL_SECTION_HEADING = "## Framework commands through"
 _FEATURES_INTRO = "# Features :\n\nYou are given the following features to help you."
 
 # Tier-2 of the empty_response fix (opt-in, for the A/B vs the in-loop nudge alone):
@@ -91,18 +92,24 @@ class PromptBuilder:
         (cache-friendly); the dynamic observation is sent separately as the first message.
         """
         ctx = FeatureContext(problem_name=problem.name, task_name=task_name, workdir="")
+        # Reading order: who you are, where you are, HOW you act, what you act on, the game,
+        # how to solve it - so the mechanics of acting precede the game description.
         sections = [
             _SYSTEM_MD.read_text(encoding="utf-8"),
+            _terminal_block(tool_protocol),
+            _ENVIRONMENT_MD.read_text(encoding="utf-8"),
             problem.build_prompt(task_name, info_mode=info_mode, obs_mode=obs_mode),
         ]
         if controller is not None and (core := controller.prompt_fragment(ctx)):
-            sections.append(core)  # the controller is core, not under "# Features"
+            # the controller is core, not under "# Features"; it also carries the control CLI
+            sections.append(_fill_control_commands(core, tool_protocol, tool_names or []))
         fragments = [frag for f in features if (frag := f.prompt_fragment(ctx))]
         if fragments:  # generic intro, then each feature describes its own deliverable
             sections.append(_FEATURES_INTRO)
             sections += fragments
-        sections.append(_control_channel_block(tool_protocol, tool_names or []))
-        sections.append(_LIFECYCLE_MD[lifecycle].read_text(encoding="utf-8"))
+        sections.append(_framework_tools_block(tool_protocol, tool_names or []))
+        if (lifecycle_md := _LIFECYCLE_MD.get(lifecycle)) is not None:
+            sections.append(lifecycle_md.read_text(encoding="utf-8"))
         if (hint := _VERBALIZE_VARIANTS.get(verbalize_variant)) is not None:
             sections.append(hint)
         return "\n\n".join(s.strip() for s in sections if s and s.strip())
@@ -117,29 +124,61 @@ class PromptBuilder:
         return start
 
 
-def _control_channel_block(
+def _terminal_block(tool_protocol: ToolProtocol) -> str:
+    """The "# Working in the terminal" fragment: the one-command-per-turn loop and shell idioms.
+
+    Bash-only dialects each have one (they differ only in the tool-call markup); native and
+    client_cli drive their own loop and read none.
+    """
+    path = _TERMINAL_MD.get(tool_protocol)
+    return path.read_text(encoding="utf-8") if path is not None else ""
+
+
+def _fill_control_commands(
+    controller_md: str,
     tool_protocol: ToolProtocol,
     tool_names: list[str],
 ) -> str:
-    """How the agent invokes tools - selected by the agent's ``tool_protocol``, never by a
-    feature or a concrete agent name.
+    """Resolve the controller section's trailing control-CLI subsection.
+
+    The commands are taught HERE rather than in the terminal fragment so that what ends a run is
+    stated once, by the controller's finish instructions - the two used to disagree, the terminal
+    text inviting the agent to "exit the task" while ExitTask was disabled. Protocols that do not
+    reach the tools over the workdir CLI drop the subsection: teaching a channel task.py never
+    binds is the seam bug that made every glm submit 503 (see :func:`_framework_tools_block`).
+    """
+    head, marker, _ = controller_md.partition(_CONTROL_SECTION_HEADING)
+    if not marker:
+        return controller_md
+    if not tool_names or tool_protocol not in _TERMINAL_MD:
+        return head.rstrip()
+    commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
+    # Only the fenced-block dialect gets a ```bash fence: showing one to a <tool_call>
+    # dialect teaches the markup we need it NOT to emit.
+    if tool_protocol == "bash_block":
+        commands = f"```bash\n{commands}\n```"
+    return controller_md.replace("{control_commands}", commands)
+
+
+def _framework_tools_block(
+    tool_protocol: ToolProtocol,
+    tool_names: list[str],
+) -> str:
+    """How a NON-terminal agent invokes the framework tools - selected by ``tool_protocol``,
+    never by a feature or a concrete agent name.
 
     Generic: lists the tool NAMES (from the run's tools) and the invocation the protocol
-    supports; it never imports a tool or a feature type. A bash-only dialect (bash_block,
-    hermes_xml) reads its whole terminal fragment (one-command-per-turn loop + shell idioms)
-    and folds submit/exit in; the framework actions are the same shell commands in either.
+    supports; it never imports a tool or a feature type. A bash-only dialect returns nothing
+    here - its commands ride the controller section (:func:`_fill_control_commands`) - but the
+    seam invariant is unchanged: a protocol whose prompt teaches the workdir control CLI is
+    exactly one task.py binds it for, both keyed off ``uses_control_cli``.
     """
     if not tool_names:
         return ""
-    # native: in-process loop tools, so the model calls them directly. Every other protocol reaches
-    # them over the workdir control CLI - the SAME split task.py binds on via uses_control_cli (a
-    # channel taught here but not bound there is the seam bug).
     if not uses_control_cli(tool_protocol):
         return f"# Framework tools\n\nCall the framework tools directly: {', '.join(tool_names)}."
-    if tool_protocol in _TERMINAL_MD:  # bash-only dialect: fold submit/exit into its fragment
-        commands = "\n".join(f"python framework/control.py {name}" for name in tool_names)
-        terminal = _TERMINAL_MD[tool_protocol].read_text(encoding="utf-8")
-        return terminal.replace("{control_commands}", commands).strip()
+    if tool_protocol in _TERMINAL_MD:
+        return ""
     # client_cli (Claude/codex): a plain list of the control commands
     lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
     return (
