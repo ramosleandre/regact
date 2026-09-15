@@ -139,6 +139,10 @@ class RunConfig:
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap
     experiment_name: str | None = None
     output_root: str = "experiments"
+    # Free-form launch record, copied verbatim into config.json: how the LAUNCHER invoked this run
+    # (attempt_index, serve mode, quant, slurm job id) - facts the harness cannot know about itself.
+    # Untyped on purpose, so the launcher can add a field without a schema change here.
+    launch: dict[str, Any] = field(default_factory=dict)
 
 
 def redacted_config_dict(config: RunConfig) -> dict[str, Any]:

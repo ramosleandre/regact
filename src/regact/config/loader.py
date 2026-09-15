@@ -130,4 +130,5 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         sandbox_opts=dict(data.get("sandbox_opts") or {}),
         experiment_name=data.get("experiment_name"),
         output_root=str(data.get("output_root", "experiments")),
+        launch=dict(data.get("launch") or {}),
     )

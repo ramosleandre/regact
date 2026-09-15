@@ -466,3 +466,44 @@ def test_by_arm_pivot_separates_observability_settings() -> None:
     by_arm = bench_aggregate._pivot(rows, "success_rate", "experiment")
     assert "| task | M |" in pooled  # one column, both arms averaged into it
     assert "alan-M-fo" in by_arm and "alan-M-po" in by_arm
+
+
+def _launch_tree(tmp_path: Path, specs: list[tuple[str, int | None]]) -> Path:
+    for stamp, index in specs:
+        config: dict[str, object] = {
+            "agent": {"name": "alan", "model": "openai/M"},
+            "controller": {"exit_task_enabled": False},
+            "problem": {"name": "minigrid"},
+        }
+        if index is not None:
+            config["launch"] = {"attempt_index": index}
+        run = tmp_path / "alan-M-Q8-po" / stamp / "MiniGrid-DoorKey-8x8-v0"
+        (run / "logs").mkdir(parents=True)
+        (run / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    return tmp_path
+
+
+def test_launch_attempt_index_identifies_attempts_a_fanout_layout_cannot(tmp_path: Path) -> None:
+    """One Slurm job per attempt writes no attempt_N dir, so the layout cannot say which attempt a
+    run is. The launcher knows, and records it; that index then distinguishes a genuine RERUN of
+    an attempt from a separate attempt, which nothing on disk can do."""
+    five = [(f"2026-09-20_1{i}-00-00", i) for i in range(1, 6)]
+    rows = bench_aggregate.collect_runs(_launch_tree(tmp_path, five), all_stamps=False)
+    assert sorted(row["attempt"] for row in rows) == [1, 2, 3, 4, 5]
+
+
+def test_a_rerun_of_one_attempt_collapses_to_its_newest_stamp(tmp_path: Path) -> None:
+    specs = [(f"2026-09-20_1{i}-00-00", i) for i in range(1, 6)]
+    specs.append(("2026-09-20_19-00-00", 3))  # attempt 3 relaunched later
+    rows = bench_aggregate.collect_runs(_launch_tree(tmp_path, specs), all_stamps=False)
+    assert sorted(row["attempt"] for row in rows) == [1, 2, 3, 4, 5]  # six dirs, five attempts
+    kept = next(row for row in rows if row["attempt"] == 3)
+    assert kept["stamp"] == "2026-09-20_19-00-00"
+
+
+def test_without_the_launch_key_the_stamp_is_still_the_identity(tmp_path: Path) -> None:
+    """Round 03 and older trees have no launch section; they must keep counting every stamp."""
+    five = [(f"2026-09-20_1{i}-00-00", None) for i in range(1, 6)]
+    rows = bench_aggregate.collect_runs(_launch_tree(tmp_path, five), all_stamps=False)
+    assert len(rows) == 5
+    assert {row["attempt"] for row in rows} == {None}

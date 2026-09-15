@@ -251,3 +251,21 @@ def test_experiment_profile_respects_cli_agent_override() -> None:
     assert "reasoning_effort" in config.agent.args  # codex's own args, no claude leftovers
     # the profile's experiment fields still apply (the controller's own knob)
     assert config.controller.shadow_replay is True
+
+
+def test_launch_section_is_copied_verbatim() -> None:
+    """The launcher records facts the harness cannot know about itself (which attempt this job is,
+    how the model was served). It is untyped on purpose: a launcher must be able to add a field
+    without a schema change here, so an unknown key is carried, not dropped."""
+    config = run_config_from_mapping(
+        {
+            "agent": {"name": "alan"},
+            "problem": {"name": "minigrid"},
+            "launch": {"attempt_index": 3, "serve_mode": "vllm", "slurm_job_id": 5416609},
+        }
+    )
+    assert config.launch == {"attempt_index": 3, "serve_mode": "vllm", "slurm_job_id": 5416609}
+    assert redacted_config_dict(config)["launch"]["attempt_index"] == 3
+    # Absent section is an empty dict, never None - callers index it without guarding.
+    bare = run_config_from_mapping({"agent": {"name": "alan"}, "problem": {"name": "minigrid"}})
+    assert bare.launch == {}

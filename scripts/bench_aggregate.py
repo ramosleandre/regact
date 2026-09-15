@@ -97,8 +97,14 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     A run dir is any directory that holds a ``config.json`` next to a ``logs/`` or
     ``workdir/``; they are found at any depth via rglob, so both a flat
     ``root/exp/stamp/task`` and a model-grouped ``root/model/exp/stamp/task``
-    layout work. Without ``all_stamps``, only the latest stamp per
-    (experiment, task) is kept - the newest rerun wins.
+    layout work.
+
+    Without ``all_stamps``, repeats of one cell collapse to the newest - but only repeats that
+    can be TOLD APART from separate attempts. A cell's attempts are identified by
+    ``launch.attempt_index`` when the launcher recorded one, else by an ``attempt_N`` dir, else
+    by the stamp itself; only a collision WITHIN one identity is a rerun. So a fan-out that gives
+    each attempt its own job (``n_attempts_per_task=1``, no ``attempt_N`` dir) keeps all of them,
+    and never silently reports five attempts as one.
     """
     rows: list[dict[str, Any]] = []
     for config_path in sorted(root.rglob("config.json")):
@@ -112,6 +118,11 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
         # holds the artifacts, but the task name is its parent's.
         task_dir = run_dir.parent if _ATTEMPT_RE.fullmatch(run_dir.name) else run_dir
         attempt = int(run_dir.name.removeprefix("attempt_")) if task_dir is not run_dir else None
+        # A launcher that fans out one job per attempt knows the index the layout cannot express;
+        # it wins, because it distinguishes a rerun from an attempt and nothing on disk can.
+        recorded = (config.get("launch") or {}).get("attempt_index")
+        if recorded is not None:
+            attempt = int(recorded)
         stamp = task_dir.parent
         rows.append(
             _run_row(stamp.parent.name, stamp.name, task_dir.name, run_dir, config, attempt)
@@ -125,12 +136,23 @@ def collect_runs(root: Path, *, all_stamps: bool) -> list[dict[str, Any]]:
     # IS the identity: count them all. Over-counting a rerun is visible as a raised n; dropping
     # attempts is not visible at all.
     latest: dict[tuple[str, str, Any], dict[str, Any]] = {}
+    superseded = 0
     for row in rows:
         identity = row["attempt"] if row["attempt"] is not None else row["stamp"]
         key = (row["experiment"], row["task"], identity)
-        if key not in latest or row["stamp"] > latest[key]["stamp"]:
+        if key not in latest:
+            latest[key] = row
+            continue
+        superseded += 1  # same identity, two stamps: a genuine rerun, newest wins
+        if row["stamp"] > latest[key]["stamp"]:
             latest[key] = row
     kept = list(latest.values())
+    if superseded:
+        print(
+            f"note: {superseded} run(s) share an attempt identity with a later stamp and were "
+            "read as reruns; the newest of each was kept.",
+            file=sys.stderr,
+        )
     _warn_ambiguous_stamps(kept)
     return kept
 
