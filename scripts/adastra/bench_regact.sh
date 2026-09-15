@@ -172,4 +172,4 @@ if [ -n "${PID}" ]; then
 fi
 echo "[bench] done: $((${#TASKS[@]} - failed))/${#TASKS[@]} tasks ran clean"
 # A task whose run_exp exited non-zero never ran; the job must not read as COMPLETED.
-[ "${failed}" -eq 0 ]
+exit $(( failed != 0 ))
