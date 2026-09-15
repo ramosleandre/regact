@@ -9,8 +9,9 @@ You can rely on this environment being fully observable and deterministic: the s
 You can access the data (for fixing your model) with, run from the workdir root:
 ```python
 from world_model.verify import load_transitions
-t = load_transitions()[17]     # inspect the transition of index 17
-print(t.keys())                # o, a, r, o2, done  (reward/done/info also live inside o and o2)
+
+t = load_transitions()[17]  # inspect the transition of index 17
+print(t.keys())  # o, a, r, o2, done  (reward/done/info also live inside o and o2)
 ```
 
 **Write your model** in `world_model/` (keep all model code there):
