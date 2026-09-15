@@ -337,6 +337,8 @@ def _classify_outcome(
     exit_reason: str | None,
     controller_crashed: bool = False,
     reasoning_only_rate: float | None = None,
+    exit_task_enabled: bool = True,
+    submissions: int | None = None,
 ) -> str:
     """Whether a cell's score is a trustworthy capability signal.
 
@@ -354,7 +356,12 @@ def _classify_outcome(
       severe enough to kill the run; on bench-01 it caught NOTHING, and all 23 runs of the three
       affected arms exited ``agent_exit`` and were scored as clean failures with a quarter of
       their turns destroyed. Partial damage is the common case, so exit_reason alone cannot see it;
-    - ``walltime``: hit the job walltime before finishing - UNRELIABLE;
+    - ``walltime``: hit the walltime before finishing - UNRELIABLE, EXCEPT where the run had no
+      way to end itself. With ``exit_task_enabled=False`` a run stops only on a perfect score, so
+      reaching the attempt limit is the designed ending, not a failure to finish, and a run that
+      SUBMITTED carries a score it earned. One that never submitted was scored only by
+      ``FinalizeControllerHook``, so that number is ours rather than the model's and stays
+      unreliable under either design (the same split :func:`_walltime_bucket` draws);
     - ``no-final``: no scored result (still running, or killed before teardown);
     - ``controller-crashed``: EVERY episode raised, so the controller never ran. Distinct
       from a 0.0, which the table otherwise renders identically - one is a policy that
@@ -367,9 +374,14 @@ def _classify_outcome(
         return "solve"
     if exit_reason == "agent_api":
         return "harness-killed"
-    if exit_reason == "walltime_limit":
+    # A budgeted run (no ExitTask) that submitted ended the only way it could, so it is read
+    # exactly like a clean exit; without a submission the score is the harness's, not the model's.
+    budgeted_end = (
+        exit_reason == "walltime_limit" and not exit_task_enabled and (submissions or 0) > 0
+    )
+    if exit_reason == "walltime_limit" and not budgeted_end:
         return "walltime"
-    if exit_reason == "agent_exit":
+    if exit_reason == "agent_exit" or budgeted_end:
         if success_rate is None:
             return "no-final"
         if reasoning_only_rate is not None and reasoning_only_rate >= _REASONING_ONLY_DEGRADED:
@@ -392,6 +404,7 @@ def _run_row(
     model = str(agent.get("model") or "?").removeprefix("openai/")
     state = _read_json(task_dir / "logs" / "experiment_state.json") or {}
     reasoning_only = _reasoning_only_rate(task_dir / "logs" / "transcript.jsonl")
+    exit_task_enabled = bool((config.get("controller") or {}).get("exit_task_enabled", True))
     final = _read_json(task_dir / "workdir" / "submissions" / "final" / "results.json") or {}
     aggregate = final.get("aggregate", {})
     transcript = _count_lines(
@@ -418,7 +431,10 @@ def _run_row(
             state.get("exit_reason"),
             controller_crashed=bool(aggregate.get("n_errors")) and not aggregate.get("n_episodes"),
             reasoning_only_rate=reasoning_only,
+            exit_task_enabled=exit_task_enabled,
+            submissions=state.get("submission_count"),
         ),
+        "exit_task_enabled": exit_task_enabled,
         "reasoning_only_rate": reasoning_only,
         "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
         "tail_mean": _tail_mean(task_dir)[0],  # the same controller's neighbourhood, for stability
@@ -486,7 +502,7 @@ def _walltime_bucket(row: dict[str, Any]) -> str | None:
     return "capped" if (row.get("submissions") or 0) > 0 else "teardown"
 
 
-def coverage_markdown(rows: list[dict[str, Any]]) -> str:
+def coverage_markdown(rows: list[dict[str, Any]], column: str = "model") -> str:
     """Per-model coverage, because incomplete columns here are NOT missing at random.
 
     A slow serve finishes the easy tasks and times out on the hard ones, so the cells a model does
@@ -494,14 +510,14 @@ def coverage_markdown(rows: list[dict[str, Any]]) -> str:
     capability. This table exists so that skew is visible next to the pivots rather than inferred.
     """
     tasks = {row["task"] for row in rows}
-    models = sorted({row["model"] for row in rows})
+    models = sorted({row[column] for row in rows})
     lines = [
-        "| model | tasks | attempts/task | shape | solved | budget-capped "
+        f"| {column} | tasks | attempts/task | shape | solved | budget-capped "
         "| wt-capped | wt-teardown | wt-starved | missing |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for model in models:
-        mine = [row for row in rows if row["model"] == model]
+        mine = [row for row in rows if row[column] == model]
         covered = {row["task"] for row in mine}
         per_task = collections.Counter(row["task"] for row in mine)
         # Count every benchmark task, missing ones as 0: that is what exposes raggedness.
@@ -593,13 +609,18 @@ def _cell(values: list[Any]) -> str:
     return top if count == len(present) else f"{top} {count}/{len(present)}"
 
 
-def _pivot(rows: list[dict[str, Any]], field: str) -> str:
-    """One row per task, one column per model; each cell aggregates that pair's attempts."""
-    models = sorted({row["model"] for row in rows})
+def _pivot(rows: list[dict[str, Any]], field: str, column: str = "model") -> str:
+    """One row per task, one column per ``column``; each cell aggregates that pair's attempts.
+
+    ``column="experiment"`` keys by ARM (``alan-<model>-fo`` / ``-po``) instead of pooling both
+    into one model column - which is what a round comparing observability settings needs, since
+    the pooled cell averages two different experiments.
+    """
+    models = sorted({row[column] for row in rows})
     tasks = sorted({row["task"] for row in rows})
     grouped: dict[tuple[str, str], list[Any]] = {}
     for row in rows:
-        grouped.setdefault((row["task"], row["model"]), []).append(row.get(field))
+        grouped.setdefault((row["task"], row[column]), []).append(row.get(field))
     lines = ["| task | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
     for task in tasks:
         cells = [_cell(grouped.get((task, m), [])) for m in models]
@@ -607,22 +628,22 @@ def _pivot(rows: list[dict[str, Any]], field: str) -> str:
     return "\n".join(lines)
 
 
-def pivot_markdown(rows: list[dict[str, Any]]) -> str:
+def pivot_markdown(rows: list[dict[str, Any]], column: str = "model") -> str:
     """Success-rate pivot: one row per task, one column per model."""
-    return _pivot(rows, "success_rate")
+    return _pivot(rows, "success_rate", column)
 
 
-def controller_pivot_markdown(rows: list[dict[str, Any]]) -> str:
+def controller_pivot_markdown(rows: list[dict[str, Any]], column: str = "model") -> str:
     """Controller-state pivot (stub/trivial/reasoned) - the behavioral signal that,
     unlike success, is not confounded by walltime."""
-    return _pivot(rows, "controller")
+    return _pivot(rows, "controller", column)
 
 
-def outcome_pivot_markdown(rows: list[dict[str, Any]]) -> str:
+def outcome_pivot_markdown(rows: list[dict[str, Any]], column: str = "model") -> str:
     """Outcome pivot: whether each cell's score is trustworthy (solve/genuine-fail)
     or must be discounted (harness-killed/truncated/walltime/no-final). Separates the
     empty_response harness bias from real incapacity - see :func:`_classify_outcome`."""
-    return _pivot(rows, "outcome")
+    return _pivot(rows, "outcome", column)
 
 
 _DETAIL_COLUMNS = [
@@ -660,12 +681,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--all-stamps", action="store_true", help="keep reruns, not just the latest stamp"
     )
+    parser.add_argument(
+        "--by-arm",
+        action="store_true",
+        help="key the tables by ARM (alan-<model>-fo / -po) instead of pooling both into one "
+        "model column - use when the round's question is the setting, not the model",
+    )
     args = parser.parse_args(argv)
 
     if not args.bench_root.is_dir():
         print(f"not a directory: {args.bench_root}", file=sys.stderr)
         return 2
     rows = collect_runs(args.bench_root, all_stamps=args.all_stamps)
+    column = "experiment" if args.by_arm else "model"
     if not rows:
         print(f"no runs found under {args.bench_root}", file=sys.stderr)
         return 1
@@ -698,7 +726,7 @@ def main(argv: list[str] | None = None) -> int:
         "times out on the hard ones, so a model's visible cells skew toward the tasks every model "
         "passes. Read per-task cells; never average a column into a per-model score.\n"
     )
-    print(coverage_markdown(rows))
+    print(coverage_markdown(rows, column))
     print("\n## Stability - cells whose evaluation did not finish\n")
     print(
         "Episodes that RAISED are dropped from the denominator, so a controller crashing on 7 of "
@@ -708,17 +736,25 @@ def main(argv: list[str] | None = None) -> int:
         "them.\n"
     )
     print(stability_markdown(rows))
-    print("\n## Outcome - is the score trustworthy? (task x model)\n")
+    print(f"\n## Outcome - is the score trustworthy? (task x {column})\n")
+    # With ExitTask disabled, reaching the attempt limit IS the ending; only a walltime end
+    # with no submission stays unreliable, since that score came from teardown, not the model.
+    budgeted = any(row.get("exit_task_enabled") is False for row in rows)
+    walltime_note = (
+        "`walltime` WITHOUT a submission (that score is the harness's, not the model's)"
+        if budgeted
+        else "`walltime`"
+    )
     print(
         "`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response), "
-        "`truncated` (turns cut to reasoning alone) and `walltime` must be "
+        f"`truncated` (turns cut to reasoning alone) and {walltime_note} must be "
         "discounted / re-run.\n"
     )
-    print(outcome_pivot_markdown(rows))
-    print("\n## Controller written (task x model)\n")
-    print(controller_pivot_markdown(rows))
-    print("\n## Final success rate (task x model)\n")
-    print(pivot_markdown(rows))
+    print(outcome_pivot_markdown(rows, column))
+    print(f"\n## Controller written (task x {column})\n")
+    print(controller_pivot_markdown(rows, column))
+    print(f"\n## Final success rate (task x {column})\n")
+    print(pivot_markdown(rows, column))
     print("\n## Runs\n")
     print(detail_markdown(rows))
 

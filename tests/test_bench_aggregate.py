@@ -434,3 +434,35 @@ def test_a_cleanly_exited_run_whose_turns_were_cut_is_not_a_capability_signal() 
     assert cls(0.9, "agent_exit", reasoning_only_rate=0.24) == "solve"
     # Unknown rate (no transcript) must not silently reclassify anything.
     assert cls(0.0, "agent_exit") == "genuine-fail"
+
+
+def test_a_budgeted_run_that_submitted_ended_the_only_way_it_could() -> None:
+    """With exit_task_enabled=False a run stops only on a perfect score, so reaching the attempt
+    limit is the designed ending, not a failure to finish - bench-03 labelled 421 of 640 runs
+    "discount / re-run" on that reading. A run that never submitted keeps the old verdict: its
+    score came from FinalizeControllerHook, so it is the harness's number, not the model's."""
+    cls = bench_aggregate._classify_outcome
+    budget = {"exit_task_enabled": False}
+    assert cls(0.1, "walltime_limit", submissions=3, **budget) == "genuine-fail"
+    assert cls(0.1, "walltime_limit", submissions=0, **budget) == "walltime"
+    assert cls(None, "walltime_limit", submissions=3, **budget) == "no-final"
+    # Truncation still outranks it, and a solve still wins.
+    assert (
+        cls(0.1, "walltime_limit", submissions=3, reasoning_only_rate=0.3, **budget) == "truncated"
+    )
+    assert cls(0.9, "walltime_limit", submissions=3, **budget) == "solve"
+    # Where the agent COULD have exited, hitting the walltime is still a failure to finish.
+    assert cls(0.1, "walltime_limit", submissions=3, exit_task_enabled=True) == "walltime"
+
+
+def test_by_arm_pivot_separates_observability_settings() -> None:
+    """Pooling alan-<model>-fo and -po into one model column averages two different experiments,
+    which is precisely the comparison a fo-vs-po round exists to make."""
+    rows = [
+        {"task": "t1", "model": "M", "experiment": "alan-M-fo", "success_rate": 1.0},
+        {"task": "t1", "model": "M", "experiment": "alan-M-po", "success_rate": 0.0},
+    ]
+    pooled = bench_aggregate._pivot(rows, "success_rate")
+    by_arm = bench_aggregate._pivot(rows, "success_rate", "experiment")
+    assert "| task | M |" in pooled  # one column, both arms averaged into it
+    assert "alan-M-fo" in by_arm and "alan-M-po" in by_arm
