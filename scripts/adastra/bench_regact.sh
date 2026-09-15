@@ -171,4 +171,5 @@ if [ -n "${PID}" ]; then
     kill "${PID}" 2>/dev/null; sleep 2; kill -9 "${PID}" 2>/dev/null; wait 2>/dev/null || true
 fi
 echo "[bench] done: $((${#TASKS[@]} - failed))/${#TASKS[@]} tasks ran clean"
-exit 0
+# A task whose run_exp exited non-zero never ran; the job must not read as COMPLETED.
+[ "${failed}" -eq 0 ]
