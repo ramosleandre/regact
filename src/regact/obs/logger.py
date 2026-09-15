@@ -56,6 +56,11 @@ class RunLogger:
         )
 
     def emit(self, record: LogRecord) -> None:
+        # The task's env server can still be serving a request from the previous attempt's
+        # leaked script when teardown closes these handles, and writing then raises into that
+        # request handler. The attempt is over and its log is sealed, so drop the record.
+        if self._events.closed:
+            return
         self._events.write(json.dumps(record.to_json()) + "\n")
         self._events.flush()
         self._human.write(_human_line(record) + "\n")
