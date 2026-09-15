@@ -159,7 +159,9 @@ _RANK = {"stub": 0, "trivial": 1, "reasoned": 2}
 
 def _classify_act(act: ast.FunctionDef) -> str:
     """``reasoned`` vs ``trivial`` for a found ``act`` body (the leaf judgement)."""
-    body = [s for s in act.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
+    body = [
+        s for s in act.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))
+    ]
     # Any control flow or bound state is reasoning about the situation.
     if any(isinstance(n, (ast.If, ast.For, ast.While, ast.Assign, ast.AugAssign)) for n in body):
         return "reasoned"
@@ -172,7 +174,9 @@ def _classify_act(act: ast.FunctionDef) -> str:
     return "reasoned" if reads - {"available_actions"} else "trivial"
 
 
-def _resolve_local_module(module: str | None, level: int, current_dir: Path, root: Path) -> Path | None:
+def _resolve_local_module(
+    module: str | None, level: int, current_dir: Path, root: Path
+) -> Path | None:
     """The workdir file an import names, or None if it isn't a local module.
 
     Absolute ``code_library.smart_controller`` -> ``<root>/code_library/smart_controller.py``;
@@ -189,7 +193,9 @@ def _resolve_local_module(module: str | None, level: int, current_dir: Path, roo
     return root.joinpath(*module.split(".")).with_suffix(".py")
 
 
-def _classify_source(source: str, current_dir: Path, root: Path, seen: set[Path], depth: int) -> str:
+def _classify_source(
+    source: str, current_dir: Path, root: Path, seen: set[Path], depth: int
+) -> str:
     """Classify the ``act`` a controller ultimately runs, following subclassing into
     agent-written local modules when ``solution.py`` is only a thin subclass."""
     if "raise NotImplementedError" in source:
@@ -218,7 +224,9 @@ def _classify_source(source: str, current_dir: Path, root: Path, seen: set[Path]
         if path is None or path in seen or not path.is_file():
             continue
         seen.add(path)
-        found = _classify_source(path.read_text(encoding="utf-8"), path.parent, root, seen, depth - 1)
+        found = _classify_source(
+            path.read_text(encoding="utf-8"), path.parent, root, seen, depth - 1
+        )
         if best is None or _RANK.get(found, -1) > _RANK.get(best, -1):
             best = found
     return best if best is not None else "unparsable"
@@ -253,6 +261,47 @@ def _classify_controller(solution_path: Path) -> str:
 
 
 _SOLVE_THRESHOLD = 0.6
+# Pre-registered on 2026-09-15 from bench-01, BEFORE any 03 number was read: the affected arms
+# sat at 8/24/25% and every unaffected one at 0-1%, so 5% separates them with margin either side.
+_REASONING_ONLY_DEGRADED = 0.05
+
+
+def _reasoning_only_rate(path: Path) -> float | None:
+    """Share of a run's completions that produced only hidden reasoning, or None if it has none.
+
+    A completion is reasoning-only when it made NO tool call, its visible text is empty, and its
+    reasoning is not. That is the shape alancode's bash-fence stop string leaves when it fires
+    inside a thinking model's reasoning channel: llama.cpp strips the stop, so the fence is never
+    present to search for - the reasoning simply ends where it would have opened. Counting the
+    SHAPE rather than the fence is the whole trick; looking for the fence returns 0% on every
+    affected arm and would clear a bug that is there (measured 2026-09-15: DeepSeek 24%, Kimi 25%,
+    MiniMax 8%, against 0-1% on arms whose stop is ``</tool_call>``).
+    """
+    if not path.exists():
+        return None
+    calls = total = reasoning_only = 0
+    text: list[str] = []
+    think: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = record.get("type")
+        if kind == "ToolCall":
+            calls += 1
+        elif kind == "TextDelta":
+            text.append(record.get("text") or "")
+        elif kind == "ThinkingDelta":
+            think.append(record.get("text") or "")
+        elif kind in ("IterationComplete", "TurnComplete"):  # TurnComplete = the bench-01 schema
+            total += 1
+            if calls == 0 and not "".join(text).strip() and "".join(think).strip():
+                reasoning_only += 1
+            calls = 0
+            text = []
+            think = []
+    return reasoning_only / total if total else None
 
 
 def _episodes_shortfall(row: dict[str, Any], configured: int | None) -> int | None:
@@ -287,6 +336,7 @@ def _classify_outcome(
     success_rate: float | None,
     exit_reason: str | None,
     controller_crashed: bool = False,
+    reasoning_only_rate: float | None = None,
 ) -> str:
     """Whether a cell's score is a trustworthy capability signal.
 
@@ -299,6 +349,11 @@ def _classify_outcome(
     - ``solve``: scored at/above the solve threshold - reliable;
     - ``genuine-fail``: a clean ``agent_exit`` with a sub-threshold score - reliable;
     - ``harness-killed``: exited ``agent_api`` (the pre-nudge empty_response wall) - UNRELIABLE;
+    - ``truncated``: exited CLEANLY, but ``_REASONING_ONLY_DEGRADED`` or more of its completions
+      were cut to reasoning alone - UNRELIABLE. The ``agent_api`` wall only catches truncation
+      severe enough to kill the run; on bench-01 it caught NOTHING, and all 23 runs of the three
+      affected arms exited ``agent_exit`` and were scored as clean failures with a quarter of
+      their turns destroyed. Partial damage is the common case, so exit_reason alone cannot see it;
     - ``walltime``: hit the job walltime before finishing - UNRELIABLE;
     - ``no-final``: no scored result (still running, or killed before teardown);
     - ``controller-crashed``: EVERY episode raised, so the controller never ran. Distinct
@@ -315,7 +370,11 @@ def _classify_outcome(
     if exit_reason == "walltime_limit":
         return "walltime"
     if exit_reason == "agent_exit":
-        return "genuine-fail" if success_rate is not None else "no-final"
+        if success_rate is None:
+            return "no-final"
+        if reasoning_only_rate is not None and reasoning_only_rate >= _REASONING_ONLY_DEGRADED:
+            return "truncated"
+        return "genuine-fail"
     if exit_reason:  # any other terminal state (loop_crash, interrupted, ...)
         return str(exit_reason)
     return "no-final"  # no exit reason recorded: still running / killed before teardown
@@ -332,6 +391,7 @@ def _run_row(
     agent = config.get("agent", {})
     model = str(agent.get("model") or "?").removeprefix("openai/")
     state = _read_json(task_dir / "logs" / "experiment_state.json") or {}
+    reasoning_only = _reasoning_only_rate(task_dir / "logs" / "transcript.jsonl")
     final = _read_json(task_dir / "workdir" / "submissions" / "final" / "results.json") or {}
     aggregate = final.get("aggregate", {})
     transcript = _count_lines(
@@ -356,9 +416,10 @@ def _run_row(
         "outcome": _classify_outcome(
             _primary_score(aggregate),
             state.get("exit_reason"),
-            controller_crashed=bool(aggregate.get("n_errors"))
-            and not aggregate.get("n_episodes"),
+            controller_crashed=bool(aggregate.get("n_errors")) and not aggregate.get("n_episodes"),
+            reasoning_only_rate=reasoning_only,
         ),
+        "reasoning_only_rate": reasoning_only,
         "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
         "tail_mean": _tail_mean(task_dir)[0],  # the same controller's neighbourhood, for stability
         "episodes_asked": (config.get("controller") or {}).get("n_episodes"),
@@ -559,14 +620,27 @@ def controller_pivot_markdown(rows: list[dict[str, Any]]) -> str:
 
 def outcome_pivot_markdown(rows: list[dict[str, Any]]) -> str:
     """Outcome pivot: whether each cell's score is trustworthy (solve/genuine-fail)
-    or must be discounted (harness-killed/walltime/no-final). Separates the
+    or must be discounted (harness-killed/truncated/walltime/no-final). Separates the
     empty_response harness bias from real incapacity - see :func:`_classify_outcome`."""
     return _pivot(rows, "outcome")
 
 
 _DETAIL_COLUMNS = [
-    "task", "model", "seed", "controller", "outcome", "success_rate", "exit_reason",
-    "submissions", "tool_calls", "turns", "error_retries", "duration_s", "env_moves", "stamp",
+    "task",
+    "model",
+    "seed",
+    "controller",
+    "outcome",
+    "success_rate",
+    "reasoning_only_rate",
+    "exit_reason",
+    "submissions",
+    "tool_calls",
+    "turns",
+    "error_retries",
+    "duration_s",
+    "env_moves",
+    "stamp",
 ]
 
 
@@ -583,7 +657,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("bench_root", type=Path)
     parser.add_argument("--csv", type=Path, help="also write every run row as CSV")
     parser.add_argument("--json", type=Path, help="also write every run row as JSON")
-    parser.add_argument("--all-stamps", action="store_true", help="keep reruns, not just the latest stamp")
+    parser.add_argument(
+        "--all-stamps", action="store_true", help="keep reruns, not just the latest stamp"
+    )
     args = parser.parse_args(argv)
 
     if not args.bench_root.is_dir():
@@ -633,8 +709,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(stability_markdown(rows))
     print("\n## Outcome - is the score trustworthy? (task x model)\n")
-    print("`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response) and "
-          "`walltime` must be discounted / re-run.\n")
+    print(
+        "`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response), "
+        "`truncated` (turns cut to reasoning alone) and `walltime` must be "
+        "discounted / re-run.\n"
+    )
     print(outcome_pivot_markdown(rows))
     print("\n## Controller written (task x model)\n")
     print(controller_pivot_markdown(rows))

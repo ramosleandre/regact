@@ -386,3 +386,51 @@ def test_uninformative_rate_counts_empty_and_repeated_results(tmp_path: Path) ->
     assert bench_aggregate._uninformative_rate(t) == 0.0
 
     assert bench_aggregate._uninformative_rate(tmp_path / "nope.jsonl") is None
+
+
+def test_reasoning_only_rate_counts_the_shape_not_the_fence(tmp_path: Path) -> None:
+    """alancode's bash-fence stop fires inside a thinking model's reasoning channel, and
+    llama.cpp strips the stop - so the fence is never in the transcript to search for. What
+    remains is a completion with no tool call, no visible text, and non-empty reasoning."""
+    path = tmp_path / "transcript.jsonl"
+    events = [
+        {"type": "ThinkingDelta", "text": "let me look"},
+        {"type": "TextDelta", "text": "I will ls"},
+        {"type": "ToolCall", "input": {"command": "ls"}},
+        {"type": "IterationComplete"},
+        {"type": "ThinkingDelta", "text": "the grid is:"},  # cut where the fence would open
+        {"type": "IterationComplete"},
+    ]
+    path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+    assert bench_aggregate._reasoning_only_rate(path) == 0.5
+
+    # bench-01 transcripts close a completion with TurnComplete, not IterationComplete.
+    old = tmp_path / "old.jsonl"
+    old.write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "ThinkingDelta", "text": "cut here:"},
+                {"type": "TurnComplete"},
+                {"type": "TextDelta", "text": "done"},
+                {"type": "ToolCall", "input": {}},
+                {"type": "TurnComplete"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert bench_aggregate._reasoning_only_rate(old) == 0.5
+    assert bench_aggregate._reasoning_only_rate(tmp_path / "absent.jsonl") is None
+
+
+def test_a_cleanly_exited_run_whose_turns_were_cut_is_not_a_capability_signal() -> None:
+    """The agent_api wall only catches truncation severe enough to kill the run. On bench-01 it
+    caught nothing: all 23 runs of the three affected arms exited agent_exit and were scored as
+    clean failures with 8-25% of their completions destroyed."""
+    cls = bench_aggregate._classify_outcome
+    assert cls(0.0, "agent_exit", reasoning_only_rate=0.24) == "truncated"
+    assert cls(0.0, "agent_exit", reasoning_only_rate=0.01) == "genuine-fail"
+    # A solve is still a solve - truncation that did not prevent success is not a caveat.
+    assert cls(0.9, "agent_exit", reasoning_only_rate=0.24) == "solve"
+    # Unknown rate (no transcript) must not silently reclassify anything.
+    assert cls(0.0, "agent_exit") == "genuine-fail"
