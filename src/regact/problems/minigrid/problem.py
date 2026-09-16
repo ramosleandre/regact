@@ -15,6 +15,7 @@ from typing import Any
 
 from regact.config.schema import HelperConfig, InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
+from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, register_problem
@@ -95,6 +96,10 @@ class _ActionInfoShim:
         return obs, self._augment(info)
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        if isinstance(action, bool) or not self._env.action_space.contains(action):
+            raise InvalidActionError(
+                f"expected a MiniGrid action in 0..{self._env.action_space.n - 1}; got {action!r}"
+            )
         obs, reward, terminated, truncated, info = self._env.step(action)
         return obs, reward, terminated, truncated, self._augment(info)
 

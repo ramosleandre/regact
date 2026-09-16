@@ -13,15 +13,17 @@ from fastapi import FastAPI, HTTPException
 
 from regact.env.session import EnvSession
 from regact.env.wrapped_env import WrappedEnv
+from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.tools.base import Tool, ToolContext
 
 
 def _env_fault(op: str, exc: Exception) -> HTTPException:
-    """A native env step/reset that raised is an AGENT-triggered fault (a malformed action, a WFC
-    gen failure): return it as a clean 422, which FastAPI handles WITHOUT the uvicorn 'Exception in
-    ASGI application' 500 that would otherwise spam the operator's terminal. The message rides the
-    agent's env-client error, so the agent (and the transcript) see what failed."""
+    """Preserve cause: only explicit action validation failures are controller faults."""
+    if op == "step" and isinstance(exc, InvalidActionError):
+        return HTTPException(
+            status_code=422, detail={"code": "invalid_action", "message": str(exc)}
+        )
     return HTTPException(status_code=422, detail=f"env {op} failed: {type(exc).__name__}: {exc}")
 
 
@@ -92,7 +94,7 @@ class EnvServer:
             env = session.make()
             try:
                 obs = env.reset(seed=body.get("seed"))
-            except Exception as exc:  # an agent-triggered env fault (e.g. a WFC gen failure)
+            except Exception as exc:  # environment fault (e.g. a WFC generation failure)
                 raise _env_fault("reset", exc) from exc
             return {"obs": obs.to_json(), "action_count": env.action_count}
 
@@ -101,7 +103,7 @@ class EnvServer:
             env = self._require_live(game_id)
             try:
                 obs = env.step(body.get("action"))
-            except Exception as exc:  # a malformed action the agent sent, etc.
+            except Exception as exc:  # preserve explicit invalid-action errors across HTTP
                 raise _env_fault("step", exc) from exc
             return {"obs": obs.to_json(), "action_count": env.action_count}
 

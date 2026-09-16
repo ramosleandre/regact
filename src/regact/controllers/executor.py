@@ -6,8 +6,10 @@ and drives ``controller.act(obs) -> EnvClient.step(action)`` against the env
 over N fresh-env episodes; SINGLE_INSTANCE runs the one shared handle to a level
 boundary. Per-episode and run metrics are computed by injected callables (the
 problem's, so the problem owns what a score means), defaulting to a generic
-success/steps/reward summary. Controller exceptions are caught per episode and
-tagged ``agent_solution``; the aggregate is written to ``output_path`` and returned.
+success/steps/reward summary. Controller failures receive zero-credit metrics and
+remain in the aggregate;
+environment/harness failures mark the evaluation incomplete. The result is written
+to ``output_path`` and returned.
 """
 
 from __future__ import annotations
@@ -23,8 +25,9 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from regact.config.schema import Lifecycle
-from regact.controllers.runner import run_controller
+from regact.controllers.runner import RolloutError, run_controller
 from regact.envclient.client import EnvClient
+from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
@@ -55,6 +58,10 @@ def _default_episode_metrics(final_obs: Obs, *, steps: int) -> dict[str, Any]:
     """Generic per-episode metrics: success requires a positive terminal reward."""
     reward = final_obs.reward or 0.0
     return {"success": bool(final_obs.is_done and reward > 0), "steps": steps, "reward": reward}
+
+
+def _default_failure_metrics(*, steps: int) -> dict[str, Any]:
+    return {"success": False, "reward": 0.0, "steps": steps}
 
 
 def _default_aggregate(episodes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -100,14 +107,26 @@ def run_episodes_raw(
     out: list[dict[str, Any]] = []
     for index in range(episode_count):
         episode_seed = base_seed + index
+        category = ErrorCategory.ENV_RUNTIME
         try:
             env.reset(seed=episode_seed)
+            category = ErrorCategory.AGENT_SOLUTION
+            controller = factory()
+            category = ErrorCategory.EVAL_HARNESS
             summary = run_controller(
-                env, factory(), max_steps=max_moves, collect_frames=index < n_videos
+                env, controller, max_steps=max_moves, collect_frames=index < n_videos
             )
         except Exception as exc:  # a fault in the reset (e.g. a slow-env timeout) or the controller
             out.append(
-                {"episode": index, "seed": episode_seed, "error": f"{type(exc).__name__}: {exc}"}
+                {
+                    "episode": index,
+                    "seed": episode_seed,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "error_category": (
+                        exc.category if isinstance(exc, RolloutError) else category
+                    ).value,
+                    "steps": exc.steps if isinstance(exc, RolloutError) else 0,
+                }
             )
             continue
         out.append(
@@ -128,6 +147,44 @@ def run_episodes_raw(
     return out
 
 
+def _failed_episode(raw: dict[str, Any], failure_metrics: EpisodeMetrics) -> EpisodeResult:
+    try:
+        category = ErrorCategory(raw.get("error_category", ErrorCategory.EVAL_HARNESS))
+    except ValueError:
+        category = ErrorCategory.EVAL_HARNESS
+    return EpisodeResult(
+        episode=int(raw["episode"]),
+        error=str(raw["error"]),
+        error_category=category,
+        metrics=failure_metrics(steps=int(raw.get("steps", 0)))
+        if category is ErrorCategory.AGENT_SOLUTION
+        else {},
+    )
+
+
+def _aggregate_results(
+    episodes: list[EpisodeResult], aggregate_metrics: AggregateMetrics, expected_episodes: int
+) -> dict[str, Any]:
+    aggregate = aggregate_metrics(
+        [
+            e.metrics
+            for e in episodes
+            if e.error is None or e.error_category is ErrorCategory.AGENT_SOLUTION
+        ]
+    )
+    aggregate["n_errors"] = sum(e.error is not None for e in episodes)
+    aggregate["n_expected_episodes"] = expected_episodes
+    aggregate["evaluation_complete"] = (
+        expected_episodes > 0
+        and len(episodes) == expected_episodes
+        and {e.episode for e in episodes} == set(range(expected_episodes))
+        and all(
+            e.error is None or e.error_category is ErrorCategory.AGENT_SOLUTION for e in episodes
+        )
+    )
+    return aggregate
+
+
 def score_episodes(
     raw_episodes: list[dict[str, Any]],
     *,
@@ -135,6 +192,8 @@ def score_episodes(
     compute_metrics: EpisodeMetrics,
     aggregate_metrics: AggregateMetrics,
     executor: str,
+    failure_metrics: EpisodeMetrics = _default_failure_metrics,
+    expected_episodes: int | None = None,
 ) -> EvalResult:
     """Score raw episode outcomes (the **trusted** half): apply the problem's metric callables.
 
@@ -143,13 +202,7 @@ def score_episodes(
     episodes: list[EpisodeResult] = []
     for raw in raw_episodes:
         if raw.get("error"):
-            episodes.append(
-                EpisodeResult(
-                    episode=int(raw["episode"]),
-                    error=str(raw["error"]),
-                    error_category=ErrorCategory.AGENT_SOLUTION,
-                )
-            )
+            episodes.append(_failed_episode(raw, failure_metrics))
             continue
         final_obs = Obs.from_json(raw["final_obs"])
         episodes.append(
@@ -161,8 +214,11 @@ def score_episodes(
                 metrics=compute_metrics(final_obs, steps=int(raw["steps"])),
             )
         )
-    aggregate = aggregate_metrics([e.metrics for e in episodes if e.error is None])
-    aggregate["n_errors"] = sum(1 for e in episodes if e.error is not None)
+    aggregate = _aggregate_results(
+        episodes,
+        aggregate_metrics,
+        len(raw_episodes) if expected_episodes is None else expected_episodes,
+    )
     return EvalResult(task=task_name, aggregate=aggregate, episodes=episodes, executor=executor)
 
 
@@ -173,7 +229,10 @@ def _replay_episode(env: EnvClient, actions: list[Any], *, seed: int | None) -> 
     for action in actions:
         if obs.is_done:
             break
-        obs = env.step(action)
+        try:
+            obs = env.step(action)
+        except InvalidActionError as exc:
+            raise RolloutError(ErrorCategory.AGENT_SOLUTION, exc, steps) from exc
         steps += 1
     return obs, steps
 
@@ -186,6 +245,8 @@ def replay_and_score(
     seed: int | None,
     compute_metrics: EpisodeMetrics,
     aggregate_metrics: AggregateMetrics,
+    failure_metrics: EpisodeMetrics = _default_failure_metrics,
+    expected_episodes: int | None = None,
 ) -> EvalResult:
     """Shadow replay (anti-cheat): score by RE-APPLYING the controller's recorded actions on a fresh
     **trusted** env here, instead of trusting the obs the untrusted subprocess reported. The actions
@@ -198,13 +259,7 @@ def replay_and_score(
     for raw in raw_episodes:
         index = int(raw["episode"])
         if raw.get("error"):
-            episodes.append(
-                EpisodeResult(
-                    episode=index,
-                    error=str(raw["error"]),
-                    error_category=ErrorCategory.AGENT_SOLUTION,
-                )
-            )
+            episodes.append(_failed_episode(raw, failure_metrics))
             continue
         episode_seed = raw.get("seed", None if seed is None else seed + index)
         try:
@@ -214,7 +269,12 @@ def replay_and_score(
                 EpisodeResult(
                     episode=index,
                     error=f"{type(exc).__name__}: {exc}",
-                    error_category=ErrorCategory.EVAL_HARNESS,
+                    error_category=exc.category
+                    if isinstance(exc, RolloutError)
+                    else ErrorCategory.EVAL_HARNESS,
+                    metrics=failure_metrics(steps=exc.steps)
+                    if isinstance(exc, RolloutError)
+                    else {},
                 )
             )
             continue
@@ -227,8 +287,11 @@ def replay_and_score(
                 metrics=compute_metrics(final_obs, steps=steps),
             )
         )
-    aggregate = aggregate_metrics([e.metrics for e in episodes if e.error is None])
-    aggregate["n_errors"] = sum(1 for e in episodes if e.error is not None)
+    aggregate = _aggregate_results(
+        episodes,
+        aggregate_metrics,
+        len(raw_episodes) if expected_episodes is None else expected_episodes,
+    )
     return EvalResult(
         task=task_name, aggregate=aggregate, episodes=episodes, executor="shadow_replay"
     )
@@ -265,6 +328,31 @@ def _write_episode_videos(
         _encode_video(rgb, os.path.join(out_dir, f"video_{raw['episode']}.mp4"))
 
 
+def _load_failure_result(
+    task: str,
+    error: str,
+    count: int,
+    compute_metrics: EpisodeMetrics,
+    aggregate_metrics: AggregateMetrics,
+    failure_metrics: EpisodeMetrics,
+    executor: str,
+) -> EvalResult:
+    result = score_episodes(
+        [
+            {"episode": i, "error": error, "error_category": ErrorCategory.AGENT_SOLUTION}
+            for i in range(count)
+        ],
+        task_name=task,
+        compute_metrics=compute_metrics,
+        aggregate_metrics=aggregate_metrics,
+        failure_metrics=failure_metrics,
+        expected_episodes=count,
+        executor=executor,
+    )
+    result.error, result.error_category = error, ErrorCategory.AGENT_SOLUTION
+    return result
+
+
 class ControllerExecutor:
     """Evaluate the controller in ``solution.py`` **in-process** and return a result.
 
@@ -280,12 +368,14 @@ class ControllerExecutor:
         env: EnvClient,
         *,
         compute_metrics: EpisodeMetrics | None = None,
+        failure_metrics: EpisodeMetrics | None = None,
         aggregate_metrics: AggregateMetrics | None = None,
         render_frame: FrameRenderer | None = None,
         seed: int | None = None,
     ) -> None:
         self._env = env
         self._compute_metrics = compute_metrics or _default_episode_metrics
+        self._failure_metrics = failure_metrics or _default_failure_metrics
         self._aggregate_metrics = aggregate_metrics or _default_aggregate
         self._render_frame = render_frame
         self._seed = seed
@@ -315,17 +405,22 @@ class ControllerExecutor:
                 seed=self._seed,
             )
         except Exception as exc:  # import / attribute / syntax error in agent code
-            result = EvalResult(
-                task=task_name,
-                error=f"{type(exc).__name__}: {exc}",
-                error_category=ErrorCategory.AGENT_SOLUTION,
-                executor="in_process",
+            result = _load_failure_result(
+                task_name,
+                f"{type(exc).__name__}: {exc}",
+                1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes,
+                self._compute_metrics,
+                self._aggregate_metrics,
+                self._failure_metrics,
+                "in_process",
             )
             write_result(output_path, result)
             return result
         result = score_episodes(
             raw,
             task_name=task_name,
+            failure_metrics=self._failure_metrics,
+            expected_episodes=1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes,
             compute_metrics=self._compute_metrics,
             aggregate_metrics=self._aggregate_metrics,
             executor="in_process",
@@ -352,6 +447,7 @@ class SandboxedExecutor:
         workdir: str,
         sandbox_wrap: Callable[[list[str]], list[str]],
         compute_metrics: EpisodeMetrics | None = None,
+        failure_metrics: EpisodeMetrics | None = None,
         aggregate_metrics: AggregateMetrics | None = None,
         render_frame: FrameRenderer | None = None,
         seed: int | None = None,
@@ -361,6 +457,7 @@ class SandboxedExecutor:
         self._workdir = workdir
         self._wrap = sandbox_wrap
         self._compute_metrics = compute_metrics or _default_episode_metrics
+        self._failure_metrics = failure_metrics or _default_failure_metrics
         self._aggregate_metrics = aggregate_metrics or _default_aggregate
         self._render_frame = render_frame
         self._seed = seed
@@ -455,11 +552,14 @@ class SandboxedExecutor:
                 executor="subprocess",
             )
         if payload.get("load_error"):  # solution.py failed to import/load — the agent's fault
-            return EvalResult(
-                task=task_name,
-                error=str(payload["load_error"]),
-                error_category=ErrorCategory.AGENT_SOLUTION,
-                executor="subprocess",
+            return _load_failure_result(
+                task_name,
+                str(payload["load_error"]),
+                1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes,
+                self._compute_metrics,
+                self._aggregate_metrics,
+                self._failure_metrics,
+                "subprocess",
             )
         episodes = payload.get("episodes", [])
         if self._shadow_replay and self._env_client is not None:
@@ -468,6 +568,8 @@ class SandboxedExecutor:
                 episodes,
                 task_name=task_name,
                 seed=self._seed,
+                failure_metrics=self._failure_metrics,
+                expected_episodes=1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes,
                 compute_metrics=self._compute_metrics,
                 aggregate_metrics=self._aggregate_metrics,
             )
@@ -476,6 +578,8 @@ class SandboxedExecutor:
             direct = score_episodes(
                 episodes,
                 task_name=task_name,
+                failure_metrics=self._failure_metrics,
+                expected_episodes=1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes,
                 compute_metrics=self._compute_metrics,
                 aggregate_metrics=self._aggregate_metrics,
                 executor="subprocess",
@@ -485,6 +589,8 @@ class SandboxedExecutor:
             result = score_episodes(
                 episodes,
                 task_name=task_name,
+                failure_metrics=self._failure_metrics,
+                expected_episodes=1 if lifecycle is Lifecycle.SINGLE_INSTANCE else n_episodes,
                 compute_metrics=self._compute_metrics,
                 aggregate_metrics=self._aggregate_metrics,
                 executor="subprocess",

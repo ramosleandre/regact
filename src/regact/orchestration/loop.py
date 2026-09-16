@@ -352,7 +352,14 @@ def _solved(
 ) -> bool:
     """Whether the latest submission scored perfect, so the run has nothing left to do."""
     last = experiment.last_submission_results
-    return bool(is_perfect and last and is_perfect(last.get("aggregate", {})))
+    if not is_perfect or not last or last.get("error"):
+        return False
+    aggregate = last.get("aggregate", {})
+    if not aggregate.get("evaluation_complete") or aggregate.get("n_errors", 0):
+        return False
+    if any(e.get("error") for e in last.get("episodes", [])):
+        return False
+    return bool(is_perfect(aggregate))
 
 
 def _acted_without_submitting(

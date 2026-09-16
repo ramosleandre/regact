@@ -152,6 +152,7 @@ def _make_executor(deps: RunDeps, *, shadow_replay: bool) -> ControllerExecutor 
         return SandboxedExecutor(
             workdir=os.path.dirname(deps.solution_path),
             sandbox_wrap=deps.sandbox_wrap,
+            failure_metrics=deps.failure_metrics,
             compute_metrics=deps.compute_episode_metrics,
             aggregate_metrics=deps.aggregate_episode_metrics,
             render_frame=deps.render_frame,
@@ -161,6 +162,7 @@ def _make_executor(deps: RunDeps, *, shadow_replay: bool) -> ControllerExecutor 
         )
     return ControllerExecutor(
         deps.env_client,
+        failure_metrics=deps.failure_metrics,
         compute_metrics=deps.compute_episode_metrics,
         aggregate_metrics=deps.aggregate_episode_metrics,
         render_frame=deps.render_frame,

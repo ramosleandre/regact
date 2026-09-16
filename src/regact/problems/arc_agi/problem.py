@@ -21,6 +21,7 @@ from typing import Any
 
 from regact.config.schema import HelperConfig, InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
+from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.arc_agi.tasks import (
@@ -129,13 +130,19 @@ class _ArcGymShim:
         """No-op — the Arcade owns the env lifecycle."""
 
     def _decode(self, action: Any) -> tuple[Any, dict[str, Any] | None]:
-        if isinstance(action, dict):
-            action_id = int(action["action"])
-            data = action.get("data")
-            if action_id == _CLICK_ACTION_ID:  # ACTION6 is the only action that needs coordinates
+        try:
+            action_id = action["action"] if isinstance(action, dict) else action
+            if isinstance(action_id, bool) or not isinstance(action_id, int):
+                raise ValueError("action id must be an integer")
+            data = action.get("data") if isinstance(action, dict) else None
+            if action_id == _CLICK_ACTION_ID:
                 data = _validated_click_data(data)
-            return self._GameAction.from_id(action_id), data
-        return self._GameAction.from_id(int(action)), None
+            game_action = self._GameAction.from_id(action_id)
+            if game_action is None:
+                raise ValueError(f"unknown action id {action_id}")
+            return game_action, data
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InvalidActionError(str(exc)) from exc
 
     def _outcome(self, obs: Any) -> tuple[float, bool]:
         if obs is None:
@@ -465,6 +472,18 @@ class ArcAgiProblem(BaseProblem):
             # Graded score for this episode: the fraction of the game's levels it cleared (0..1).
             "level_completion_rate": (completed / total) if total else 0.0,
         }
+
+    def failure_metrics(self, *, steps: int) -> dict[str, Any]:
+        return {
+            "success": False,
+            "steps": steps,
+            "levels_completed": 0,
+            "win_levels": 0,
+            "level_completion_rate": 0.0,
+        }
+
+    def is_perfect(self, aggregate: dict[str, Any]) -> bool:
+        return float(aggregate.get("win_rate", 0.0)) >= 1.0
 
     def aggregate_episode_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
         if not episodes:

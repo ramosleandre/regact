@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Action, Obs
 
 
@@ -44,6 +45,13 @@ class EnvClient:
         return self._apply(self._post("reset", {"seed": seed}))
 
     def step(self, action: Action) -> Obs:
+        # Reject unserializable controller output before entering the HTTP transport.
+        import json
+
+        try:
+            json.dumps(action, allow_nan=False)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise InvalidActionError(f"action must be JSON-serializable: {exc}") from exc
         return self._apply(self._post("step", {"action": action}))
 
     def current(self) -> Obs:
@@ -72,6 +80,10 @@ class EnvClient:
 
     def _post(self, route: str, body: dict[str, Any]) -> dict[str, Any]:
         resp = self._http.post(f"/env/{self._game_id}/{route}", json=body)
+        if route == "step" and resp.status_code == 422:
+            detail = resp.json().get("detail")
+            if isinstance(detail, dict) and detail.get("code") == "invalid_action":
+                raise InvalidActionError(str(detail.get("message", "invalid action")))
         resp.raise_for_status()
         data: dict[str, Any] = resp.json()
         return data

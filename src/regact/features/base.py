@@ -73,6 +73,7 @@ class RunDeps:
     lifecycle: Lifecycle
     solution_path: str
     submissions_dir: str
+    failure_metrics: Callable[..., dict[str, Any]] | None = None
     compute_episode_metrics: Callable[..., dict[str, Any]] | None = None
     aggregate_episode_metrics: Callable[..., dict[str, Any]] | None = None
     sandbox_wrap: Callable[[list[str]], list[str]] | None = None

@@ -388,6 +388,7 @@ async def run_task(
                 lifecycle=config.problem.lifecycle,
                 solution_path=os.path.join(workdir, "solution.py"),
                 submissions_dir=os.path.join(workdir, "submissions"),
+                failure_metrics=problem.failure_metrics,
                 compute_episode_metrics=problem.compute_episode_metrics,
                 aggregate_episode_metrics=problem.aggregate_episode_metrics,
                 sandbox_wrap=eval_wrap,

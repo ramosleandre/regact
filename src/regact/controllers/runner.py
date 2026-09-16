@@ -18,10 +18,20 @@ from regact.controllers.summary import (
     MilestoneEvent,
 )
 from regact.envclient.client import EnvClient
+from regact.envclient.errors import InvalidActionError
+from regact.obs.errors import ErrorCategory, RegactError
+
+
+class RolloutError(RegactError):
+    """A rollout fault with its cause category and completed step count."""
+
+    def __init__(self, category: ErrorCategory, exc: Exception, steps: int) -> None:
+        super().__init__(category, f"{type(exc).__name__}: {exc}", cause=exc)
+        self.steps = steps
 
 
 class Controller(Protocol):
-    """Anything with a pure ``act(obs) -> action`` (a foreign object: Protocol)."""
+    """Anything with an ``act(obs) -> action`` (a foreign object: Protocol)."""
 
     def act(self, obs: Any) -> Any: ...
 
@@ -39,7 +49,10 @@ def run_controller(
     With ``collect_frames`` it records each step's ``obs`` (JSON) for later video render.
     """
     history = ControllerRun(name=name)
-    obs = env.current()
+    try:
+        obs = env.current()
+    except Exception as exc:
+        raise RolloutError(ErrorCategory.ENV_RUNTIME, exc, 0) from exc
     frames = [obs.to_json()] if collect_frames else []
     actions: list[Any] = []
     steps = 0
@@ -53,9 +66,17 @@ def run_controller(
         if steps >= max_steps:
             return done("max_steps", f"reached max_steps={max_steps}")
 
-        action = controller.act(obs)
+        try:
+            action = controller.act(obs)
+        except Exception as exc:
+            raise RolloutError(ErrorCategory.AGENT_SOLUTION, exc, steps) from exc
         actions.append(action)
-        obs = env.step(action)
+        try:
+            obs = env.step(action)
+        except InvalidActionError as exc:
+            raise RolloutError(ErrorCategory.AGENT_SOLUTION, exc, steps) from exc
+        except Exception as exc:
+            raise RolloutError(ErrorCategory.ENV_RUNTIME, exc, steps) from exc
         steps += 1
         if collect_frames:
             frames.append(obs.to_json())

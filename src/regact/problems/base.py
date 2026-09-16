@@ -118,6 +118,13 @@ class BaseProblem(ABC):
         """Roll per-episode metrics into a run aggregate."""
         ...
 
+    def failure_metrics(self, *, steps: int) -> dict[str, Any]:
+        """Zero credit for a controller-caused failure; steps remain diagnostic.
+
+        Override for problems with additional score fields (e.g. ARC levels).
+        """
+        return {"success": False, "reward": 0.0, "steps": steps}
+
     def is_perfect(self, aggregate: dict[str, Any]) -> bool:
         """Whether a submission's aggregate is a PERFECT solve - the loop may then stop the run
         early. Default: ``success_rate >= 1.0``. Override where 'perfect' is a different metric

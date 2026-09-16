@@ -213,7 +213,9 @@ def test_executor_flags_missing_factory(tmp_path: Path) -> None:
         max_moves=10,
     )
     assert result.error_category is ErrorCategory.AGENT_SOLUTION
-    assert result.episodes == []
+    assert result.aggregate["n_episodes"] == 1
+    assert result.aggregate["success_rate"] == 0.0
+    assert result.episodes[0].metrics["success"] is False
 
 
 def test_shadow_replay_reproduces_solve_with_recorded_seed(tmp_path: Path) -> None:
