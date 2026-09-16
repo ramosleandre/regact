@@ -350,3 +350,27 @@ async def test_pipeline_stops_on_interrupt(tmp_path: Path) -> None:
 
     assert reason == "interrupted"
     assert stack.experiment.submission_count == 0  # no turn ran
+
+
+async def test_the_verdict_is_on_disk_before_teardown_runs(tmp_path: Path) -> None:
+    """Teardown re-scores the controller, which on a slow serve outlasts what is left of an
+    exhausted budget. bench-04 job 5418021 decided walltime_limit correctly and was then SIGKILLed
+    two minutes into that re-score, leaving exit_reason=None - the run read as "still running"
+    forever. A hook that inspects the state file mid-teardown must already see the verdict."""
+    from regact.features.base import Hook, HookPhase
+
+    seen: dict[str, Any] = {}
+    stack = _Stack(tmp_path)
+
+    class _ReadStateMidTeardown(Hook):
+        phase = HookPhase.TEARDOWN
+
+        async def run(self) -> None:
+            state = json.loads(Path(stack.state_path).read_text())
+            seen["exit_reason"] = state.get("exit_reason")
+
+    stack.hooks = [*stack.hooks, _ReadStateMidTeardown()]
+    reason = await stack.run(ScriptedAgent([[ToolCall("c1", "ExitTask", {}), IterationComplete()]]))
+
+    assert reason == "agent_exit"
+    assert seen["exit_reason"] == "agent_exit"  # already persisted, not written after teardown

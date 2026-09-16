@@ -235,8 +235,14 @@ async def run_session(
         if watchdog is not None:
             watchdog.cancel()
 
-    await _run_teardown_hooks(hooks or [], reason, ctx)
+    # Recorded BEFORE teardown, which re-scores the controller and on a slow serve outlasts what
+    # is left of an exhausted budget: the verdict is known the moment the loop breaks, and nothing
+    # teardown does can change it. A run killed in that window used to keep exit_reason=None and
+    # read as "still running" forever - bench-04 job 5418021 was SIGKILLed two minutes into its
+    # final re-score, having correctly decided walltime_limit.
     experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
+    _save_state(ctx)
+    await _run_teardown_hooks(hooks or [], reason, ctx)
     if _acted_without_submitting(reason, experiment.submission_count, experiment.tool_calls_total):
         logger.log(
             LogComponent.ORCHESTRATOR,
