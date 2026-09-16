@@ -18,11 +18,14 @@ call, and teardown **hooks**. regact ships one:
 
 The controller is configured under `controller.*` (group
 [`conf/controller/`](../src/regact/conf/controller/)), not as a feature. Its knobs:
-`n_episodes`, `max_moves`, `record_video`, `shadow_replay`.
+`n_episodes`, `max_moves`, `n_videos`, `shadow_replay`, `exit_task_enabled`.
+
+`n_videos` caps the number of final-evaluation episodes recorded (at most `n_episodes`);
+set it to `0` to disable video. Numbered submissions are scored without recording video.
 
 ```bash
 # the always-on controller with 3 eval episodes, no video
-make run ARGS="controller.n_episodes=3 controller.record_video=false"
+make run ARGS="controller.n_episodes=3 controller.n_videos=0"
 ```
 
 ## Use a feature

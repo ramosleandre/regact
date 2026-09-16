@@ -28,16 +28,17 @@ lazily, so a base install never pulls a game library or an agent SDK.
    tools + hooks, builds the prompt, and drives the keep-alive loop until the agent
    submits and exits (or hits a limit).
 4. **Score** — the agent's submitted code is evaluated by rolling episodes on the env;
-   results and a video land under the task's `workdir/submissions/`.
+   results land under the task's `workdir/submissions/`. Videos, when enabled, are
+   recorded during final evaluation under `workdir/submissions/final/`.
 
 ## The anti-cheat spine
 
-The agent reaches the environment **only over localhost HTTP** and never imports the
-game — so the score can't come from reading the answer. On a scored run, an OS sandbox
-additionally makes the game files *absent* from the agent's filesystem and blocks the
-internet, while keeping the sanctioned localhost path open. This is the whole point of
-the framework: the number measures understanding, not memorization. See
-**[Sandboxing](sandboxing.md)**.
+The agent interacts with the environment **over localhost HTTP**. With `sandbox=true`,
+the OS sandbox hides the game source, preventing the agent from bypassing exploration
+by reading the implementation. Network isolation is enabled by default under sandboxing;
+it restricts access to the sanctioned environment/model connections, including allowed
+LLM hosts for cloud agents. These controls address access to hidden game information.
+See **[Sandboxing](sandboxing.md)** for the configuration and enforcement details.
 
 ## Where to go next
 

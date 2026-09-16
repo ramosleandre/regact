@@ -21,8 +21,9 @@ or Alan) that plays an environment (ARC-AGI-3, MiniGrid) through a set of plugga
 
 Everything is agnostic behind three seams — the **agent**, the **environment** (a
 "problem"), and the **features** — so you swap parts and rerun. The agent reaches the
-environment only over a localhost **HTTP boundary** and never imports the game, so the
-score measures understanding, not memorization.
+environment through a localhost **HTTP boundary**. With sandboxing enabled, the game
+source is hidden from the agent, preventing it from bypassing exploration by reading
+the implementation.
 
 ## Demo
 
@@ -87,7 +88,7 @@ The always-on controller's eval knobs live under `controller.*` (e.g. `controlle
 each optional feature owns its knobs under `features.<name>.*`. A few examples:
 
 ```bash
-# fastest end-to-end, no LLM and no game (scripted agent, one game):
+# smoke test: scripted agent, no LLM; runs ARC ls20 (requires make install-arc and game data):
 make run ARGS="experiment=dev"
 
 # MiniGrid with Claude:

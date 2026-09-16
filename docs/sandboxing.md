@@ -108,8 +108,12 @@ the camera records.
   — the threat model is a cheating agent, not a kernel exploit.
 - On **macOS**, seatbelt puts `allow_read` paths in the read-write set (looser than bwrap's
   read-only intent) — a known, documented gap.
-- The **evaluator** always runs with egress denied (untrusted `solution.py` needs no
-  internet); this is deliberate and independent of the run's `sandbox` flag.
+- The **evaluator** follows the run's sandbox configuration. For subprocess agents,
+  its network isolation is enabled when `sandbox=true` and
+  `sandbox_opts.network_isolation` is enabled (the default). Setting `sandbox=false`
+  disables OS confinement; setting `sandbox_opts.network_isolation=false` disables
+  the egress block while retaining filesystem confinement when sandboxing is on.
+  The scripted backend evaluates in-process without an evaluator sandbox.
 
 ## HPC diagnostics
 

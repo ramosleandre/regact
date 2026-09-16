@@ -4,9 +4,9 @@ An **environment** (a "problem") is the game the agent plays. A problem exposes 
 more **tasks** (games/levels) and knows how to build the env, render it, prompt about it,
 and score an episode. regact ships two:
 
-| `problem=` | Tasks | Lifecycle | Needs |
+| `problem=` | Tasks | Default lifecycle | Needs |
 |---|---|---|---|
-| `arc_agi` | the discovered ARC-AGI-3 games | `single_instance` | `make install-arc` |
+| `arc_agi` | the discovered ARC-AGI-3 games | `multi_instance` | `make install-arc` |
 | `minigrid` | MiniGrid gym environments | `multi_instance` | `make install-minigrid` |
 
 ## Use an environment
@@ -32,11 +32,13 @@ The `ProblemConfig` fields are `name`, `tasks`, `lifecycle`, `obs_mode`, `info_m
 | `minigrid_lite.yaml` | the curated 20 | `fully_obs: true` |
 | `minigrid_full.yaml` | all 72 | `fully_obs: true` |
 
-**Lifecycle** — `multi_instance` builds a **fresh env per episode** (more resets = better
-stats); `single_instance` keeps **one env per game** (RESET = level reset; this is ARC).
-A single-instance problem paired with a feature that scores on the env is **refused** at
-startup — exploration and evaluation would share the same env, making the score
-session-level rather than an isolated policy. See [`arc_agi.yaml`](../src/regact/conf/problem/arc_agi.yaml).
+**Lifecycle** — both ARC and MiniGrid default to `multi_instance`, which supports
+evaluation on fresh episodes. The older `single_instance` mode keeps one environment
+per game, but the current runner **rejects it**, including with `features=none`: the
+always-on controller evaluates on the environment, so exploration and evaluation would
+share a session instead of measuring an isolated policy. The lifecycle implementation
+remains in the code; it is not a supported configuration for the current runner. See
+[`arc_agi.yaml`](../src/regact/conf/problem/arc_agi.yaml).
 
 ## Add an environment
 

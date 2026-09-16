@@ -8,7 +8,7 @@ A research run is composed by Hydra: pick the `agent` / `problem` / `features` g
 override any field on the CLI.
 
 ```bash
-# the CI smoke: scripted agent, no LLM, no game
+# smoke test: scripted agent, no LLM; requires ARC ls20 and its engine/data
 make run ARGS="experiment=dev"
 
 # a real run
@@ -23,12 +23,15 @@ make run ARGS="agent=claude problem=arc_agi --cfg job"
 A profile bundles a whole setup (agent + problem + limits) under one name. They live in
 [`conf/experiment/`](../src/regact/conf/experiment/):
 
-- **`dev`** — fastest end-to-end, no LLM/no game (plumbing smoke test).
+- **`dev`** — plumbing smoke test with the scripted agent on ARC `ls20`; no LLM, but
+  requires `make install-arc` and the local game data.
 - **`research`** — a real ARC run with a coding CLI, anti-cheat on, video recorded.
-- **`competition`** — the Kaggle profile (see below).
+- **`competition`** — legacy Kaggle profile; currently rejected by the runner (see below).
 
-A profile **selects** groups, so a CLI override still wins:
+The `dev` and `research` profiles **select** groups, so a CLI override still wins:
 `make run ARGS="experiment=research agent=codex"` runs codex, not the profile's default.
+The legacy `competition` profile uses inline agent/problem fields instead; combining it
+with an `agent=` override can produce a hybrid configuration.
 
 ## Outputs
 
@@ -43,7 +46,7 @@ Each run gets a fresh **timestamped** directory, with a `latest` symlink pointin
       experiment_state.json           # live state (saved atomically per event)
       events.jsonl / output.log       # the operational log
     workdir/                          # the agent's working directory
-      submissions/<n|final>/results.json   # each scored submission (+ .mp4)
+      submissions/<n|final>/results.json   # each scored submission; videos under final/
 ```
 
 The state file is written **atomically after every event**, so it always reflects the last
@@ -62,7 +65,13 @@ define them, shows derived offline metrics (e.g. ARC's RHAE).
 
 ## Competition (Kaggle)
 
-The Kaggle path uses argparse instead of Hydra, driven by the `competition` profile:
+**Currently incompatible with the runner:** the default `competition` profile selects
+`single_instance`, which the always-on controller rejects. The command below documents
+the existing entry point, but does not currently launch a supported run with that profile.
+Changing it to `multi_instance` would change the evaluation semantics; it would not
+restore persistent-session competition support.
+
+The Kaggle path uses argparse instead of Hydra:
 
 ```bash
 make run-kaggle ARGS="--games ls20 ft09 --parallel 2"
