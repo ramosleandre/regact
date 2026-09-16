@@ -47,6 +47,7 @@ class SubmitSolution(Tool):
         self._max_moves = max_moves
         self._n_videos = n_videos
         self._feature_metrics = feature_metrics
+        self._submission_lock = asyncio.Lock()
 
     @property
     def name(self) -> str:
@@ -66,10 +67,32 @@ class SubmitSolution(Tool):
     async def call(self, args: dict[str, Any], context: ToolContext) -> ToolOutput:
         """Run the executor on ``solution.py``; persist ``submissions/<n>/results.json``;
         bump the submission count; return a digest of the aggregate."""
+        async with self._submission_lock:
+            # Cancellation of the HTTP caller must not release the lock while its
+            # executor thread is still running. Finish recording before propagating it.
+            submission = asyncio.create_task(self._submit())
+            try:
+                return await asyncio.shield(submission)
+            except asyncio.CancelledError:
+                while not submission.done():
+                    try:
+                        await asyncio.shield(submission)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not submission.cancelled():
+                    submission.exception()  # retrieve a failure even if the caller has gone
+                raise
+
+    async def _submit(self) -> ToolOutput:
+        """Evaluate and publish one submission while holding the per-task lock."""
         index = self._experiment.submission_count
         output_dir = os.path.join(self._submissions_dir, str(index))
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "results.json")
+        # Reserve this ID even if evaluation fails after writing partial artifacts.
+        self._experiment.submission_count = index + 1
 
         result = await asyncio.to_thread(
             self._executor.run,
@@ -86,7 +109,6 @@ class SubmitSolution(Tool):
             result.features = self._feature_metrics()
             write_result(output_path, result)  # re-persist with the features' numbers
 
-        self._experiment.submission_count = index + 1
         self._experiment.last_submission_results = result.to_json()
 
         errors = [e.error for e in result.episodes if e.error]
