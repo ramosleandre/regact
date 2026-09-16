@@ -89,8 +89,14 @@ class LimitsConfig:
     max_tool_calls: int | None = None
     max_seconds_per_task: int | None = None  # wall-clock per task, from session start
     max_actions_per_env: int | None = None  # env.step cap per env instance (from its make)
-    # Doom-loop breaker: end the loop after N consecutive turns with no tool call (a degenerate
-    # model spinning garbage); 0 disables. Any tool call (framework/bash/native) resets the count.
+    # Doom-loop breaker: end the loop after N consecutive REGACT TURNS with no tool call (a
+    # degenerate model spinning garbage); 0 disables. Any tool call (framework/bash/native)
+    # resets the count, and the text of a turn is never consulted - a turn full of unparseable
+    # markup counts as tool-less.
+    #
+    # A regact turn is ONE send(), not one model call: a subprocess agent runs several internal
+    # iterations inside each one (alan averages ~5, and a Kimi run measured 4). So this caps
+    # roughly 5N wasted model calls, not N - set it in turns and read the cost in calls.
     max_consecutive_no_tool_turns: int = 0
 
 

@@ -507,3 +507,46 @@ def test_without_the_launch_key_the_stamp_is_still_the_identity(tmp_path: Path) 
     rows = bench_aggregate.collect_runs(_launch_tree(tmp_path, five), all_stamps=False)
     assert len(rows) == 5
     assert {row["attempt"] for row in rows} == {None}
+
+
+def test_unparsed_native_markup_is_a_harness_loss_not_a_policy_failure(tmp_path: Path) -> None:
+    """A model emitting its own tool dialect into an arm taught a different one loses the turn as
+    surely as a truncated one does. Measured on bench-04: Kimi-K2.6 alone, 11.5% of its fo
+    completions and individual runs at 80-84%, against 0.0-0.9% for every other arm."""
+    path = tmp_path / "transcript.jsonl"
+    events = [
+        {"type": "TextDelta", "text": "I will list the dir"},
+        {"type": "ToolCall", "input": {"command": "ls"}},
+        {"type": "IterationComplete"},
+        {"type": "TextDelta", "text": "<|tool_calls_section_begin|><|tool_call_begin|>text_x"},
+        {"type": "IterationComplete"},  # markup, no call: the turn is lost
+    ]
+    path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+    assert bench_aggregate._unparsed_markup_rate(path) == 0.5
+    assert bench_aggregate._unparsed_markup_rate(tmp_path / "absent.jsonl") is None
+
+    cls = bench_aggregate._classify_outcome
+    assert cls(0.1, "agent_exit", unparsed_markup_rate=0.5) == "unparsed-markup"
+    assert cls(0.1, "agent_exit", unparsed_markup_rate=0.01) == "genuine-fail"
+    assert cls(0.9, "agent_exit", unparsed_markup_rate=0.5) == "solve"  # a solve is still a solve
+    assert cls(0.1, "agent_exit") == "genuine-fail"  # unknown rate reclassifies nothing
+
+
+def test_markup_and_reasoning_only_are_disjoint_by_construction(tmp_path: Path) -> None:
+    """One requires EMPTY visible text, the other requires text carrying the markup, so a single
+    completion can never be counted under both - the two rates are additive, not overlapping."""
+    path = tmp_path / "t.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "ThinkingDelta", "text": "cut here:"},
+                {"type": "IterationComplete"},  # reasoning-only
+                {"type": "TextDelta", "text": "<tool_call>whatever"},
+                {"type": "IterationComplete"},  # markup
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert bench_aggregate._reasoning_only_rate(path) == 0.5
+    assert bench_aggregate._unparsed_markup_rate(path) == 0.5

@@ -288,6 +288,45 @@ _SOLVE_THRESHOLD = 0.6
 _REASONING_ONLY_DEGRADED = 0.05
 
 
+# Native tool markup a bash-family extractor cannot use. Pre-registered from bench-04, where
+# Kimi-K2.6 stands alone (11.5% of its fo completions, 54.5% of po, individual runs at 80-82%)
+# against 0.0-0.9% for every other arm - the same 5% line the truncation rate uses, because the
+# harm is identical: a completion that produced nothing the harness could act on.
+_UNPARSED_MARKUP = ("<|tool_call", "<tool_call>")
+_UNPARSED_MARKUP_DEGRADED = 0.05
+
+
+def _unparsed_markup_rate(path: Path) -> float | None:
+    """Share of a run's completions that emitted native tool markup nothing could parse.
+
+    Disjoint from :func:`_reasoning_only_rate` by construction: that one requires EMPTY visible
+    text, this one requires text carrying the markup. A model speaking its own dialect into an
+    arm taught a different one loses the turn exactly as a truncated model does, so the run is a
+    harness loss rather than a failure of the policy it was writing.
+    """
+    if not path.exists():
+        return None
+    calls = total = unparsed = 0
+    text: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = record.get("type")
+        if kind == "ToolCall":
+            calls += 1
+        elif kind == "TextDelta":
+            text.append(record.get("text") or "")
+        elif kind in ("IterationComplete", "TurnComplete"):
+            total += 1
+            if calls == 0 and any(m in "".join(text) for m in _UNPARSED_MARKUP):
+                unparsed += 1
+            calls = 0
+            text = []
+    return unparsed / total if total else None
+
+
 def _reasoning_only_rate(path: Path) -> float | None:
     """Share of a run's completions that produced only hidden reasoning, or None if it has none.
 
@@ -359,6 +398,7 @@ def _classify_outcome(
     exit_reason: str | None,
     controller_crashed: bool = False,
     reasoning_only_rate: float | None = None,
+    unparsed_markup_rate: float | None = None,
     exit_task_enabled: bool = True,
     submissions: int | None = None,
 ) -> str:
@@ -373,6 +413,9 @@ def _classify_outcome(
     - ``solve``: scored at/above the solve threshold - reliable;
     - ``genuine-fail``: a clean ``agent_exit`` with a sub-threshold score - reliable;
     - ``harness-killed``: exited ``agent_api`` (the pre-nudge empty_response wall) - UNRELIABLE;
+    - ``unparsed-markup``: exited cleanly, but that share of its completions emitted native tool
+      markup the arm's extractor could not read - the model spoke a dialect it was not taught, so
+      those turns are a harness loss rather than a policy failure;
     - ``truncated``: exited CLEANLY, but ``_REASONING_ONLY_DEGRADED`` or more of its completions
       were cut to reasoning alone - UNRELIABLE. The ``agent_api`` wall only catches truncation
       severe enough to kill the run; on bench-01 it caught NOTHING, and all 23 runs of the three
@@ -408,6 +451,8 @@ def _classify_outcome(
             return "no-final"
         if reasoning_only_rate is not None and reasoning_only_rate >= _REASONING_ONLY_DEGRADED:
             return "truncated"
+        if unparsed_markup_rate is not None and unparsed_markup_rate >= _UNPARSED_MARKUP_DEGRADED:
+            return "unparsed-markup"
         return "genuine-fail"
     if exit_reason:  # any other terminal state (loop_crash, interrupted, ...)
         return str(exit_reason)
@@ -426,6 +471,7 @@ def _run_row(
     model = str(agent.get("model") or "?").removeprefix("openai/")
     state = _read_json(task_dir / "logs" / "experiment_state.json") or {}
     reasoning_only = _reasoning_only_rate(task_dir / "logs" / "transcript.jsonl")
+    unparsed_markup = _unparsed_markup_rate(task_dir / "logs" / "transcript.jsonl")
     exit_task_enabled = bool((config.get("controller") or {}).get("exit_task_enabled", True))
     final = _read_json(task_dir / "workdir" / "submissions" / "final" / "results.json") or {}
     aggregate = final.get("aggregate", {})
@@ -453,11 +499,13 @@ def _run_row(
             state.get("exit_reason"),
             controller_crashed=bool(aggregate.get("n_errors")) and not aggregate.get("n_episodes"),
             reasoning_only_rate=reasoning_only,
+            unparsed_markup_rate=unparsed_markup,
             exit_task_enabled=exit_task_enabled,
             submissions=state.get("submission_count"),
         ),
         "exit_task_enabled": exit_task_enabled,
         "reasoning_only_rate": reasoning_only,
+        "unparsed_markup_rate": unparsed_markup,
         "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
         "tail_mean": _tail_mean(task_dir)[0],  # the same controller's neighbourhood, for stability
         "episodes_asked": (config.get("controller") or {}).get("n_episodes"),
@@ -676,6 +724,7 @@ _DETAIL_COLUMNS = [
     "outcome",
     "success_rate",
     "reasoning_only_rate",
+    "unparsed_markup_rate",
     "exit_reason",
     "submissions",
     "tool_calls",
@@ -769,7 +818,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         "`solve`/`genuine-fail` are reliable; `harness-killed` (empty_response), "
-        f"`truncated` (turns cut to reasoning alone) and {walltime_note} must be "
+        f"`truncated` (turns cut to reasoning alone), `unparsed-markup` (native tool markup the "
+        f"extractor could not read) and {walltime_note} must be "
         "discounted / re-run.\n"
     )
     print(outcome_pivot_markdown(rows, column))
