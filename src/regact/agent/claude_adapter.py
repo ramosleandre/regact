@@ -139,6 +139,9 @@ class ClaudeAgent(_CliAgent):
         shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
 
+    def prompt_for_transcript(self, prepared: str) -> str:
+        return "[Claude Code system prompt — supplied by Claude Code, not captured]\n\n" + prepared
+
     def capabilities(self) -> Capabilities:
         return Capabilities(
             system_prompt="append",  # --append-system-prompt

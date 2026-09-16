@@ -172,7 +172,7 @@ async def run_session(
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
     if system_prompt:  # record the inputs so the viewer shows the whole session, not just replies
-        transcript.write(SystemPrompt(system_prompt))
+        transcript.write(SystemPrompt(agent.prompt_for_transcript(system_prompt)))
 
     message = first_message
     turns = 0

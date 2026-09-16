@@ -491,14 +491,34 @@ async def run_task(
             )
             if config.dry_run:
                 # Prompt-only: write the exact system prompt + first message to the transcript and
-                # exit - no agent, no eval, no cost. `make viz` then shows the prompt for review.
+                # exit - no model turns, no eval, no cost. Alan is initialized for prompt assembly.
                 logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
                 rendered = (
                     problem.render_obs_text(server.first_obs(task_name))
                     if config.first_obs_in_prompt
                     else None
                 )
-                transcript.write(SystemPrompt(system_prompt))
+                # Alan's assembled prompt includes backend-generated text tool instructions.
+                # Initialize its child to run the public builder, but never send a model turn.
+                try:
+                    if config.agent.name is AgentName.ALAN:
+                        await agent.start(
+                            cwd=workdir,
+                            model=config.agent.model,
+                            base_url=config.agent.base_url,
+                            api_key=config.agent.api_key,
+                            system_prompt=system_prompt,
+                            tools=tools,
+                            env=agent_env,
+                            runtime_wrap=runtime_wrap,
+                        )
+                    transcript.write(SystemPrompt(agent.prompt_for_transcript(system_prompt)))
+                finally:
+                    await agent.close()
+                    if egress is not None:
+                        await egress.close()
+                    if mirror is not None:
+                        await mirror.close()
                 transcript.write(UserMessage(builder.build_first_message(rendered)))
                 experiment.exit_reason = "dry_run"
                 experiment.save(os.path.join(logs_dir, "experiment_state.json"))

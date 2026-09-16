@@ -86,6 +86,10 @@ class CodeAgent(ABC):
         """Static description of what this backend supports."""
         ...
 
+    def prompt_for_transcript(self, prepared: str) -> str:
+        """Prompt display text for new transcripts; does not change model instructions."""
+        return prepared
+
     def session_id(self) -> str | None:
         """The backend's native session/thread id, once known (``None`` until then).
 

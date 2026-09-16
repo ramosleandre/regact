@@ -12,6 +12,7 @@ output — the live test is gated on the ``codex`` CLI being installed.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import uuid
@@ -43,9 +44,12 @@ class CodexAgent(_CliAgent):
         self._home_root = os.path.realpath(os.path.expanduser(raw_home))
         self._session_home: str | None = None  # this task's fresh home (created on demand)
 
+    def prompt_for_transcript(self, prepared: str) -> str:
+        return "[Codex system prompt — supplied by Codex, not captured]\n\n" + prepared
+
     def capabilities(self) -> Capabilities:
         return Capabilities(
-            system_prompt="replace",
+            system_prompt="append",  # developer instructions alongside Codex built-ins
             tool_protocol="client_cli",  # native bash/file tools; submit/exit via the workdir CLI
             permission_hooks=False,
             streams_tool_calls=True,
@@ -99,6 +103,15 @@ class CodexAgent(_CliAgent):
         home = self._config_dir()
         self._env_overrides["CODEX_HOME"] = home
         self._env_overrides["HOME"] = home
+        # Loaded for initial and resumed turns; a file avoids argv size limits.
+        with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as handle:
+            handle.write("# generated: isolated codex home\n")
+            if self._system_prompt is not None:
+                handle.write(
+                    "developer_instructions = "
+                    + json.dumps(self._system_prompt, ensure_ascii=False)
+                    + "\n"
+                )
 
     async def close(self) -> None:
         """Drop the per-task home on teardown (nothing reads codex's native session store post-run;

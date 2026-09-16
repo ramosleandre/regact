@@ -99,6 +99,15 @@ async def _run_turn(agent: Any, message: str) -> None:
         _write({"type": TURN_END, **_model_info(agent)})
 
 
+def _assembled_prompt(agent: Any) -> str:
+    """Use Alan's own public builder, including its configured text-tool instructions."""
+    try:
+        sections, _ = agent.build_system_prompt()
+        return "\n\n".join(sections)
+    except Exception as exc:
+        return f"[Alan Code system prompt unavailable: {type(exc).__name__}: {exc}]"
+
+
 async def _serve() -> int:
     """Command loop: build on ``start``, then run turns until ``close`` or EOF."""
     agent: Any = None
@@ -109,7 +118,7 @@ async def _serve() -> int:
         kind = command.get("cmd")
         if kind == "start":
             agent = _build(command)
-            _write({"type": READY})
+            _write({"type": READY, "system_prompt": _assembled_prompt(agent)})
         elif kind == "send" and agent is not None:
             await _run_turn(agent, str(command.get("message", "")))
         elif kind == "inject" and agent is not None:

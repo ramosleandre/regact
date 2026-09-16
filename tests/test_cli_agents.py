@@ -5,7 +5,10 @@ without the CLI installed. Actually spawning the CLI is a separate live concern.
 """
 
 import os
+import tomllib
 from pathlib import Path
+
+import pytest
 
 from regact.agent.base import build_agent
 from regact.agent.claude_adapter import ClaudeAgent
@@ -285,3 +288,30 @@ async def test_claude_config_home_is_per_task_and_cleaned(tmp_path) -> None:
     assert not os.path.exists(os.path.join(d1, "projects"))  # no memory dir
     await a1.close()
     assert not os.path.exists(d1)  # cleaned on teardown
+
+
+@pytest.mark.parametrize("prompt", [None, "", 'Quotes " and \\ paths\nLéandre 😀', "x" * 200_000])
+async def test_codex_task_prompt_available_on_initial_and_resumed_launch(
+    tmp_path, monkeypatch, prompt
+):
+    agent = CodexAgent({"codex_home": str(tmp_path / "home")})
+    monkeypatch.setattr(agent, "_freshest_auth", lambda: None)
+    cwd = tmp_path / "workdir"
+    cwd.mkdir()
+    await agent.start(cwd=str(cwd), model=None, base_url=None, api_key=None, system_prompt=prompt)
+    home = Path(agent._env_overrides["CODEX_HOME"])
+    try:
+        assert agent.capabilities().system_prompt == "append"
+        for session in (None, "test-session"):
+            agent._session_id = session
+            argv, stdin = agent._command("Begin working.")
+            config = tomllib.loads((home / "config.toml").read_text())
+            assert config.get("developer_instructions") == prompt
+            assert "model_instructions_file" not in config
+            assert stdin == "Begin working."
+            assert ("resume" in argv) == (session is not None)
+            if prompt:
+                assert prompt not in argv
+    finally:
+        await agent.close()
+    assert not home.exists()

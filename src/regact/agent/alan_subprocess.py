@@ -72,6 +72,7 @@ class AlanSubprocessAgent(CodeAgent):
 
     def __init__(self, args: dict[str, Any] | None = None, *, base_url: str | None = None) -> None:
         self._args = dict(args or {})  # alancode tuning, forwarded verbatim to the child
+        self._display_prompt: str | None = None
         self._base_url = base_url
         self._proc: asyncio.subprocess.Process | None = None
         self._pending: list[str] = []  # queued by inject(), prepended to the next turn
@@ -123,6 +124,13 @@ class AlanSubprocessAgent(CodeAgent):
             }
         )
         await self._await_ready()
+
+    def prompt_for_transcript(self, prepared: str) -> str:
+        if self._display_prompt is None:
+            return (
+                "[Alan Code system prompt unavailable: child did not report its assembled prompt]"
+            )
+        return self._display_prompt
 
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
         """Run one turn in the child; yield its normalized events."""
@@ -273,6 +281,8 @@ class AlanSubprocessAgent(CodeAgent):
         async for frame in self._read_frames():
             kind = frame.get("type")
             if kind == READY:
+                prompt = frame.get("system_prompt")
+                self._display_prompt = prompt if isinstance(prompt, str) else None
                 return
             if kind == FATAL:
                 raise RuntimeError(f"alan runner failed to start: {frame.get('message')}")
