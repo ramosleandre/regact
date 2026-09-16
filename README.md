@@ -15,12 +15,13 @@
 
 **regact** is a research framework for agents that **reason** about an unknown
 **game** and **act** in it. It drives a *code-writing agent* (Claude Code, codex,
-or Alan) that plays an environment (ARC-AGI-3, MiniGrid) through a set of pluggable
-**features** — the base one being `controller`, where the agent writes a pure
-`act(obs) -> action` policy and submits it.
+or Alan) that plays an environment (ARC-AGI-3, MiniGrid), writes an
+`act(obs) -> action` controller, and submits it for evaluation. The controller is
+always-on; optional **features** such as Code World Model add capabilities. Controllers
+can retain state between actions; evaluation creates a new controller for each episode.
 
-Everything is agnostic behind three seams — the **agent**, the **environment** (a
-"problem"), and the **features** — so you swap parts and rerun. The agent reaches the
+The **agent**, the **environment** (a "problem"), and the optional **features** have
+separate extension interfaces within this controller-evaluation workflow. The agent reaches the
 environment through a localhost **HTTP boundary**. With sandboxing enabled, the game
 source is hidden from the agent, preventing it from bypassing exploration by reading
 the implementation.
@@ -31,7 +32,7 @@ the implementation.
 
 ![regact — a ~60-second tour](assets/videos/regact_pres.gif)
 
-<em>A code-writing agent probes an unknown game, writes an <code>act(obs)</code> controller, and gets scored — browsed in the visualizer (sped up 2x). <a href="assets/videos/regact_pres.mp4">Full-quality clip</a>.</em>
+<em>A code-writing agent probes an unknown game, writes an <code>act(self, obs)</code> controller, and gets scored — browsed in the visualizer (sped up 2x). <a href="assets/videos/regact_pres.mp4">Full-quality clip</a>.</em>
 
 </div>
 
@@ -99,6 +100,30 @@ make run ARGS="agent=alan problem=arc_agi features=cwm controller.n_episodes=3"
 ```
 
 See a config composed without running it: `make run ARGS="... --cfg job"`.
+
+## Visualization
+
+Explore saved experiments in the local browser viewer:
+
+```bash
+make viz EXP=experiments                   # browse all experiments and benchmarks
+# Or open one experiment's latest run:
+make viz EXP=experiments/<experiment_name>/latest
+```
+
+Open **[localhost:8030](http://localhost:8030)**. Set `PORT=8031` to use another port. You can then navigate to an experiment and browse its tasks. In each of them you have access to panels Overview, Conversation, Artifacts (files and videos) and Graphs (metrics).
+
+| Conversation | Overview |
+|---|---|
+| ![Conversation panel with agent messages and expandable tool calls](assets/images/viz_run_Conversation.png) | ![Overview panel with game preview, results, and run configuration](assets/images/viz_run_Overview.png) |
+| Follow the agent's messages and tool calls, and jump between submissions. | Inspect the game preview, scores, resource usage, and run configuration. |
+
+If you performed your experiments in `experiments/<benchmark_name>/`, you can also compare multiple runs of the same benchmark and see their metrics side by side with the Graphs panel of a benchmark interface.
+
+| Benchmark experiments | Benchmark graphs |
+|---|---|
+| ![Benchmark experiments grouped by agent with status and metrics](assets/images/viz_benchmark_Experiments.png) | ![Benchmark graphs comparing metrics across experiments](assets/images/viz_benchmark_Graphs.png) |
+| Browse experiments and compare their task results and resource usage. | Compare metrics across experiments, choose an aggregation, and filter crashed runs. |
 
 ## Documentation
 
