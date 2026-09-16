@@ -35,7 +35,11 @@ with an `agent=` override can produce a hybrid configuration.
 
 ## Outputs
 
-Each run gets a fresh **timestamped** directory, with a `latest` symlink pointing at it:
+By default, each run gets a fresh **timestamped** directory.
+`<output_root>/<experiment_name>/latest` is a symlink to that directory when the
+filesystem supports it. It identifies a run, not a submission.
+
+With `n_attempts_per_task=1`, each task has this layout:
 
 ```
 <output_root>/<experiment_name>/<timestamp>/
@@ -46,11 +50,25 @@ Each run gets a fresh **timestamped** directory, with a `latest` symlink pointin
       experiment_state.json           # live state (saved atomically per event)
       events.jsonl / output.log       # the operational log
     workdir/                          # the agent's working directory
-      submissions/<n|final>/results.json   # each scored submission; videos under final/
+      submissions/
+        0/results.json                # first numbered submission (then 1/, 2/, ...)
+        final/
+          results.json                # final evaluation of the current controller
+          video_0.mp4                 # optional final-evaluation video (then video_1.mp4, ...)
 ```
 
-The state file is written **atomically after every event**, so it always reflects the last
-turn — even after a crash. A re-run never overwrites an old one (new timestamp).
+With `n_attempts_per_task > 1`, the same `config.json`, `logs/`, and `workdir/` layout
+lives under `<task_name>/attempt_0/`, `attempt_1/`, etc. Attempts are scheduled across
+tasks in rounds.
+
+`final` is a new evaluation of the controller left in the workdir at teardown, not a
+copy of the best numbered submission. Videos are recorded there when `n_videos > 0`
+and frames can be rendered/encoded. There is no `submissions/last` directory in the
+current writer.
+
+The state file is saved atomically as events are processed. Normal timestamped runs
+claim separate directories; callers supplying an explicit run directory are responsible
+for avoiding reuse.
 
 ## The visualizer
 

@@ -5,7 +5,7 @@
 # Phase 1 inventories the node (bwrap? user namespaces?); phase 2 runs
 # regact's own diagnostics (doctor, conformance probe bare + sandboxed, agentcheck).
 #
-# Submit from the LOGIN node (see docs/adastra-pipeline.md for the env setup):
+# Submit from the LOGIN node with the cluster Python environment activated:
 #   JOB_ROOT=$WORKDIR/experiments_logs/$(date +%Y-%m-%d_%H-%M-%S)_isoprobe; mkdir -p "$JOB_ROOT"
 #   sbatch --account=iso1996 --constraint=GENOA \
 #          --job-name=isoprobe --nodes=1 --ntasks=1 --cpus-per-task=8 --time=00:15:00 \

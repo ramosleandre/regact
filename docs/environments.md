@@ -28,7 +28,7 @@ The `ProblemConfig` fields are `name`, `tasks`, `lifecycle`, `obs_mode`, `info_m
 | File | `tasks` | `kwargs` |
 |---|---|---|
 | `arc_agi.yaml` | `[]` (all) | `operation_mode: offline`, `environments_dir` |
-| `minigrid.yaml` | `[MiniGrid-Empty-5x5-v0]` | `fully_obs: false` |
+| `minigrid.yaml` | `[MiniGrid-Empty-5x5-v0]` | `fully_obs: true` |
 | `minigrid_lite.yaml` | the curated 20 | `fully_obs: true` |
 | `minigrid_full.yaml` | all 72 | `fully_obs: true` |
 
@@ -39,6 +39,11 @@ always-on controller evaluates on the environment, so exploration and evaluation
 share a session instead of measuring an isolated policy. The lifecycle implementation
 remains in the code; it is not a supported configuration for the current runner. See
 [`arc_agi.yaml`](../src/regact/conf/problem/arc_agi.yaml).
+
+More episodes do not automatically mean more varied evaluation: MiniGrid uses an
+episode seed sequence, while deterministic ARC games ignore the seed. Submissions and
+final evaluation reuse the configured seed sequence; these are not automatically
+held-out tests.
 
 ## Add an environment
 
@@ -54,14 +59,32 @@ A problem implements the [`BaseProblem`](../src/regact/problems/base.py) ABC.
   sees.
 - `compute_episode_metrics(final_obs, *, steps)` and `aggregate_episode_metrics(episodes)`
   — the per-episode score and its aggregate.
-- `build_prompt(task_name, *, info_mode)` — the game briefing (keep the prose in a markdown
+- `build_prompt(task_name, *, info_mode, obs_mode)` — the game briefing (keep the prose in a markdown
   file next to the module).
 - `config_kwargs()` — kwargs to rebuild the problem for trusted-side eval.
 
 Optional hooks (each has a default): `milestone_detector`, `helper_templates`,
 `secret_modules` (the packages that ARE the game — hidden from the sandbox),
 `render_frame` (obs → RGB frame for the video), `render_obs_text`,
-`derived_submission_metrics` (offline scores like ARC's RHAE, shown in the viewer).
+`derived_submission_metrics` (offline scores like ARC's RHAE, shown in the viewer),
+`failure_metrics(*, steps)` (zero credit for controller errors), and
+`is_perfect(aggregate)` (whether a submission should end the run early). The default
+perfect predicate checks `success_rate >= 1.0`; override it if your problem uses a
+different completion metric (ARC uses `win_rate`). The loop also requires a complete,
+error-free evaluation before stopping as solved.
+
+Override `failure_metrics` when your problem has additional score fields. Failed
+controller episodes remain in the scoring denominator: MiniGrid assigns no success
+or reward; ARC assigns no success or level completion, including any partial progress
+before the error. Step counts remain diagnostic. Environment/harness failures instead
+mark the evaluation incomplete (`evaluation_complete=false`); `n_expected_episodes`
+records the requested count, and `n_errors` counts all failed episodes.
+
+Validate actions before calling the game engine and raise
+`regact.envclient.errors.InvalidActionError` for invalid input. The server/client
+preserves this distinction, so a malformed action is a controller failure even when
+validation happens inside the environment. Other engine/transport errors are not
+assumed to be controller faults.
 
 **2. Register it** at the bottom of the module — problems are string-keyed, no enum:
 

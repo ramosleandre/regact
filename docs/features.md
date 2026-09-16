@@ -1,9 +1,10 @@
 # Features
 
-The **controller** is always-on core: every run has the agent write a pure
+The **controller** is always-on core: every run has the agent write an
 `act(obs) -> action` policy in `solution.py` and submit it (`SubmitSolution` / `ExitTask`),
 scored by rolling episodes on the env. It is **not** a feature - see
-[Controller](#controller) below.
+[Controller](#controller) below. The controller may keep internal state between
+actions; evaluation constructs a new controller for each episode.
 
 A **feature** is an OPTIONAL capability layered on top of the controller. It bundles four
 things: workdir **templates** (scaffolding), a **prompt fragment**, **tools** the agent can
@@ -12,7 +13,19 @@ call, and teardown **hooks**. regact ships one:
 | `features=` | What it does | Scores on env? |
 |---|---|---|
 | `none` | no extra feature (the default) | - |
-| `cwm` | Code World Model: records env transitions + an agent-run `verify.py` coherence check | no |
+| `cwm` | Code World Model: records transitions and scaffolds a representation and transition model with an agent-run verifier | no |
+
+### What CWM checks
+
+CWM scaffolds a `world_model/` directory containing `State`, `parse`, `render`, and
+`step` implementations for the agent to fill in. The agent runs `verify.py` against
+recorded transitions to inspect parser injectivity, observation reconstruction,
+transition accuracy, and code/state size. These checks describe agreement with the
+collected data.
+
+Separately, CWM adds model-independent transition counts and conflict counts to
+submission results through `submission_metrics`. Those recorded metrics are distinct
+from the agent-run verifier output.
 
 ## Controller
 
@@ -81,8 +94,13 @@ Both `tools` and `hooks` receive a [`RunDeps`](../src/regact/features/base.py): 
 `env_client`, the solution/submissions paths, the metric callables, the seed, etc. — the
 runtime dependencies the orchestrator owns.
 
-Optional: `env_wrapper(ctx)` returns an `env -> wrapped env` factory applied server-side
-(cwm uses it to record every transition). It must preserve the `WrappedEnv` surface.
+Optional extension points:
+
+- `env_wrapper(ctx)` returns an `env -> wrapped env` factory applied server-side
+  (CWM uses it to record transitions). It must preserve the `WrappedEnv` surface.
+- `submission_metrics(deps)` returns a JSON-serializable metric mapping after an
+  evaluation. It is stored under `results.json` → `features` → the feature's name;
+  this is how a feature contributes metrics without replacing the controller score.
 
 **2. Register it** at the bottom of the module — features are string-keyed, no enum:
 
