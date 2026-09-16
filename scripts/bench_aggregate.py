@@ -470,6 +470,17 @@ def _run_row(
     agent = config.get("agent", {})
     model = str(agent.get("model") or "?").removeprefix("openai/")
     state = _read_json(task_dir / "logs" / "experiment_state.json") or {}
+    budget_s = (config.get("limits") or {}).get("max_seconds_per_task")
+    duration_s = state.get("duration_s")
+    # How much of its wall budget the run actually used. On a COMPLETE tree this separates the two
+    # things a `no-final` hides: ~1.0 means the run exhausted its budget and THEN died, which for
+    # any tree written before the loop persisted its verdict ahead of teardown means the verdict
+    # was lost in the final re-score rather than never decided; a smaller value means it died
+    # early - a node, an OOM, a cancellation.
+    #
+    # Meaningless on a LIVE tree: a still-running cell's duration is climbing toward its budget,
+    # so it is indistinguishable from one that stopped there. Read it only once a round is done.
+    budget_used = round(duration_s / budget_s, 3) if budget_s and duration_s is not None else None
     reasoning_only = _reasoning_only_rate(task_dir / "logs" / "transcript.jsonl")
     unparsed_markup = _unparsed_markup_rate(task_dir / "logs" / "transcript.jsonl")
     exit_task_enabled = bool((config.get("controller") or {}).get("exit_task_enabled", True))
@@ -504,6 +515,7 @@ def _run_row(
             submissions=state.get("submission_count"),
         ),
         "exit_task_enabled": exit_task_enabled,
+        "budget_used": budget_used,
         "reasoning_only_rate": reasoning_only,
         "unparsed_markup_rate": unparsed_markup,
         "success_rate": _primary_score(aggregate),  # MiniGrid success_rate or ARC completion rate
@@ -723,6 +735,7 @@ _DETAIL_COLUMNS = [
     "controller",
     "outcome",
     "success_rate",
+    "budget_used",
     "reasoning_only_rate",
     "unparsed_markup_rate",
     "exit_reason",

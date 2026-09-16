@@ -550,3 +550,33 @@ def test_markup_and_reasoning_only_are_disjoint_by_construction(tmp_path: Path) 
     )
     assert bench_aggregate._reasoning_only_rate(path) == 0.5
     assert bench_aggregate._unparsed_markup_rate(path) == 0.5
+
+
+def test_budget_used_separates_a_run_that_died_at_its_budget_from_one_that_died_early(
+    tmp_path: Path,
+) -> None:
+    """A `no-final` verdict hides two different runs: one that exhausted its wall budget and was
+    then killed (on an older tree, during the final re-score, which is where its verdict was lost)
+    and one that died early on a node or an OOM. Only the ratio tells them apart, and only once
+    the round is complete - a live cell's duration is still climbing."""
+    for name, duration, budget in (("at_budget", 33041.0, 33041), ("died_early", 95.9, 33041)):
+        run = tmp_path / name / "2026-09-16_03-57-52" / "MiniGrid-DoorKey-8x8-v0"
+        (run / "logs").mkdir(parents=True)
+        (run / "config.json").write_text(
+            json.dumps(
+                {
+                    "agent": {"name": "alan", "model": "openai/M"},
+                    "problem": {"name": "minigrid"},
+                    "limits": {"max_seconds_per_task": budget},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run / "logs" / "experiment_state.json").write_text(
+            json.dumps({"duration_s": duration}),
+            encoding="utf-8",  # no exit_reason: a no-final
+        )
+    rows = {r["experiment"]: r for r in bench_aggregate.collect_runs(tmp_path, all_stamps=False)}
+    assert rows["at_budget"]["budget_used"] == 1.0
+    assert rows["died_early"]["budget_used"] == 0.003
+    assert rows["at_budget"]["outcome"] == "no-final"  # the verdict itself is unchanged
