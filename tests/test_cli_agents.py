@@ -59,7 +59,9 @@ def test_claude_config_dir_isolates_when_forced(tmp_path) -> None:
     assert not any("codex" in p for p in rw)
 
 
-def test_claude_config_dir_falls_back_to_real_home_for_keychain_auth(monkeypatch) -> None:
+def test_claude_config_dir_falls_back_to_real_home_for_keychain_auth(
+    monkeypatch,
+) -> None:
     """With no forced home and no copyable .credentials.json (macOS Keychain auth),
     relocating would strand the CLI as 'Not logged in', so it uses the real ~/.claude."""
     monkeypatch.setattr(os.path, "exists", lambda p: False)  # no .credentials.json anywhere
@@ -121,7 +123,12 @@ def test_claude_parses_assistant_text_and_tool_use() -> None:
         "message": {
             "content": [
                 {"type": "text", "text": "I'll list files."},
-                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}},
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "Bash",
+                    "input": {"command": "ls"},
+                },
             ]
         },
     }
@@ -140,12 +147,22 @@ def test_claude_parses_tool_result_and_result() -> None:
     }
     assert agent._parse_events(user) == [ToolResult("t1", "ok", False)]
 
-    done = {"type": "result", "subtype": "success", "result": "all done", "usage": {"in": 5}}
+    done = {
+        "type": "result",
+        "subtype": "success",
+        "result": "all done",
+        "usage": {"in": 5},
+    }
     assert agent._parse_events(done) == [IterationComplete("all done", {"in": 5})]
 
 
 def test_claude_result_error_becomes_agent_error() -> None:
-    obj = {"type": "result", "subtype": "error_max_turns", "is_error": True, "result": "too many"}
+    obj = {
+        "type": "result",
+        "subtype": "error_max_turns",
+        "is_error": True,
+        "result": "too many",
+    }
     [event] = ClaudeAgent()._parse_events(obj)
     assert isinstance(event, AgentError)
     assert event.message == "too many"
@@ -190,7 +207,12 @@ def test_codex_parses_message_reasoning_command_and_completion() -> None:
         }
     )
     assert isinstance(call, ToolCall) and call.name == "shell" and call.input == {"command": "ls"}
-    done = {"type": "command_execution", "id": "c1", "aggregated_output": "x", "exit_code": 0}
+    done = {
+        "type": "command_execution",
+        "id": "c1",
+        "aggregated_output": "x",
+        "exit_code": 0,
+    }
     [res] = agent._parse_events({"type": "item.completed", "item": done})
     assert isinstance(res, ToolResult) and res.id == "c1" and res.output == "x"
     assert not res.is_error
@@ -315,3 +337,134 @@ async def test_codex_task_prompt_available_on_initial_and_resumed_launch(
     finally:
         await agent.close()
     assert not home.exists()
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"type": "command_execution", "command": "echo hello", "exit_code": 0},
+        {
+            "type": "file_change",
+            "changes": [
+                {"path": "a.py", "kind": "update"},
+                {"path": "b.py", "kind": "add"},
+            ],
+            "status": "completed",
+        },
+        {
+            "type": "web_search",
+            "query": "example",
+            "action": {"type": "search", "query": "example"},
+        },
+        {
+            "type": "mcp_tool_call",
+            "server": "local",
+            "tool": "read",
+            "arguments": {},
+            "result": {"content": [{"type": "text", "text": "ok"}]},
+        },
+        {
+            "type": "collab_tool_call",
+            "tool": "spawn_agent",
+            "sender_thread_id": "main",
+            "receiver_thread_ids": ["child"],
+            "status": "completed",
+        },
+    ],
+)
+@pytest.mark.parametrize("with_start", [True, False])
+def test_codex_counts_each_tool_once(item, with_start) -> None:
+    agent = CodexAgent()
+    item = {"id": "item_0", **item}
+    events = []
+    if with_start:
+        started = {"type": "item.started", "item": {**item, "status": "in_progress"}}
+        events += agent._parse_events(started)
+        assert agent._parse_events(started) == []
+    # Even a progress event with terminal-looking fields is not a completion.
+    assert agent._parse_events({"type": "item.updated", "item": item}) == []
+    done = {"type": "item.completed", "item": item}
+    events += agent._parse_events(done)
+    assert len(events) == 2
+    assert isinstance(events[0], ToolCall)
+    assert isinstance(events[1], ToolResult)
+    assert events[0].id == events[1].id
+    assert not events[1].is_error
+    assert agent._parse_events(done) == []
+    if item["type"] == "file_change":
+        assert events[0].name == "apply_patch"
+        assert len(events[0].input["changes"]) == 2  # one patch, not two calls
+    if item["type"] == "mcp_tool_call":
+        assert '"ok"' in events[1].output
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"type": "file_change", "status": "failed", "changes": []},
+        {"type": "command_execution", "status": "declined", "command": "false"},
+        {"type": "command_execution", "exit_code": 1, "command": "false"},
+        {
+            "type": "mcp_tool_call",
+            "status": "failed",
+            "error": {"message": "unavailable"},
+        },
+        {"type": "collab_tool_call", "status": "failed", "tool": "spawn_agent"},
+    ],
+)
+def test_codex_counts_failed_tools_and_records_error(item) -> None:
+    call, result = CodexAgent()._parse_events(
+        {"type": "item.completed", "item": {"id": "x", **item}}
+    )
+    assert isinstance(call, ToolCall)
+    assert isinstance(result, ToolResult) and result.is_error
+
+
+def test_codex_plan_updates_are_completed_calls_not_a_turn_long_pending_tool() -> None:
+    agent = CodexAgent()
+    item = {
+        "id": "plan",
+        "type": "todo_list",
+        "items": [{"text": "test", "completed": False}],
+    }
+    events = []
+    for kind in ("item.started", "item.updated", "item.completed"):
+        events += agent._parse_events({"type": kind, "item": item})
+    assert [type(e) for e in events] == [ToolCall, ToolResult, ToolCall, ToolResult]
+    assert events[0].id != events[2].id
+
+
+def test_codex_item_ids_restart_on_resumed_process() -> None:
+    agent = CodexAgent()
+    done = {
+        "type": "item.completed",
+        "item": {
+            "id": "item_0",
+            "type": "file_change",
+            "changes": [],
+            "status": "completed",
+        },
+    }
+    assert len(agent._parse_events(done)) == 2
+    agent._session_id = "existing-thread"
+    agent._command("continue")
+    assert len(agent._parse_events(done)) == 2
+
+
+@pytest.mark.parametrize("enabled", [True, False, None])
+def test_codex_subagent_control_is_explicit_and_survives_resume(enabled) -> None:
+    agent = CodexAgent({"subagents_enabled": enabled})
+    for session in (None, "existing-thread"):
+        agent._session_id = session
+        argv, _ = agent._command("go")
+        if enabled is None:
+            assert not any("agents.enabled=" in arg for arg in argv)
+        else:
+            assert f"agents.enabled={str(enabled).lower()}" in argv
+            assert f"features.multi_agent={str(enabled).lower()}" in argv
+            assert "features.multi_agent_v2=false" in argv
+
+
+def test_codex_rejects_string_boolean_for_subagents() -> None:
+    with pytest.raises(ValueError, match="subagents_enabled"):
+        CodexAgent({"subagents_enabled": "false"})

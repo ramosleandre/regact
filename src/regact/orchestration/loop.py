@@ -23,7 +23,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from regact.agent.base import CodeAgent
@@ -130,6 +130,7 @@ class _TurnOutcome:
     saw_tool_call: bool = False  # agent emitted >=1 tool call (framework, bash, or native)
     error_category: ErrorCategory | None = None  # a backend error in the stream
     crashed: bool = False  # an unexpected exception escaped the turn
+    pending_tools: set[str] = field(default_factory=set)  # calls awaiting their matching result
 
 
 async def run_session(
@@ -384,26 +385,21 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
             _save_state(ctx)  # live: duration + cheat counter update during a long turn
             if outcome.error_category is not None:
                 break  # backend error: stop consuming this turn
-            if ctx.experiment.exit_requested:
-                # ExitTask fired MID-turn: alancode runs its whole loop inside one send(), so the
-                # between-sends _decide_stop would not see the exit until the agent ends the turn
-                # itself - which it may never do before walltime (an ARC run spun 28min post-exit).
-                # abort() ends the send cleanly (backend synthesizes error results, transcript stays
-                # valid); the loop's next _decide_stop returns agent_exit.
-                await ctx.agent.abort()
-                break
-            if (
+            # A nested HTTP SubmitSolution/ExitTask may update experiment state while
+            # its enclosing shell command is still writing files. Likewise, a result
+            # from one parallel call does not mean the other calls have finished.
+            # Honor cooperative stops only after all observed calls have returned.
+            if outcome.pending_tools:
+                continue
+            budget_reached = (
                 ctx.max_tool_calls is not None
                 and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
+            )
+            if (
+                ctx.experiment.exit_requested
+                or budget_reached
+                or _solved(ctx.experiment, ctx.is_perfect)
             ):
-                # The CLI agents run their whole loop in one send() with no inner tool cap, so the
-                # budget must bind mid-send. abort() ends the send; the next _decide_stop stops.
-                await ctx.agent.abort()
-                break
-            if _solved(ctx.experiment, ctx.is_perfect):
-                # Solved: stop at the SUBMISSION, not at the end of the turn. alancode submits many
-                # times inside one send(), so a turn-granular check re-scores the winning controller
-                # for the rest of the turn (measured: 6 identical perfect submissions, 5 redundant).
                 await ctx.agent.abort()
                 break
     except Exception as exc:  # an unexpected fault in a tool or the adapter
@@ -421,6 +417,7 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
 async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOutcome) -> None:
     """Route one event: execute framework tools, record backend errors, else observe."""
     if isinstance(event, ToolCall):
+        outcome.pending_tools.add(event.id)
         outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
         ctx.experiment.tool_calls_total += 1
         await _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
@@ -429,7 +426,9 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             result = await _execute_framework_tool(tool, event, ctx)
             ctx.transcript.write(result)
             await ctx.agent.inject(result.output)
+            outcome.pending_tools.discard(event.id)
     elif isinstance(event, ToolResult):
+        outcome.pending_tools.discard(event.id)
         await _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)
     elif isinstance(event, AgentError):
         ctx.logger.log(

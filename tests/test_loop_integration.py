@@ -13,7 +13,13 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from regact.agent.events import AgentError, IterationComplete, TextDelta, ToolCall
+from regact.agent.events import (
+    AgentError,
+    IterationComplete,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+)
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.schema import Lifecycle, LimitsConfig
 from regact.env.lifecycle import MultiInstancePolicy
@@ -118,7 +124,11 @@ async def test_full_pipeline_submit_then_exit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     agent = ScriptedAgent(
         [
-            [TextDelta("Submitting."), ToolCall("c1", "SubmitSolution", {}), IterationComplete()],
+            [
+                TextDelta("Submitting."),
+                ToolCall("c1", "SubmitSolution", {}),
+                IterationComplete(),
+            ],
             [ToolCall("c2", "ExitTask", {}), IterationComplete()],
         ]
     )
@@ -141,7 +151,9 @@ async def test_full_pipeline_submit_then_exit(tmp_path: Path) -> None:
     assert final["aggregate"]["success_rate"] == 1.0
 
 
-async def test_teardown_finalizes_when_agent_exits_without_resubmitting(tmp_path: Path) -> None:
+async def test_teardown_finalizes_when_agent_exits_without_resubmitting(
+    tmp_path: Path,
+) -> None:
     """The agent exits having never called SubmitSolution; finalize still scores solution.py."""
     stack = _Stack(tmp_path)
     agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), IterationComplete()]])
@@ -230,7 +242,12 @@ async def test_pipeline_stops_on_tool_call_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
     # One Bash call per turn (never submits/exits); the loop counts every ToolCall event.
-    agent = ScriptedAgent([[ToolCall("c", "Bash", {}), IterationComplete()] for _ in range(6)])
+    agent = ScriptedAgent(
+        [
+            [ToolCall("c", "Bash", {}), ToolResult("c", "done"), IterationComplete()]
+            for _ in range(6)
+        ]
+    )
     reason = await stack.run(agent)
 
     assert reason == "tool_call_limit"
@@ -244,7 +261,11 @@ async def test_pipeline_aborts_mid_send_at_the_tool_call_budget(tmp_path: Path) 
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
     # A single send() emitting five Bash calls: the loop must stop after the third, not run all 5.
-    calls = [ToolCall(f"c{i}", "Bash", {}) for i in range(5)]
+    calls = [
+        event
+        for i in range(5)
+        for event in (ToolCall(f"c{i}", "Bash", {}), ToolResult(f"c{i}", "done"))
+    ]
     agent = ScriptedAgent([[*calls, IterationComplete()]])
     reason = await stack.run(agent)
 
@@ -258,8 +279,14 @@ async def test_pipeline_stops_when_a_submission_is_perfect(tmp_path: Path) -> No
     stack = _Stack(tmp_path)
     agent = ScriptedAgent(
         [
-            [ToolCall("c1", "SubmitSolution", {}), IterationComplete()],  # _FORWARD solves -> 1.0
-            [ToolCall("c2", "Bash", {}), IterationComplete()],  # must NOT run: the run stops first
+            [
+                ToolCall("c1", "SubmitSolution", {}),
+                IterationComplete(),
+            ],  # _FORWARD solves -> 1.0
+            [
+                ToolCall("c2", "Bash", {}),
+                IterationComplete(),
+            ],  # must NOT run: the run stops first
         ]
     )
     reason = await stack.run(agent, is_perfect=lambda agg: agg.get("success_rate", 0) >= 1.0)
@@ -269,7 +296,9 @@ async def test_pipeline_stops_when_a_submission_is_perfect(tmp_path: Path) -> No
     assert len(agent.sent) == 1  # stopped right after the perfect submission
 
 
-async def test_pipeline_stops_at_the_perfect_submission_not_the_turn_end(tmp_path: Path) -> None:
+async def test_pipeline_stops_at_the_perfect_submission_not_the_turn_end(
+    tmp_path: Path,
+) -> None:
     """Solved must stop at the SUBMISSION, not when the turn ends. alancode submits many times
     inside one send(), so a turn-granular check keeps re-scoring the winning controller: a live run
     paid for six identical perfect submissions before its turn closed."""
@@ -374,3 +403,108 @@ async def test_the_verdict_is_on_disk_before_teardown_runs(tmp_path: Path) -> No
 
     assert reason == "agent_exit"
     assert seen["exit_reason"] == "agent_exit"  # already persisted, not written after teardown
+
+
+@pytest.mark.parametrize("stop_kind", ["budget", "solved", "exit"])
+async def test_stop_waits_for_enclosing_shell_result(tmp_path: Path, stop_kind: str) -> None:
+    """A submission/exit inside a shell command must not interrupt its remaining writes."""
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=1 if stop_kind == "budget" else None)
+    solution = stack.workdir / "solution.py"
+
+    class WritingAgent(ScriptedAgent):
+        async def send(self, message):
+            yield ToolCall("shell", "Bash", {"command": "write; SubmitSolution; write"})
+            solution.write_text("")  # reproduce the truncation window at call start
+            if stop_kind == "exit":
+                stack.experiment.exit_requested = True
+            else:
+                # Execute the real tool as the HTTP bridge would, inside the shell call.
+                submit = next(t for t in stack.tools if t.name == "SubmitSolution")
+                solution.write_text(_FORWARD)
+                await submit.call({}, ToolContext(cwd=str(stack.workdir)))
+                solution.write_text("")
+            yield TextDelta("Intermediate event while the command is still running")
+            assert not self.aborted
+            solution.write_text(_FORWARD)
+            yield ToolResult("shell", "finished")
+            pytest.fail("A new command must not start after the completed-call stop")
+
+    agent = WritingAgent()
+    reason = await stack.run(
+        agent,
+        is_perfect=(lambda a: a.get("success_rate") == 1) if stop_kind == "solved" else None,
+    )
+    assert (
+        reason == {"budget": "tool_call_limit", "solved": "solved", "exit": "agent_exit"}[stop_kind]
+    )
+    assert agent.aborted
+    assert solution.read_text() == _FORWARD
+    result = json.loads((stack.workdir / "submissions/final/results.json").read_text())
+    assert result["aggregate"]["success_rate"] == 1
+    assert stack.transcript_types().count("ToolResult") == 1
+
+
+async def test_tool_budget_waits_for_all_started_calls(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=2)
+
+    class ParallelAgent(ScriptedAgent):
+        async def send(self, message):
+            yield ToolCall("a", "Bash", {})
+            yield ToolCall("b", "Bash", {})
+            yield ToolResult("b", "failed", is_error=True)
+            yield TextDelta("a is still writing")
+            assert not self.aborted
+            yield ToolResult("a", "finished")
+            pytest.fail("Budget must stop after both results")
+
+    agent = ParallelAgent()
+    assert await stack.run(agent) == "tool_call_limit"
+    assert stack.transcript_types().count("ToolResult") == 2
+    assert agent.aborted
+
+
+async def test_inline_framework_result_satisfies_tool_budget(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=1)
+    agent = ScriptedAgent(
+        [[ToolCall("submit", "SubmitSolution", {}), ToolCall("extra", "Bash", {})]]
+    )
+    assert await stack.run(agent) == "tool_call_limit"
+    assert stack.experiment.submission_count == 1
+    assert stack.experiment.tool_calls_total == 1
+    assert stack.transcript_types().count("ToolResult") == 1
+
+
+async def test_codex_completion_only_patch_counts_and_finishes_before_stop(
+    tmp_path: Path,
+) -> None:
+    from regact.agent.codex_adapter import CodexAgent
+
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=1)
+    parser = CodexAgent()
+
+    class PatchAgent(ScriptedAgent):
+        async def send(self, message):
+            # CLI reports this patch only AFTER it has written both files.
+            item = {
+                "id": "item_0",
+                "type": "file_change",
+                "changes": [
+                    {"path": "solution.py", "kind": "update"},
+                    {"path": "helper.py", "kind": "add"},
+                ],
+                "status": "completed",
+            }
+            for event in parser._parse_events({"type": "item.completed", "item": item}):
+                assert not self.aborted
+                yield event
+            pytest.fail("Budget must stop before another operation")
+
+    agent = PatchAgent()
+    assert await stack.run(agent) == "tool_call_limit"
+    assert stack.experiment.tool_calls_total == 1
+    assert stack.transcript_types().count("ToolResult") == 1
+    assert agent.aborted

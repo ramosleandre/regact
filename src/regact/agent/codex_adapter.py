@@ -5,9 +5,11 @@ maps its ndjson events to the normalized union; resumes across turns via the
 thread id codex reports. Ported in shape from arc-3-agents-baseline1's
 ``codex_runner`` (subprocess + ndjson + thread-id resume).
 
-NOTE: codex's exact ``--json`` event schema is not pinned here, so ``_parse_events``
-is best-effort (keyed on common fields) and should be validated against real codex
-output — the live test is gated on the ``codex`` CLI being installed.
+Event mapping follows Codex 0.153.4's exec_events.rs and
+event_processor_with_jsonl_output.rs. Count one reported tool operation, not one
+stream event or one changed file. Completion-only items synthesize a paired call
+and result. The CLI omits some native operations (e.g. image viewing) and child
+agents' internal work; this stream cannot provide a full model tool-request count.
 """
 
 from __future__ import annotations
@@ -43,6 +45,12 @@ class CodexAgent(_CliAgent):
         raw_home = str(self._args.get("codex_home") or "~/.regact/codex-home")
         self._home_root = os.path.realpath(os.path.expanduser(raw_home))
         self._session_home: str | None = None  # this task's fresh home (created on demand)
+        self._started_tools: set[str] = set()
+        self._finished_tools: set[str] = set()
+        self._plan_updates = 0
+        subagents = self._args.get("subagents_enabled")
+        if subagents is not None and not isinstance(subagents, bool):
+            raise ValueError("agent.args.subagents_enabled must be true, false, or null")
 
     def prompt_for_transcript(self, prepared: str) -> str:
         return "[Codex system prompt — supplied by Codex, not captured]\n\n" + prepared
@@ -131,7 +139,23 @@ class CodexAgent(_CliAgent):
         self._session_home = None
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
+        # Exec item IDs restart for each process, including resumed turns.
+        self._started_tools.clear()
+        self._finished_tools.clear()
+        self._plan_updates = 0
         argv = ["codex"]
+        subagents = self._args.get("subagents_enabled")
+        if subagents is not None:
+            enabled = str(subagents).lower()
+            argv += [
+                "-c",
+                f"agents.enabled={enabled}",
+                "-c",
+                f"features.multi_agent={enabled}",
+            ]
+            # V2 takes precedence over agents.enabled. Pin the supported V1 protocol
+            # for explicit true/false control; leave CLI defaults alone for null.
+            argv += ["-c", "features.multi_agent_v2=false"]
         if self._model:
             argv += ["-m", self._model]
         if self._args.get("reasoning_effort"):
@@ -142,10 +166,18 @@ class CodexAgent(_CliAgent):
         # agent.args.ask_for_approval if you want codex's native sandbox instead.
         if self._args.get("sandbox"):
             argv += ["--sandbox", str(self._args["sandbox"])]
-            argv += ["--ask-for-approval", str(self._args.get("ask_for_approval", "never"))]
+            argv += [
+                "--ask-for-approval",
+                str(self._args.get("ask_for_approval", "never")),
+            ]
         else:
             argv += ["--dangerously-bypass-approvals-and-sandbox"]
-        argv += ["exec", "--cd", os.path.abspath(self._cwd) if self._cwd else ".", "--json"]
+        argv += [
+            "exec",
+            "--cd",
+            os.path.abspath(self._cwd) if self._cwd else ".",
+            "--json",
+        ]
         if self._session_id is not None:
             argv += ["resume", self._session_id]
         return argv, message  # codex reads the prompt from stdin
@@ -174,20 +206,28 @@ class CodexAgent(_CliAgent):
         if "reasoning" in kind or itype == "reasoning":
             return [ThinkingDelta(_text_of(item.get("text") or item.get("reasoning")))]
 
-        if itype in ("command_execution", "tool_call", "function_call", "mcp_tool_call"):
-            tool_id = str(item.get("id", ""))
-            if kind.endswith("item.completed") or item.get("status") == "completed":
-                exit_code = item.get("exit_code")
-                return [
-                    ToolResult(
-                        id=tool_id,
-                        output=_text_of(item.get("aggregated_output") or item.get("output")),
-                        is_error=isinstance(exit_code, int) and exit_code != 0,
-                    )
-                ]
-            if kind.endswith("item.started"):
-                return [ToolCall(id=tool_id, name=_tool_name(item), input=_tool_input(item))]
-            return []  # item.updated and other intermediate frames
+        if itype == "todo_list":
+            # Each start/update is one already-executed update_plan call. The final
+            # completion repeats the list at turn end, not another tool invocation.
+            if kind not in ("item.started", "item.updated"):
+                return []
+            self._plan_updates += 1
+            tool_id = f"{item.get('id', 'plan')}:update:{self._plan_updates}"
+            return [
+                ToolCall(tool_id, "update_plan", {"items": item.get("items", [])}),
+                ToolResult(tool_id, "Plan updated"),
+            ]
+
+        if itype in (
+            "command_execution",
+            "file_change",
+            "mcp_tool_call",
+            "collab_tool_call",
+            "web_search",
+            "tool_call",
+            "function_call",
+        ):
+            return self._tool_events(kind, item)
 
         if kind.endswith("turn.completed") or kind.endswith("turn_complete"):
             return [IterationComplete(final_text=_text_of(item.get("text")))]
@@ -197,11 +237,35 @@ class CodexAgent(_CliAgent):
             return [TextDelta(_text_of(text))]
         return []
 
+    def _tool_events(self, kind: str, item: dict[str, Any]) -> list[AgentEvent]:
+        """Pair each item once, including failed and completion-only operations."""
+        if kind not in ("item.started", "item.completed"):
+            return []  # output/progress updates are not new calls or completions
+        tool_id = str(item.get("id", ""))
+        if tool_id in self._finished_tools:
+            return []
+        events: list[AgentEvent] = []
+        if tool_id not in self._started_tools:
+            self._started_tools.add(tool_id)
+            events.append(ToolCall(tool_id, _tool_name(item), _tool_input(item)))
+        if kind == "item.completed":
+            self._finished_tools.add(tool_id)
+            exit_code = item.get("exit_code")
+            failed = (
+                item.get("status") in ("failed", "declined", "interrupted")
+                or (isinstance(exit_code, int) and exit_code != 0)
+                or bool(item.get("error"))
+            )
+            events.append(ToolResult(tool_id, _tool_output(item), failed))
+        return events
+
 
 def _tool_name(item: dict[str, Any]) -> str:
     """A short tool label: ``shell`` for a command, else the tool/function name."""
     if item.get("command") is not None:
         return "shell"
+    if item.get("type") == "file_change":
+        return "apply_patch"
     return str(item.get("name") or item.get("tool") or item.get("type") or "tool")
 
 
@@ -209,8 +273,29 @@ def _tool_input(item: dict[str, Any]) -> dict[str, Any]:
     """The tool's arguments only — never the noisy lifecycle/output fields."""
     if item.get("command") is not None:
         return {"command": item["command"]}
-    drop = {"id", "type", "status", "aggregated_output", "exit_code"}
+    drop = {
+        "id",
+        "type",
+        "status",
+        "aggregated_output",
+        "exit_code",
+        "result",
+        "error",
+        "output",
+        "agents_states",
+    }
     return {k: v for k, v in item.items() if k not in drop}
+
+
+def _tool_output(item: dict[str, Any]) -> str:
+    for key in ("error", "aggregated_output", "output", "result"):
+        value = item.get(key)
+        if value is not None:
+            return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    # Patches/search/collaboration carry their result on the item itself.
+    return json.dumps(
+        {k: v for k, v in item.items() if k not in ("id", "type")}, ensure_ascii=False
+    )
 
 
 def _text_of(value: Any) -> str:
