@@ -468,3 +468,18 @@ def test_codex_subagent_control_is_explicit_and_survives_resume(enabled) -> None
 def test_codex_rejects_string_boolean_for_subagents() -> None:
     with pytest.raises(ValueError, match="subagents_enabled"):
         CodexAgent({"subagents_enabled": "false"})
+
+
+@pytest.mark.parametrize("session_id", [None, "existing-session"])
+@pytest.mark.parametrize("sandbox", [None, "workspace-write"])
+def test_codex_disables_web_search_on_every_launch(session_id, sandbox) -> None:
+    agent = CodexAgent({"sandbox": sandbox})
+    agent._session_id = session_id
+    argv, stdin = agent._command("continue")
+    overrides = [argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"]
+    assert [value for value in overrides if value.startswith("web_search=")] == [
+        'web_search="disabled"'
+    ]
+    assert argv.index('web_search="disabled"') < argv.index("exec")
+    assert ("resume" in argv) == (session_id is not None)
+    assert stdin == "continue"

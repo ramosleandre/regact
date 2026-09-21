@@ -143,7 +143,9 @@ class CodexAgent(_CliAgent):
         self._started_tools.clear()
         self._finished_tools.clear()
         self._plan_updates = 0
-        argv = ["codex"]
+        # Hosted web search is independent of the outer sandbox network rules.
+        # Apply this override to both initial and resumed conversations.
+        argv = ["codex", "-c", 'web_search="disabled"']
         subagents = self._args.get("subagents_enabled")
         if subagents is not None:
             enabled = str(subagents).lower()
