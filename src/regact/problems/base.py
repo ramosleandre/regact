@@ -11,7 +11,7 @@ backend is imported lazily so this module needs no game library installed.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from regact.config.schema import HelperConfig, InfoMode, ObsMode
@@ -117,6 +117,22 @@ class BaseProblem(ABC):
     def aggregate_episode_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
         """Roll per-episode metrics into a run aggregate."""
         ...
+
+    def enumerate_actions(self, obs: Obs) -> Iterable[Any]:
+        """Public finite action space for CWM planning; no engine introspection.
+
+        Problems with parameterized actions must override this method explicitly.
+        """
+        for action in obs.available_actions:
+            if type(action) is not int:
+                raise ValueError(
+                    "planner action enumeration requires a problem-specific implementation"
+                )
+            yield action
+
+    def exploration_score(self, aggregate: dict[str, Any]) -> float:
+        """Rank observed CWM progress for the best-exploration summary only."""
+        return float(aggregate.get("success_rate", 0) or 0)
 
     def failure_metrics(self, *, steps: int) -> dict[str, Any]:
         """Zero credit for a controller-caused failure; steps remain diagnostic.

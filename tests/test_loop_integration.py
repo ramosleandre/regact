@@ -34,6 +34,7 @@ from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.loop import run_session
 from regact.orchestration.signals import StopSignal
+from regact.protocols.policy_search import PolicySearchSession
 from regact.session.state import ExperimentState
 from regact.testing.fakes import FakeNativeEnv
 from regact.tools.base import Tool, ToolContext, ToolOutput
@@ -107,9 +108,10 @@ class _Stack:
                 limits=self.limits,
                 state_path=self.state_path,
                 cwd=str(self.workdir),
-                hooks=self.hooks,
+                protocol=PolicySearchSession(
+                    experiment=self.experiment, hooks=self.hooks, is_perfect=is_perfect
+                ),
                 stop=stop,
-                is_perfect=is_perfect,
             )
         finally:
             self.transcript.close()

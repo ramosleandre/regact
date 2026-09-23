@@ -98,11 +98,12 @@ class LimitsConfig:
     # iterations inside each one (alan averages ~5, and a Kimi run measured 4). So this caps
     # roughly 5N wasted model calls, not N - set it in turns and read the cost in calls.
     max_consecutive_no_tool_turns: int = 0
+    max_real_actions_per_task: int | None = None  # CWM: all recorded real steps, resets excluded
 
 
 @dataclass
 class ControllerConfig:
-    """Eval knobs for the always-on controller (the agent writes a policy and submits it).
+    """Evaluation settings for policy_search (the agent writes and submits a policy).
 
     The controller is core, not a feature, so its settings live here rather than under
     ``features.<name>``. They configure the controller's *evaluation*: how many episodes
@@ -119,13 +120,25 @@ class ControllerConfig:
 
 
 @dataclass
+class ProtocolConfig:
+    """Workflow selection. Protocol-specific settings are validated by its factory.
+
+    YAML/CLI fields live directly under protocol.*; the loader separates the name
+    from the options. Existing controller.* settings keep their names and defaults.
+    """
+
+    name: str = "policy_search"
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class RunConfig:
     """The full description of one experiment (one or many tasks)."""
 
     agent: AgentConfig
     problem: ProblemConfig
-    # The controller is always-on core (its eval knobs live on ``controller``). ``features``
-    # holds only OPTIONAL extra capabilities (e.g. cwm), each owning its knobs (``features.<name>``)
+    # Existing policy_search settings retain their public names and defaults.
+    # Other protocols own their settings under ``protocol`` and do not use these fields.
     controller: ControllerConfig = field(default_factory=ControllerConfig)
     features: dict[str, dict[str, Any]] = field(default_factory=dict)
     parallel_workers: int = 1  # 1 = sequential
@@ -149,6 +162,7 @@ class RunConfig:
     # (attempt_index, serve mode, quant, slurm job id) - facts the harness cannot know about itself.
     # Untyped on purpose, so the launcher can add a field without a schema change here.
     launch: dict[str, Any] = field(default_factory=dict)
+    protocol: ProtocolConfig = field(default_factory=ProtocolConfig)
 
 
 def redacted_config_dict(config: RunConfig) -> dict[str, Any]:
@@ -168,4 +182,6 @@ def redacted_config_dict(config: RunConfig) -> dict[str, Any]:
             return [_mask(v) for v in value]
         return value
 
-    return {k: _mask(v, k) for k, v in dataclasses.asdict(config).items()}
+    serialized = dataclasses.asdict(config)
+    serialized["protocol"] = {"name": config.protocol.name, **config.protocol.options}
+    return {k: _mask(v, k) for k, v in serialized.items()}

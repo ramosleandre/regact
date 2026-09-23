@@ -8,54 +8,49 @@ from typing import Any
 from regact.agent.events import ToolCall
 from regact.config.schema import LimitsConfig
 from regact.orchestration.loop import (
-    _ESCALATE_AFTER_REMINDERS,
-    _acted_without_submitting,
     _decide_stop,
     _execute_framework_tool,
-    _keep_alive_message,
     _LoopContext,
 )
+from regact.protocols.policy_search import (
+    _ESCALATE_AFTER_REMINDERS,
+    PolicySearchSession,
+    _acted_without_submitting,
+    _keep_alive_message,
+)
 from regact.security.policy import default_policy
+from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
 _LIMITS = LimitsConfig(max_turns=3, max_seconds_per_task=None)
 
 
 def test_decide_stop_continues_by_default() -> None:
-    assert (
-        _decide_stop(
-            exit_requested=False, interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS
-        )
-        is None
-    )
+    assert _decide_stop(interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS) is None
 
 
 def test_decide_stop_interrupt_wins_over_everything() -> None:
     reason = _decide_stop(
-        exit_requested=True, interrupted=True, turns=99, elapsed_s=999.0, limits=_LIMITS
+        protocol_reason="agent_exit", interrupted=True, turns=99, elapsed_s=999.0, limits=_LIMITS
     )
     assert reason == "interrupted"
 
 
 def test_decide_stop_agent_exit() -> None:
     reason = _decide_stop(
-        exit_requested=True, interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS
+        protocol_reason="agent_exit", interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS
     )
     assert reason == "agent_exit"
 
 
 def test_decide_stop_keep_alive_limit() -> None:
-    reason = _decide_stop(
-        exit_requested=False, interrupted=False, turns=3, elapsed_s=0.0, limits=_LIMITS
-    )
+    reason = _decide_stop(interrupted=False, turns=3, elapsed_s=0.0, limits=_LIMITS)
     assert reason == "loop_limit"
 
 
 def test_decide_stop_walltime_limit() -> None:
     limits = LimitsConfig(max_turns=100, max_seconds_per_task=5)
-    reason = _decide_stop(
-        exit_requested=False, interrupted=False, turns=0, elapsed_s=6.0, limits=limits
-    )
+    reason = _decide_stop(interrupted=False, turns=0, elapsed_s=6.0, limits=limits)
     assert reason == "walltime_limit"
 
 
@@ -64,7 +59,6 @@ def test_decide_stop_tool_call_limit() -> None:
     # under the budget: keep going
     assert (
         _decide_stop(
-            exit_requested=False,
             interrupted=False,
             turns=0,
             elapsed_s=0.0,
@@ -75,7 +69,6 @@ def test_decide_stop_tool_call_limit() -> None:
     )
     # at the budget: stop
     reason = _decide_stop(
-        exit_requested=False,
         interrupted=False,
         turns=0,
         elapsed_s=0.0,
@@ -90,36 +83,33 @@ def test_decide_stop_solved_beats_exit_and_limits() -> None:
     # A perfect submission stops successfully even with budget left and an exit pending.
     assert (
         _decide_stop(
-            exit_requested=True,
             interrupted=False,
             turns=0,
             elapsed_s=0.0,
             limits=limits,
-            solved=True,
+            protocol_reason="solved",
         )
         == "solved"
     )
     # ...but a hard interrupt still wins over it.
     assert (
         _decide_stop(
-            exit_requested=False,
             interrupted=True,
             turns=0,
             elapsed_s=0.0,
             limits=limits,
-            solved=True,
+            protocol_reason="solved",
         )
         == "interrupted"
     )
     # Not solved -> keep going.
     assert (
         _decide_stop(
-            exit_requested=False,
             interrupted=False,
             turns=0,
             elapsed_s=0.0,
             limits=limits,
-            solved=False,
+            protocol_reason=None,
         )
         is None
     )
@@ -171,6 +161,7 @@ def _ctx(logger: Any) -> _LoopContext:
         logger=logger,
         cwd="/tmp",
         policy=default_policy(),
+        protocol=PolicySearchSession(experiment=ExperimentState(problem_name="p", task_name="t")),
     )
 
 
@@ -221,6 +212,9 @@ async def test_flagging_warning_injected_up_to_cap() -> None:
             logger=_FakeLogger(),
             cwd="/tmp",
             policy=default_policy(),
+            protocol=PolicySearchSession(
+                experiment=ExperimentState(problem_name="p", task_name="t")
+            ),
             flagging_warning_cap=cap,
         )
         return ctx, agent

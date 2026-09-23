@@ -7,7 +7,7 @@ mirrors everything to the canonical ``transcript.jsonl``, and stops on the agent
 request, a limit, an interrupt, a persistent backend error, or a crash.
 
 It is deliberately agnostic of controllers/games/eval: it only knows agents,
-framework tools, hooks, limits, and writers — all generic interfaces. It imports
+framework tools, protocol sessions, hooks, limits, and writers — all generic interfaces. It imports
 neither the executor nor a problem. Feature-specific teardown work (e.g. re-scoring
 the final solution) arrives as :class:`Hook` objects it fires by phase, the same
 way feature ``tools`` arrive as :class:`Tool` objects it executes on demand.
@@ -24,7 +24,6 @@ import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from regact.agent.base import CodeAgent
 from regact.agent.events import (
@@ -41,43 +40,13 @@ from regact.obs.errors import ErrorCategory, LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.signals import StopSignal
+from regact.protocols.base import ProtocolSession
 from regact.security.detection import flag_os_denial, flag_tool_call
 from regact.security.policy import SecurityPolicy, default_policy
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext
 
 _ABORTED_REASONS = frozenset({"loop_crash"})
-
-_KEEP_ALIVE_MESSAGE = (
-    "Keep-alive reminder - continue working or finish your work: 1) produce a controller in "
-    "solution.py, 2) submit it by running `python framework/control.py SubmitSolution`, 3) if you "
-    "are satisfied with your solution, end the task with `python framework/control.py ExitTask`."
-)
-# Used when the agent cannot end its own run (exit_task_enabled=False): no ExitTask mention.
-_KEEP_ALIVE_MESSAGE_NO_EXIT = (
-    "Keep-alive reminder - keep improving your controller: 1) refine the controller in "
-    "solution.py, 2) submit it via `python framework/control.py SubmitSolution`, 3) keep "
-    "iterating until fully solving the task."
-)
-
-# Repeating one sentence does not convert a non-submitter: over 43 runs, submitters and
-# non-submitters got the same number of reminders (29.1 vs 27.9) and two ignored it 57 times.
-_ESCALATE_AFTER_REMINDERS = 10
-_KEEP_ALIVE_MESSAGE_ESCALATED = (
-    "You have now received {n} reminders and have not submitted anything. Submit NOW, even if "
-    "your controller is unfinished: run `python framework/control.py SubmitSolution`. Every "
-    "submission is scored and the result is returned to you, so submitting is how you find out "
-    "whether your controller works - keep improving it afterwards."
-)
-
-
-def _keep_alive_message(base: str, reminders: int, submissions: int) -> str:
-    """The reminder to send. Escalates once a run has been reminded repeatedly and still submitted
-    nothing - firing early only costs a stronger sentence, never the run."""
-    if submissions == 0 and reminders >= _ESCALATE_AFTER_REMINDERS:
-        return _KEEP_ALIVE_MESSAGE_ESCALATED.format(n=reminders)
-    return base
-
 
 # Injected on the agent's next turn when a tool call is flagged (see config.flagging_warning_cap),
 # so a model reaching for a sandboxed action learns why it failed and stops wasting budget on it.
@@ -114,13 +83,13 @@ class _LoopContext:
     logger: RunLogger
     cwd: str
     policy: SecurityPolicy  # for flagging (not blocking) suspicious tool calls
+    protocol: ProtocolSession
     state_path: str = ""  # where to persist ExperimentState (saved live, per event)
     start: float = 0.0  # time.monotonic() at the run's start, for the live duration
     move_count: Callable[[], int] | None = None  # polls the env's step count, for the live state
     flagging_warning_cap: int = 0  # max flagging warnings to inject this task (0 = never)
     warnings_injected: int = 0  # how many have been injected so far (mutated as they fire)
     max_tool_calls: int | None = None  # hard tool-call budget, enforced mid-send (None = off)
-    is_perfect: Callable[[dict[str, Any]], bool] | None = None  # perfect-score test, mid-send
 
 
 @dataclass
@@ -145,16 +114,14 @@ async def run_session(
     state_path: str,
     cwd: str,
     system_prompt: str | None = None,
-    hooks: list[Hook] | None = None,
+    protocol: ProtocolSession,
     stop: StopSignal | None = None,
     move_count: Callable[[], int] | None = None,
     flagging_warning_cap: int = 0,
-    exit_task_enabled: bool = True,
-    is_perfect: Callable[[dict[str, Any]], bool] | None = None,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
-    keep_alive = _KEEP_ALIVE_MESSAGE if exit_task_enabled else _KEEP_ALIVE_MESSAGE_NO_EXIT
+    protocol.on_start(start)
     ctx = _LoopContext(
         agent=agent,
         experiment=experiment,
@@ -168,7 +135,7 @@ async def run_session(
         move_count=move_count,
         flagging_warning_cap=flagging_warning_cap,
         max_tool_calls=limits.max_tool_calls,
-        is_perfect=is_perfect,
+        protocol=protocol,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -184,13 +151,12 @@ async def run_session(
     try:
         while True:
             reason = _decide_stop(
-                exit_requested=experiment.exit_requested,
                 interrupted=stop.is_set() if stop is not None else False,
                 turns=turns,
                 tool_calls_total=experiment.tool_calls_total,
                 elapsed_s=time.monotonic() - start,
                 limits=limits,
-                solved=_solved(experiment, is_perfect),
+                protocol_reason=protocol.stop_reason(),
             )
             if reason is not None:
                 break
@@ -231,7 +197,7 @@ async def run_session(
                 reason = "no_tool_progress"
                 break
             reminders += 1
-            message = _keep_alive_message(keep_alive, reminders, experiment.submission_count)
+            message = protocol.reminder(reminders)
     finally:
         if watchdog is not None:
             watchdog.cancel()
@@ -243,15 +209,8 @@ async def run_session(
     # final re-score, having correctly decided walltime_limit.
     experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
     _save_state(ctx)
-    await _run_teardown_hooks(hooks or [], reason, ctx)
-    if _acted_without_submitting(reason, experiment.submission_count, experiment.tool_calls_total):
-        logger.log(
-            LogComponent.ORCHESTRATOR,
-            "WARNING",
-            "acted_without_submitting",
-            tool_calls_total=experiment.tool_calls_total,
-            env_moves=experiment.env_moves,
-        )
+    await _run_teardown_hooks(protocol.hooks, reason, ctx)
+    protocol.after_teardown(reason, logger)
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_end", phase="teardown", reason=reason)
     _save_state(ctx)
     return reason
@@ -267,7 +226,7 @@ def _save_state(ctx: _LoopContext) -> None:
         ctx.experiment.agent_session_id = ctx.agent.session_id()
     info = ctx.agent.resolved_model_info()
     resolved = info.get("context_window") if info else None
-    if resolved is not None:  # alancode's resolved window, when reported, wins over the baseline
+    if info is not None and resolved is not None:  # reported window wins over the baseline
         ctx.experiment.context_window = resolved
         ctx.experiment.context_window_source = info.get("context_window_source") or "alancode"
     ctx.experiment.save(ctx.state_path)
@@ -324,21 +283,18 @@ def _spawn_walltime_watchdog(
 
 def _decide_stop(
     *,
-    exit_requested: bool,
     interrupted: bool,
     turns: int,
     elapsed_s: float,
     limits: LimitsConfig,
     tool_calls_total: int = 0,
-    solved: bool = False,
+    protocol_reason: str | None = None,
 ) -> str | None:
     """Pure stop decision, checked before each turn. ``None`` means keep going."""
     if interrupted:
         return "interrupted"
-    if solved:  # a perfect submission - stop successfully, no need to burn the rest of the budget
-        return "solved"
-    if exit_requested:
-        return "agent_exit"
+    if protocol_reason is not None:
+        return protocol_reason
     if turns >= limits.max_turns:
         return "loop_limit"
     if limits.max_tool_calls is not None and tool_calls_total >= limits.max_tool_calls:
@@ -346,31 +302,6 @@ def _decide_stop(
     if limits.max_seconds_per_task is not None and elapsed_s >= limits.max_seconds_per_task:
         return "walltime_limit"
     return None
-
-
-def _solved(
-    experiment: ExperimentState, is_perfect: Callable[[dict[str, Any]], bool] | None
-) -> bool:
-    """Whether the latest submission scored perfect, so the run has nothing left to do."""
-    last = experiment.last_submission_results
-    if not is_perfect or not last or last.get("error"):
-        return False
-    aggregate = last.get("aggregate", {})
-    if not aggregate.get("evaluation_complete") or aggregate.get("n_errors", 0):
-        return False
-    if any(e.get("error") for e in last.get("episodes", [])):
-        return False
-    return bool(is_perfect(aggregate))
-
-
-def _acted_without_submitting(
-    reason: str | None, submission_count: int, tool_calls_total: int
-) -> bool:
-    """Shape-3 tell: the agent ran tools but never submitted and exited on walltime - an unbound
-    control channel (native protocol on a subprocess agent -> submit/exit 503s) or a doom loop,
-    scoring only via the teardown re-score. turn/tool_calls ratio look healthy, so submission_count
-    with env_moves is the only signal - the failure the spinning detector cannot see."""
-    return reason == "walltime_limit" and submission_count == 0 and tool_calls_total > 0
 
 
 async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
@@ -395,11 +326,7 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
                 ctx.max_tool_calls is not None
                 and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
             )
-            if (
-                ctx.experiment.exit_requested
-                or budget_reached
-                or _solved(ctx.experiment, ctx.is_perfect)
-            ):
+            if budget_reached or ctx.protocol.stop_reason() is not None:
                 await ctx.agent.abort()
                 break
     except Exception as exc:  # an unexpected fault in a tool or the adapter

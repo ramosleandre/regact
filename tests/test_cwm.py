@@ -543,7 +543,7 @@ class _WritingAgent(ScriptedAgent):
 
 
 @pytest.mark.integration
-async def test_run_task_with_cwm_records_and_verifies(tmp_path: Path) -> None:
+async def test_legacy_cwm_run_requires_protocol_migration(tmp_path: Path) -> None:
     config = RunConfig(
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake"),
@@ -557,27 +557,6 @@ async def test_run_task_with_cwm_records_and_verifies(tmp_path: Path) -> None:
             [ToolCall("c2", "ExitTask", {}), IterationComplete()],
         ]
     )
-    reason = await run_task(
-        config, _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent
-    )
-    assert reason == "solved"  # the perfect submission ends the run before the agent's ExitTask
-
-    workdir = tmp_path / "workdir"
-    assert (workdir / "world_model" / "verify.py").exists()
-    transcript = (tmp_path / "logs" / "transcript.jsonl").read_text()
-    assert "Code World Model" in transcript  # the prompt fragment reached the system prompt
-
-    # The submission + final evals stepped the env through HTTP: all recorded,
-    # into both the agent mirror and the trusted canonical (outside the workdir).
-    lines = _lines(tmp_path)
-    assert len(lines) >= 3
-    assert all({"o", "a", "r", "o2", "done"} <= set(line) for line in lines)
-    assert any(line["done"] for line in lines)
-    assert _canonical_lines(tmp_path) == lines
-
-    # Full circle: an identity model verifies at coherence 1.0 on the recorded data.
-    (workdir / "world_model" / "model_parser.py").write_text(_IDENTITY_PARSER)
-    (workdir / "world_model" / "model_render.py").write_text(_IDENTITY_RENDER)
-    report = _run_verify(workdir / "world_model" / "verify.py")
-    assert report["representation_coherence"] == 1.0
-    assert report["coverage"]["n_transitions_total"] == len(lines)
+    with pytest.raises(ValueError, match="CWM v3 is retired"):
+        await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path), agent=agent)
+    assert not (tmp_path / "logs").exists()

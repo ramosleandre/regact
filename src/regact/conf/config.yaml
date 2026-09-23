@@ -1,4 +1,4 @@
-# Default run config. Compose the four agnosticity axes as Hydra groups, and override
+# Default run config. Compose the Hydra groups and override
 # any field on the CLI:
 #   python -m regact.run_exp agent=claude problem=arc_agi
 #   python -m regact.run_exp agent=codex problem=minigrid agent.args.reasoning_effort=high
@@ -6,8 +6,9 @@
 defaults:
   - agent: scripted        # conf/agent/*        — who writes the code
   - problem: arc_agi       # conf/problem/*      — the environment (iterates its tasks)
-  - controller: default    # conf/controller/*   - the always-on controller (eval knobs)
-  - features: none         # conf/features/*     - OPTIONAL extra capabilities (default: none)
+  - protocol: policy_search # conf/protocol/*     - experiment workflow
+  - controller: default    # conf/controller/*   - policy-search evaluation knobs
+  - features: none         # conf/features/*     - optional policy-search capabilities
   - _self_
   - optional model:        # conf/model/*        — a served model's pinned hyperparameters (ctx window…)
   - optional experiment:   # conf/experiment/*   — a named profile that overrides the above
@@ -24,6 +25,7 @@ limits:
   max_turns: 350                # agent turns per task before the loop gives up
   max_tool_calls: null          # total tool calls across the run (the primary budget); null = off
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit
+  max_real_actions_per_task: null # CWM: total real steps across collection and explorations
   max_actions_per_env: null     # env.step cap per env instance, from its make (anti-runaway);
                                 # null = no cap
   max_consecutive_no_tool_turns: 0  # >0 = end the loop after N consecutive REGACT TURNS

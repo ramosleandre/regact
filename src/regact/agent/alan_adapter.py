@@ -110,9 +110,12 @@ def build_alan_agent(
     # settings. Apply it via the public settings API after construction (queries read live).
     escalated = args.get("escalated_max_tokens")
     value = int(escalated) if escalated is not None else _DEFAULT_ESCALATED_MAX_TOKENS
-    err = agent.update_session_setting("escalated_max_tokens", value)
-    if err is not None:
-        raise RuntimeError(f"alancode rejected escalated_max_tokens={value}: {err}")
+    # A remote human/script supplies its own completions; token escalation is unused.
+    # Recent Alan versions removed this setting. Leave normal model runs unchanged.
+    if not (args.get("backend") == "scripted" and model == "remote" and escalated is None):
+        err = agent.update_session_setting("escalated_max_tokens", value)
+        if err is not None:
+            raise RuntimeError(f"alancode rejected escalated_max_tokens={value}: {err}")
 
     # Optional empty_response-sweep settings: applied ONLY when the bench sets them, so a
     # default run still works on an older alancode. Settings (not ctor kwargs) - an unknown

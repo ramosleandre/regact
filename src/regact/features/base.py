@@ -53,6 +53,7 @@ class FeatureContext:
     # agent-writable ``workdir``. Empty for the static prompt/template contexts,
     # which never write there.
     output_dir: str = ""
+    env_base_url: str = ""
 
 
 @dataclass

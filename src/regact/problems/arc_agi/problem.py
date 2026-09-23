@@ -460,6 +460,20 @@ class ArcAgiProblem(BaseProblem):
         actions = _actions_for_ids(obs.available_actions)
         return f"{body}\n\nActions available now:\n\n{actions}" if actions else body
 
+    def enumerate_actions(self, obs: Obs) -> Iterable[Any]:
+        for action in obs.available_actions:
+            if type(action) is not int:
+                raise ValueError("ARC available actions must be integer IDs")
+            if action == 6:
+                for y in range(64):
+                    for x in range(64):
+                        yield {"action": 6, "data": {"x": x, "y": y}}
+            else:
+                yield action
+
+    def exploration_score(self, aggregate: dict[str, Any]) -> float:
+        return float(aggregate.get("mean_levels_completed", 0) or 0)
+
     def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
         info = final_obs.info or {}
         completed = info.get("levels_completed", 0)

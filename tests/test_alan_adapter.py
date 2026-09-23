@@ -300,3 +300,17 @@ def test_build_alan_agent_omits_unset_sweep_settings(monkeypatch) -> None:
     )
     assert "persist_thinking" not in captured["settings"]
     assert "empty_response_retries" not in captured["settings"]
+
+
+def test_remote_agent_does_not_require_unused_escalation_setting(monkeypatch) -> None:
+    captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
+    build_alan_agent(
+        cwd=".",
+        model="remote",
+        base_url=None,
+        api_key=None,
+        system_prompt=None,
+        extra_tools=[],
+        args={"backend": "scripted"},
+    )
+    assert "escalated_max_tokens" not in captured.get("settings", {})

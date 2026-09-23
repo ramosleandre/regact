@@ -647,7 +647,7 @@ async function renderGameGraphs(name) {
 }
 
 // ---------------------------------------------------------------- per-game shell
-const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
+const TABS = [["", "Overview"], ["cwm", "CWM"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
 
 function shell(name, active, body) {
   crumb.textContent = name;
@@ -659,6 +659,7 @@ function shell(name, active, body) {
   back.href = parent ? "#run/" + encodeURIComponent(parent) : "#";
   nav.append(back);
   for (const [slug, label] of TABS) {
+    if (slug === "cwm" && _cache[name]?.config?.protocol?.name !== "cwm") continue;
     const href = "#game/" + encodeURIComponent(name) + (slug ? "/" + slug : "");
     const a = h("a", "tab" + (slug === active ? " on" : ""), label);
     a.href = href;
@@ -786,6 +787,7 @@ async function renderOverview(name) {
   const specs = metricSpecs([{ metrics: m }]).filter((s) => s.get && !s.count && !s.categorical);
   const fmtOf = (s) => { const v = s.get(m); return v != null && s.fmt ? s.fmt(v) : fmtMetric(v); };
   const isMain = (s) => s.def || s.key.startsWith("agg:");
+  if (m.protocol === "cwm") wrap.append(h("p", "muted", "CWM protocol · score below = latest real exploration. Open CWM for best progress, phases and replay."));
   const main = [["Status", statusOf(m)], ...specs.filter(isMain).map((s) => [s.label, fmtOf(s)])];
   const other = [
     ...specs.filter((s) => !isMain(s)).map((s) => [s.label, fmtOf(s)]),
@@ -1060,7 +1062,11 @@ async function renderArtifacts(name) {
     }
     subs.append(c);
   }
-  shell(name, "artifacts", h("div", null, wrap, subs));
+  if (_cache[name]?.config?.protocol?.name === "cwm") {
+    const link = h("a", null, "Open CWM: frozen revisions, counterexamples and reconstructed trajectories");
+    link.href = "#game/" + encodeURIComponent(name) + "/cwm";
+    shell(name, "artifacts", h("div", null, wrap, link));
+  } else shell(name, "artifacts", h("div", null, wrap, subs));
 }
 
 // ---------------------------------------------------------------- logs tab
@@ -1089,6 +1095,116 @@ async function renderLogs(name) {
   shell(name, "logs", wrap);
 }
 
+
+// ---------------------------------------------------------------- CWM protocol
+async function renderCWM(name) {
+  const prefix = '/api/game/cwm?name=' + encodeURIComponent(name);
+  const d = await api(prefix);
+  const wrap = h('div');
+  const refresh = h('button', null, 'Refresh');
+  refresh.onclick = () => renderCWM(name);
+  wrap.append(h('h2', null, 'Code world model'), refresh,
+    metricTable('Current state', [
+      ['Phase', d.status.phase], ['Exit reason', d.status.exit_reason || 'running'],
+      ['Unique observations', d.status.n_observations], ['Unique transitions', d.status.n_transitions],
+      ['Real actions', d.status.n_step_events], ['CWM revision', d.status.accepted_cwm?.cwm_revision],
+      ['Latest real exploration', aggLine(d.status.latest_exploration?.aggregate)],
+      ['Best observed exploration', aggLine(d.status.best_exploration?.aggregate)]
+    ]));
+  const events = h('details', null, h('summary', null, 'Phase history'));
+  for (const event of d.phase_events) events.append(h('pre', 'code', `${new Date(event.timestamp * 1000).toISOString()} · ${event.kind}\n${JSON.stringify(event.payload, null, 2)}`));
+  wrap.append(events, h('p', 'muted', 'Real playback reads recorded observation IDs. Plan playback reruns saved actions in the frozen model; it does not rerun search or touch the real environment. No videos are stored.'));
+
+  function player(kind, id) {
+    const box = h('div', 'card');
+    const button = h('button', null, `Load ${kind === 'episode' ? 'real episode' : kind === 'dream' ? 'exploration dream' : 'predicted plan'} ${id}`);
+    box.append(button);
+    button.onclick = async () => {
+      button.disabled = true;
+      const query = `name=${encodeURIComponent(name)}&kind=${kind}&identifier=${id}`;
+      try {
+        const loaded = await api('/api/game/cwm/load?' + query, {method:'POST'});
+        const image = h('img'); image.style.cssText = 'max-width:100%;max-height:450px;image-rendering:pixelated;display:block';
+        image.alt = 'Reconstructed observation';
+        const slider = h('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(loaded.frames - 1); slider.value = '0'; slider.style.width = '100%';
+        const label = h('div');
+        const details = h('details', null, h('summary', null, 'Frame data and evidence IDs'));
+        const raw = h('pre', 'code'); details.append(raw);
+        let serial = 0;
+        const show = async () => {
+          const ticket = ++serial, index = slider.value;
+          label.textContent = `${loaded.kind} · frame ${Number(index)+1}/${loaded.frames} · ${loaded.source}`;
+          image.src = '/api/game/cwm/frame?' + query + '&index=' + index + '&image=true';
+          try {
+            const frame = await api('/api/game/cwm/frame?' + query + '&index=' + index);
+            if (ticket === serial) raw.textContent = JSON.stringify(frame, null, 2);
+          } catch (error) { raw.textContent = error.message; }
+        };
+        const play = h('button', null, 'Play'); let timer = null;
+        play.onclick = () => {
+          if (timer) { clearInterval(timer); timer = null; play.textContent = 'Play'; return; }
+          play.textContent = 'Pause';
+          timer = setInterval(() => {
+            if (!box.isConnected || Number(slider.value) >= Number(slider.max)) {
+              clearInterval(timer); timer = null; play.textContent = 'Play'; return;
+            }
+            slider.value = String(Number(slider.value) + 1); show();
+          }, 250);
+        };
+        slider.oninput = show;
+        box.replaceChildren(label, image, slider, play, details); await show();
+      } catch (error) { box.append(h('pre', 'err', error.message)); button.disabled = false; }
+    };
+    return box;
+  }
+  const episodes = h('details', null, h('summary', null, `Real episodes (${d.episodes.length}, includes initial collection)`));
+  for (const episode of d.episodes) episodes.append(h('p', null, `${episode.id}: ${episode.purpose} · ${episode.stop_reason || episode.status}`), player('episode', episode.id));
+  wrap.append(episodes, h('h2', null, 'Validations, plans and explorations'));
+  const records = h('div'); wrap.append(records);
+  function addRecords(rows) {
+    for (const record of rows) {
+      const p = record.payload;
+      const card = h('div', 'card', h('h3', null, `#${record.id} ${record.kind} · ${record.status}`));
+      if (p.goal) card.append(h('p', null, p.goal));
+      card.append(h('p', 'muted', [p.stop_reason, p.search_stop_reason, p.cwm_revision != null ? `CWM revision ${p.cwm_revision}` : '', p.dataset_revision != null ? `dataset ${p.dataset_revision}` : ''].filter(Boolean).join(' · ')));
+      const detail = h('details', null, h('summary', null, 'Result and provenance'), h('pre', 'code', JSON.stringify(p, null, 2))); card.append(detail);
+      if (p.dream_action_sequence) card.append(player('dream', record.id));
+      if (record.kind === 'plan' && p.candidate_found) card.append(player('plan', record.id));
+      if (p.episode_id) card.append(player('episode', p.episode_id));
+      const examples = p.validation?.counterexamples || (p.diagnostic_id ? [{diagnostic_id:p.diagnostic_id}] : []);
+      for (const example of examples) {
+        if (!example.diagnostic_id) continue;
+        const load = h('button', null, `Load counterexample ${example.diagnostic_id}`);
+        load.onclick = async () => {
+          try { const evidence = await api(`/api/game/cwm/evidence?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${example.diagnostic_id}`); card.append(h('pre', 'code', JSON.stringify(evidence,null,2))); load.disabled = true; }
+          catch (error) { card.append(h('pre', 'err', error.message)); }
+        }; card.append(load);
+      }
+      if (p.bundle) {
+        const showCode = h('button', null, 'Inspect frozen code');
+        showCode.onclick = async () => {
+          try {
+            const url = `/api/game/cwm/source?name=${encodeURIComponent(name)}&bundle=${p.bundle}`;
+            const listing = await api(url);
+            const select = h('select');
+            for (const filename of listing.files) { const option=h('option',null,filename); option.value=filename; select.append(option); }
+            const code = h('pre','code');
+            select.onchange = async () => { try { code.textContent=(await api(url+'&filename='+encodeURIComponent(select.value))).source; } catch(error) { code.textContent=error.message; } };
+            card.append(select,code); showCode.disabled=true; await select.onchange();
+          } catch(error) { card.append(h('pre','err',error.message)); }
+        }; card.append(showCode);
+      }
+      records.append(card);
+    }
+  }
+  addRecords(d.records);
+  let before = d.next_before;
+  const more = h('button', null, 'Load older records'); more.hidden = !before;
+  more.onclick = async () => { const page = await api(prefix + '&before=' + before); addRecords(page.records); before = page.next_before; more.hidden = !before; };
+  wrap.append(more);
+  shell(name, 'cwm', wrap);
+}
+
 // ---------------------------------------------------------------- routing
 async function route() {
   try {
@@ -1098,8 +1214,10 @@ async function route() {
     if (parts[0] === "run") return renderDashboard(parts[1] ? decodeURIComponent(parts[1]) : "");
     if (parts[0] !== "game" || !parts[1]) return renderBrowse();
     const name = decodeURIComponent(parts[1]);
+    await gameDetail(name);
     const tab = parts[2] || "";
     if (tab === "conversation") await renderConversation(name);
+    else if (tab === "cwm") await renderCWM(name);
     else if (tab === "artifacts") await renderArtifacts(name);
     else if (tab === "logs") await renderLogs(name);
     else if (tab === "graphs") await renderGameGraphs(name);

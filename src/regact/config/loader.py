@@ -23,6 +23,7 @@ from regact.config.schema import (
     LimitsConfig,
     ObsMode,
     ProblemConfig,
+    ProtocolConfig,
     RunConfig,
 )
 
@@ -44,7 +45,7 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
     for name in ("max_turns", "max_consecutive_no_tool_turns"):
         if fields.get(name) is not None:
             fields[name] = int(fields[name])
-    for name in ("max_seconds_per_task", "max_actions_per_env"):
+    for name in ("max_seconds_per_task", "max_actions_per_env", "max_real_actions_per_task"):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
@@ -97,6 +98,21 @@ def _controller_from(raw: Any) -> ControllerConfig:
     return ControllerConfig(**fields)
 
 
+def _protocol_from(raw: Any) -> ProtocolConfig:
+    """Select the old workflow when absent; accept a name or a protocol mapping."""
+    if raw is None:
+        return ProtocolConfig()
+    if isinstance(raw, str):
+        return ProtocolConfig(name=raw)
+    if not isinstance(raw, Mapping):
+        raise ValueError("protocol must be a name or a mapping containing name")
+    fields = dict(raw)
+    name = fields.pop("name", None)
+    if not isinstance(name, str) or not name:
+        raise ValueError("protocol.name must be a non-empty string")
+    return ProtocolConfig(name=name, options=fields)
+
+
 # Launch facts the LAUNCHER cannot pass: sbatch only returns a job id after submission, so the
 # running process is the first thing that knows it.
 _ENV_LAUNCH_FIELDS = {
@@ -137,6 +153,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             helper=_helper_from(problem.get("helper"), AgentName(agent["name"])),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
+        protocol=_protocol_from(data.get("protocol")),
         controller=_controller_from(data.get("controller")),
         features=_features_from(data.get("features")),
         parallel_workers=int(data.get("parallel_workers", 1)),

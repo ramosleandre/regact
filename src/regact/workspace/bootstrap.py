@@ -2,15 +2,15 @@
 
 Lays out the agent's working directory. The common base is **agnostic**: the
 directory tree (``code_library/``, ``framework/``) and the
-env/lifecycle-specific ``framework/make_env.py``. Everything controller-specific
-(the ``solution.py`` stub, the example controller, the contract prompt) belongs
-to the always-on ``Controller`` and layers on top, followed by each optional
-feature's templates.
+env/lifecycle-specific ``framework/make_env.py``. The selected experiment protocol
+supplies the remaining templates. The controller/features arguments are retained
+for callers of the older composition API; the runner uses ``templates``.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from regact.config.schema import Lifecycle
@@ -116,6 +116,7 @@ class Workspace:
         features: list[Feature],
         *,
         controller: Controller | None = None,
+        templates: Callable[[FeatureContext], Iterable[TemplateFile]] | None = None,
         problem_name: str,
         task_name: str,
         env_base_url: str,
@@ -123,9 +124,11 @@ class Workspace:
         lifecycle: Lifecycle,
         helper_templates: list[TemplateFile] | None = None,
     ) -> None:
-        """Create the agnostic base, then drop problem helpers, the always-on controller's
-        templates, and every optional feature's templates. ``controller`` is ``None`` only
-        when laying the bare base (e.g. tests); a real run always passes it."""
+        """Write the base and problem helpers, then call the protocol template provider.
+
+        Older callers can still supply controller/features instead. Providers run
+        after the base exists, so generated files see the same context as before.
+        """
         os.makedirs(self.root, exist_ok=True)
         for sub in ("code_library", "framework"):
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
@@ -150,7 +153,11 @@ class Workspace:
             problem_name=problem_name,
             task_name=task_name,
             workdir=self.root,
+            env_base_url=env_base_url,
         )
+        if templates is not None:
+            for file in templates(ctx):
+                self._write(file.relpath, file.content)
         if controller is not None:
             for file in controller.templates(ctx):
                 self._write(file.relpath, file.content)

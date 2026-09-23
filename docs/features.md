@@ -1,6 +1,11 @@
+> This page describes additive **policy-search** capabilities. CWM v4 is a separate
+> [experiment protocol](protocols.md): use `protocol=cwm features=none`.
+> The `features=cwm` examples below describe the retired v3 implementation and are
+> retained temporarily for migration reference; that launch now gives an explicit error.
+
 # Features
 
-The **controller** is always-on core: every run has the agent write an
+The **controller** is always-on core: every `policy_search` run has the agent write an
 `act(obs) -> action` policy in `solution.py` and submit it (`SubmitSolution` / `ExitTask`),
 scored by rolling episodes on the env. It is **not** a feature - see
 [Controller](#controller) below. The controller may keep internal state between
