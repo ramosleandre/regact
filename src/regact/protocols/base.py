@@ -19,6 +19,7 @@ from regact.config.schema import Lifecycle
 from regact.envclient.client import EnvClient
 from regact.features.base import FeatureContext, Hook
 from regact.obs.logger import RunLogger
+from regact.orchestration.signals import StopSignal
 from regact.problems.base import BaseProblem
 from regact.session.state import ExperimentState
 from regact.tools.base import Tool
@@ -72,6 +73,13 @@ class ProtocolSession(ABC):
         """Instruction for the next ordinary agent turn (not backend-error retries)."""
         ...
 
+    def interaction_guidance(self) -> str:
+        return "Discover the game only by playing it through framework/make_env."
+
+    async def prepare(self, stop: StopSignal | None = None) -> None:
+        """Optional trusted initialization before the agent starts (never in dry runs)."""
+        return None
+
     def on_start(self, start: float) -> None:
         """Receive the common session clock, after bootstrap."""
         return None
@@ -89,6 +97,7 @@ class ExperimentProtocol(ABC):
     """Per-task workflow definition, selected once by config and bound once by run_task."""
 
     name: str
+    exposes_environment: bool = True
 
     async def __aenter__(self) -> ExperimentProtocol:
         return self

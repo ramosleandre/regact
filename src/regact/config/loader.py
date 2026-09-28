@@ -42,25 +42,32 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
-    for name in ("max_turns", "max_consecutive_no_tool_turns"):
-        if fields.get(name) is not None:
-            fields[name] = int(fields[name])
-    for name in ("max_seconds_per_task", "max_actions_per_env", "max_real_actions_per_task"):
+    for name in (
+        "max_turns_per_task",
+        "max_consecutive_no_tool_turns",
+        "max_tool_calls",
+        "max_seconds_per_task",
+        "max_actions_per_episode",
+        "max_actions_per_task",
+    ):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
 
 
-def _helper_from(raw: Any, agent_name: AgentName) -> HelperConfig:
+def _helper_from(
+    raw: Any, agent_name: AgentName, *, protocol: str = "policy_search"
+) -> HelperConfig:
     """Build ``HelperConfig`` from the ``problem.helper`` block.
 
     ``to_png`` unset (absent or null) defaults to the agent's vision capability, so an ad-hoc
     ``agent=claude problem=arc_agi`` run gets the obs->PNG helper without a bench-script override,
-    while a text-only Alan run does not. An explicit true/false always wins.
+    while a text-only Alan run does not. CWM defaults it off because its data API
+    exports stored observations. An explicit true/false always wins.
     """
     d = dict(raw or {})
     to_png = d.get("to_png")
-    resolved = is_vision_agent(agent_name) if to_png is None else bool(to_png)
+    resolved = is_vision_agent(agent_name) and protocol != "cwm" if to_png is None else bool(to_png)
     return HelperConfig(to_png=resolved)
 
 
@@ -150,7 +157,11 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             obs_mode=ObsMode(problem.get("obs_mode", ObsMode.RAW)),
             info_mode=InfoMode(problem.get("info_mode", InfoMode.INFORMATIVE)),
             seed=problem.get("seed"),
-            helper=_helper_from(problem.get("helper"), AgentName(agent["name"])),
+            helper=_helper_from(
+                problem.get("helper"),
+                AgentName(agent["name"]),
+                protocol=_protocol_from(data.get("protocol")).name,
+            ),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
         protocol=_protocol_from(data.get("protocol")),

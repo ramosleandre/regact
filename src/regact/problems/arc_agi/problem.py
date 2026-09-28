@@ -29,7 +29,7 @@ from regact.problems.arc_agi.tasks import (
     discover_tasks,
     discover_tasks_from_arcade,
 )
-from regact.problems.base import BaseProblem, register_problem
+from regact.problems.base import BaseProblem, observation_prompt, register_problem
 from regact.workspace.templates import TemplateFile
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def _validated_click_data(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or "x" not in data or "y" not in data:
         raise ValueError(
             "ACTION6 (click) requires data={'x': int, 'y': int} with 0<=x,y<=63; "
-            f"got data={data!r}. Use complex_action(x, y) from code_library/arc_agi_helper.py."
+            f"got data={data!r}. Use complex_action(x, y) from framework/arc_agi_helper.py."
         )
     try:
         x, y = int(data["x"]), int(data["y"])
@@ -216,8 +216,8 @@ _KEYBOARD_ACTIONS = (
 )
 _CLICK_ACTIONS = (
     "The click action ACTION6 takes x,y coordinates (0-63), passed as "
-    '`{"action": 6, "data": {"x": 32, "y": 32}}` — or use `complex_action(x, y)` '
-    "from `code_library/arc_agi_helper.py`."
+    '`{"action": 6, "data": {"x": 32, "y": 32}}` — or use `complex_action(x, '
+    "y)` from `framework/arc_agi_helper.py`."
 )
 _ACTION5 = (
     "ACTION5 is a special action whose effect is game-specific (often an interact/"
@@ -257,16 +257,20 @@ def _actions_for_ids(available: Iterable[int]) -> str:
     return "\n\n".join(blocks)
 
 
-_HELPER = '''\
-"""ARC-AGI helpers (import-free): action ids + the click-action builder.
-
+_DIRECT_INTERACTION_EXAMPLE = """\
 Use these with the env client in your scripts and controller, e.g.::
 
     from framework.make_env import make_env
-    from code_library.arc_agi_helper import ACTION4, complex_action
+    from framework.arc_agi_helper import ACTION4, complex_action
     env = make_env()
     obs = env.step(ACTION4)              # a directional action
-    obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)
+    obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)"""
+
+
+_HELPER = '''\
+"""ARC-AGI helpers (import-free): action ids + the click-action builder.
+
+{interaction_example}
 
 Valid ids for the current game are in ``obs.available_actions``. ACTION6 is the click
 action, when it is available.
@@ -410,6 +414,13 @@ class ArcAgiProblem(BaseProblem):
             )
         return ArcRenderer(last_frame_only=mode is ObsMode.RAW_LAST_FRAME_ONLY)
 
+    def milestone_kind(self, milestone: str) -> str:
+        if milestone == "game over":
+            return "failure"
+        if milestone == "game won" or milestone.startswith("level completed ("):
+            return "progress"
+        return "event"
+
     def milestone_detector(self, task_name: str) -> Any:
         return _milestone_detector
 
@@ -419,11 +430,21 @@ class ArcAgiProblem(BaseProblem):
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         helper: HelperConfig | None = None,
+        direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         # The ARC helper is the action-construction interface (not a rules spoiler), so it ships
         # under every info_mode. to_png appends an obs->PNG renderer for vision agents.
-        content = _HELPER + (_RENDER_HELPER if helper and helper.to_png else "")
-        return [TemplateFile("code_library/arc_agi_helper.py", content)]
+        example = (
+            _DIRECT_INTERACTION_EXAMPLE
+            if direct_interaction
+            else (
+                "Use these to construct actions returned by your exploration controller.\n"
+                "For example: ACTION4 for a directional action, complex_action(32, 32) for a click."
+            )
+        )
+        content = _HELPER.replace("{interaction_example}", example)
+        content += _RENDER_HELPER if helper and helper.to_png else ""
+        return [TemplateFile("framework/arc_agi_helper.py", content)]
 
     def secret_modules(self) -> tuple[str, ...]:
         return ("arcengine", "arc_agi")
@@ -538,28 +559,61 @@ class ArcAgiProblem(BaseProblem):
         return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
 
     def build_prompt(
-        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode,
+        obs_mode: ObsMode = ObsMode.RAW,
+        direct_interaction: bool = True,
     ) -> str:
         task = self._task(task_name)
         if info_mode is InfoMode.MINIMAL:
-            return (
+            return observation_prompt(
                 f"# Game: ARC-AGI-3 ({task.title})\n\n"
                 "Discover the rules by interaction. Inspect `obs.frame` and "
-                "`obs.available_actions` from your own scripts with `make_env()`; "
-                "the framework tells you nothing more about this task."
+                "`obs.available_actions` "
+                + (
+                    "from your own scripts with `make_env()`; "
+                    if direct_interaction
+                    else "in recorded experience from `framework.data_api`; "
+                )
+                + "the framework tells you nothing more about this task.",
+                direct_interaction=direct_interaction,
             )
         last_frame_only = obs_mode is ObsMode.RAW_LAST_FRAME_ONLY
+        # Show the level target when known; internal game IDs and efficiency baselines stay hidden.
+        levels_to_win = f"Levels to win: {task.win_levels}" if task.win_levels is not None else ""
         body = (
             _PROMPT.read_text(encoding="utf-8")
             .replace("{task}", task.title)
+            .replace("{levels_to_win}", levels_to_win)
+            .replace(
+                "{interaction_note}",
+                (
+                    "`make_env()` gives you an isolated client with a gym-like interface "
+                    "(importable with `from framework.make_env import make_env`). Each `obs` "
+                    "is:"
+                )
+                if direct_interaction
+                else (
+                    "Recorded experience is accessible through `framework.data_api`. Each "
+                    "observation is:"
+                ),
+            )
             .replace("{frame_desc}", _FRAME_DESC_SINGLE if last_frame_only else _FRAME_DESC_STACK)
+            .replace(
+                "{goal_note}",
+                "You must figure out the goal of the game by yourself. Levels share similar goals. Complete as many levels as possible. As soon as you make progress in terms of levels, submit a solution (`python framework/control.py SubmitSolution`), then keep working on solving the next levels."
+                if direct_interaction
+                else (
+                    "Discover the goal of the game from recorded experience and your experiments. "
+                    "Levels share related goals. Complete all levels to win; real progress is "
+                    "recorded automatically when your exploration controller plays the game."
+                ),
+            )
             .rstrip()
         )
-        # Only "Levels to win" is shown - the game id is internal, and the human baseline was an
-        # irrelevant efficiency anchor. (baseline_actions is still used for RHAE scoring, just not
-        # surfaced here.) The actions are described live in the first observation (render_obs_text).
-        meta = [f"Levels to win: {task.win_levels}"] if task.win_levels is not None else []
-        return body + ("\n" + "\n".join(meta) if meta else "")
+        return observation_prompt(body, direct_interaction=direct_interaction)
 
     def config_kwargs(self) -> dict[str, Any]:
         return {"environments_dir": self._dir, "operation_mode": self._operation_mode}

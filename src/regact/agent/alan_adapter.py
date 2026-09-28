@@ -21,6 +21,7 @@ from regact.agent.events import (
     ThinkingDelta,
     ToolCall,
     ToolResult,
+    tool_result_images,
 )
 from regact.obs.errors import ErrorCategory
 
@@ -36,7 +37,6 @@ from regact.obs.errors import ErrorCategory
 # mostly failing at the job it exists for. But lowering it is not free: 79 completions across the
 # fleet SUCCEED above 6000 (one arm's median success is ~9000), and a cap truncates those too.
 # Cheaper serves make the waste affordable; the number cannot be chosen from one arm's data.
-_DEFAULT_ESCALATED_MAX_TOKENS = 12000
 
 
 def _usage_dict(usage: Any) -> dict[str, Any] | None:
@@ -51,7 +51,8 @@ def _usage_dict(usage: Any) -> dict[str, Any] | None:
 def _result_text(content: Any) -> str:
     """Flatten a tool-result payload (plain string or list of text blocks) into a string."""
     if isinstance(content, list):
-        return "".join(str(getattr(block, "text", block)) for block in content)
+        return "".join(str(getattr(block, "text", block)) for block in content
+                       if (block.get("type") if isinstance(block, dict) else getattr(block, "type", None)) != "image")
     return str(content)
 
 
@@ -105,21 +106,9 @@ def build_alan_agent(
         tool_call_format=args.get("tool_call_format"),
         **extra,
     )
-    # escalated_max_tokens is a SETTINGS key, not a constructor kwarg: an unknown ctor kwarg
-    # becomes a backend kwarg and flows to the LLM transport as an API param, silently missing
-    # settings. Apply it via the public settings API after construction (queries read live).
-    escalated = args.get("escalated_max_tokens")
-    value = int(escalated) if escalated is not None else _DEFAULT_ESCALATED_MAX_TOKENS
-    # A remote human/script supplies its own completions; token escalation is unused.
-    # Recent Alan versions removed this setting. Leave normal model runs unchanged.
-    if not (args.get("backend") == "scripted" and model == "remote" and escalated is None):
-        err = agent.update_session_setting("escalated_max_tokens", value)
-        if err is not None:
-            raise RuntimeError(f"alancode rejected escalated_max_tokens={value}: {err}")
-
     # Optional empty_response-sweep settings: applied ONLY when the bench sets them, so a
     # default run still works on an older alancode. Settings (not ctor kwargs) - an unknown
-    # ctor kwarg would silently become an LLM API param (see escalated_max_tokens above); a
+    # ctor kwarg would silently become an LLM API param; a
     # rejected setting raises loudly, which is right (a requested sweep arm must not run wrong).
     for name, cast in (("empty_response_retries", int), ("persist_thinking", _as_bool)):
         raw = args.get(name)
@@ -205,6 +194,7 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
                 id=getattr(block, "tool_use_id", ""),
                 output=_result_text(getattr(block, "content", "")),
                 is_error=bool(getattr(block, "is_error", False)),
+                images=tool_result_images(getattr(block, "content", "")),
             )
             for block in content
             if type(block).__name__ == "ToolResultBlock"
@@ -236,6 +226,7 @@ def _map_legacy(native: Any) -> AgentEvent | None:
             id=getattr(native, "tool_use_id", getattr(native, "id", "")),
             output=_result_text(getattr(native, "content", "")),
             is_error=bool(getattr(native, "is_error", False)),
+            images=tool_result_images(getattr(native, "content", "")),
         )
     if kind in ("ResultMessage", "TurnComplete"):  # native alancode terminal-message class names
         return IterationComplete(

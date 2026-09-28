@@ -56,7 +56,7 @@ class ExperienceStore:
                 REFERENCES episodes(id), step_index INTEGER, transition_id INTEGER REFERENCES
                 transitions(id), UNIQUE(episode_id,step_index));
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, timestamp REAL, kind TEXT,
-                phase INTEGER, payload TEXT);
+                phase TEXT, payload TEXT);
             CREATE TABLE IF NOT EXISTS records(id INTEGER PRIMARY KEY, kind TEXT NOT NULL,
                 status TEXT NOT NULL, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS diagnostics(id INTEGER PRIMARY KEY, payload TEXT NOT
@@ -64,7 +64,7 @@ class ExperienceStore:
             CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, payload TEXT NOT NULL,
                 result TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            INSERT OR IGNORE INTO meta VALUES('dataset_revision','0');
+            INSERT OR IGNORE INTO meta VALUES('dataset_version','0');
             CREATE INDEX IF NOT EXISTS event_episode ON step_events(episode_id,step_index);
         """)
 
@@ -78,14 +78,14 @@ class ExperienceStore:
         return int(row["id"])
 
     @property
-    def revision(self) -> int:
+    def version(self) -> int:
         return int(
-            self.db.execute("SELECT value FROM meta WHERE key='dataset_revision'").fetchone()[0]
+            self.db.execute("SELECT value FROM meta WHERE key='dataset_version'").fetchone()[0]
         )
 
     def _bump(self) -> None:
         self.db.execute(
-            "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='dataset_revision'"
+            "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='dataset_version'"
         )
 
     def start_episode(
@@ -161,13 +161,23 @@ class ExperienceStore:
             )
 
     def summary(self) -> dict[str, Any]:
-        return {
-            "dataset_revision": self.revision,
+        summary = {
+            "dataset_version": self.version,
             **{
-                f"n_{name}": int(self.db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0])
-                for name in ("observations", "transitions", "step_events", "episodes")
+                key: int(self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                for key, table in (
+                    ("n_unique_observations", "observations"),
+                    ("n_unique_transitions", "transitions"),
+                    ("n_total_transitions", "step_events"),
+                    ("n_started_episodes", "episodes"),
+                )
             },
         }
+        # One initial observation per episode, then one successor per recorded step.
+        summary["n_total_observations"] = (
+            summary["n_started_episodes"] + summary["n_total_transitions"]
+        )
+        return summary
 
     def observation(self, oid: int) -> dict[str, Any]:
         row = self.db.execute("SELECT payload FROM observations WHERE id=?", (oid,)).fetchone()
@@ -208,7 +218,21 @@ class ExperienceStore:
             args += (limit,)
         return [int(row[0]) for row in self.db.execute(sql, args)]
 
-    def event(self, kind: str, phase: int, payload: dict[str, Any]) -> int:
+    def episode_ids(self, episode_id: int) -> tuple[list[int], list[int]]:
+        """Chronological observation/transition occurrences, including the reset."""
+        row = self.db.execute(
+            "SELECT initial_obs_id FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown episode ID {episode_id}")
+        rows = self.db.execute(
+            "SELECT s.transition_id,t.after_id FROM step_events s JOIN transitions t "
+            "ON t.id=s.transition_id WHERE s.episode_id=? ORDER BY s.step_index",
+            (episode_id,),
+        ).fetchall()
+        return [int(row[0]), *[int(item[1]) for item in rows]], [int(item[0]) for item in rows]
+
+    def event(self, kind: str, phase: str, payload: dict[str, Any]) -> int:
         with self.db:
             cur = self.db.execute(
                 "INSERT INTO events(timestamp,kind,phase,payload) VALUES(?,?,?,?)",

@@ -131,7 +131,7 @@ def test_render_frame_colorizes_grid_for_video() -> None:
 
 def test_helper_template_is_import_free() -> None:
     [tmpl] = _problem().helper_templates("ls20")  # default helper (to_png off)
-    assert tmpl.relpath == "code_library/arc_agi_helper.py"
+    assert tmpl.relpath == "framework/arc_agi_helper.py"
     assert "import" not in tmpl.content.split('"""', 2)[-1]  # no imports in the code body
     assert "def complex_action" in tmpl.content
     assert "ACTION6 = 6" in tmpl.content
@@ -163,7 +163,7 @@ def test_build_prompt_informative_vs_minimal() -> None:
         "ls20", info_mode=InfoMode.INFORMATIVE, obs_mode=ObsMode.RAW_LAST_FRAME_ONLY
     )
     assert "settled grid" in single and "multiple frames" not in single
-    assert "How to read and solve" in info  # the ARC-approach advice block
+    assert "General advices on how to solve" in info  # the ARC-approach advice block
     # actions are described live in the first observation (render_obs_text), not statically
     assert "## Actions" not in info
 
@@ -282,3 +282,15 @@ def test_make_env_resets_and_steps() -> None:
     *_, info = native.step(actions[0])
     assert "state" in info
     native.close()
+
+
+def test_solving_advice_is_shared_between_protocols_and_uses_no_workflow_specific_tools():
+    problem = _problem()
+    sections = [
+        problem.build_prompt("ls20", info_mode=InfoMode.INFORMATIVE, direct_interaction=direct)
+        .split("## General advices on how to solve an ARC game\n", 1)[1]
+        for direct in (True, False)
+    ]
+    assert sections[0] == sections[1]
+    for name in ("CWM", "make_env", "data_api", "SubmitSolution", "SubmitExplorationController"):
+        assert name not in sections[0]

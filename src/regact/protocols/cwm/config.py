@@ -11,39 +11,43 @@ from typing import Any
 @dataclass
 class PlannerConfig:
     algorithm: str = "bfs"
-    max_seconds_per_planner_call: float = 30
-    max_cwm_calls_per_planner_call: int = 10000
-    max_nodes_per_planner_call: int = 10000
-    max_depth_per_planner_call: int = 100
+    max_seconds_per_planner_call: float | None = 30
+    max_cwm_calls_per_planner_call: int | None = 10000
+    max_nodes_per_planner_call: int | None = 10000
+    max_depth_per_planner_call: int | None = 100
 
 
 @dataclass
 class ExecutionConfig:
-    max_seconds_per_call: float = 5
-    max_seconds_per_validation: float = 120
-    max_seconds_per_rollout: float = 120
-    max_memory_mb: int = 512  # MiB
+    max_seconds_per_call: float | None = 5
+    max_seconds_per_UpdateCodeWorldModel: float | None = 120
+    max_seconds_per_episode: float | None = 120
+    max_memory_mb: int | None = 512  # MiB
 
 
 @dataclass
 class FeedbackConfig:
-    max_counterexamples: int = 5
-    max_diff_items: int = 6
-    max_error_chars: int = 1000
+    max_counterexamples: int | None = 5
+    max_diff_items: int | None = 6
+    max_error_chars: int | None = 1000
 
 
 @dataclass
 class DataApiConfig:
-    max_items: int = 100
-    max_response_bytes: int = 2097152
+    max_items: int | None = 100
+    max_response_bytes: int | None = 2097152
 
 
 @dataclass
 class CwmConfig:
-    initial_unique_observations: int = 15
-    threshold_state_obs_size_ratio: float = 0.5
+    n_unique_observations_in_initial_collection: int = 20
+    max_actions_per_initial_collection: int | None = 1000
+    max_seconds_per_initial_collection: float | None = 30
+    threshold_max_state_obs_size_ratio: float = 0.5
     cwm_validation_policy: str = "required"
-    max_actions_per_exploration: int = 2500
+    max_actions_per_exploration: int | None = 2500
+    n_tmp_images_saved_per_exploration: int = 8
+    workspace_helpers_enabled: bool = True
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
@@ -69,6 +73,14 @@ class CwmConfig:
             for key, value in items.items():
                 if isinstance(value, dict):
                     validate(value, prefix + key + ".")
+                elif key.startswith("max_") and value is None:
+                    continue
+                elif key == "workspace_helpers_enabled":
+                    if type(value) is not bool:
+                        raise ValueError(f"{prefix}{key} must be a boolean")
+                elif key == "n_tmp_images_saved_per_exploration":
+                    if type(value) is not int or value < 0:
+                        raise ValueError(f"{prefix}{key} must be a nonnegative integer")
                 elif key not in ("algorithm", "cwm_validation_policy"):
                     if (
                         isinstance(value, bool)
@@ -81,8 +93,11 @@ class CwmConfig:
                         raise ValueError(f"{prefix}{key} must be an integer")
 
         validate(dataclasses.asdict(config), "protocol.")
-        if config.threshold_state_obs_size_ratio >= 1:
-            raise ValueError("protocol.threshold_state_obs_size_ratio must be < 1")
-        if config.planner.max_depth_per_planner_call > config.max_actions_per_exploration:
+        if config.threshold_max_state_obs_size_ratio >= 1:
+            raise ValueError("protocol.threshold_max_state_obs_size_ratio must be < 1")
+        if config.max_actions_per_exploration is not None and (
+            config.planner.max_depth_per_planner_call is not None
+            and config.planner.max_depth_per_planner_call > config.max_actions_per_exploration
+        ):
             raise ValueError("planner depth cannot exceed protocol.max_actions_per_exploration")
         return config

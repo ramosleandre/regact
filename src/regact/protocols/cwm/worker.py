@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.config import ExecutionConfig
 from regact.protocols.cwm.store import canonical
 from regact.security.runtime import SandboxRuntime, make_wrapper, resolve
@@ -24,6 +25,8 @@ class WorkerError(RuntimeError):
     def __init__(self, message: str, *, kind: str = "code_error") -> None:
         super().__init__(message)
         self.kind = kind
+        self.context: dict[str, Any] = {}
+        self.evidence: dict[str, Any] | None = None
 
 
 class Worker:
@@ -36,8 +39,14 @@ class Worker:
         runtime: SandboxRuntime = SandboxRuntime.AUTO,
         deny_read: list[str] | None = None,
         task_deadline: Callable[[], float] | None = None,
+        budget_key: str = "protocol.execution.max_seconds_per_episode",
+        budget_seconds: float | None = None,
     ) -> None:
+        # The subprocess changes cwd to private scratch; bundle paths must survive that.
+        bundle = bundle.resolve()
         self.config = config
+        self.budget_key = budget_key
+        self.budget_seconds = budget_seconds
         self.deadline = deadline
         self.task_deadline = task_deadline or (lambda: float("inf"))
         self.closed = False
@@ -93,7 +102,7 @@ class Worker:
         assert self.proc.stdout is not None
         self.selector.register(self.proc.stdout, selectors.EVENT_READ)
         try:
-            reply = self._receive(time.monotonic() + self.config.max_seconds_per_call)
+            reply = self._receive(budgets.deadline(self.config.max_seconds_per_call))
             if not reply.get("ready"):
                 raise WorkerError(str(reply.get("error", "worker initialization failed")))
         except BaseException:
@@ -103,12 +112,30 @@ class Worker:
     def _remaining(self, limit: float) -> float:
         now = time.monotonic()
         if now >= min(self.deadline, self.task_deadline()):
-            raise WorkerError("operation deadline exhausted", kind="operation_timeout")
+            error = WorkerError(
+                f"Operation stopped at its deadline ({self.budget_key}={self.budget_seconds:g} seconds; an earlier task deadline or interruption can also stop it)."
+                if self.budget_seconds is not None
+                else "Operation stopped at its deadline.",
+                kind="operation_timeout",
+            )
+            if self.budget_seconds is not None:
+                error.context["budget"] = {
+                    "parameter": self.budget_key,
+                    "value": self.budget_seconds,
+                    "unit": "seconds",
+                }
+            raise error
         if now >= limit:
-            raise WorkerError(
-                "submitted code exceeded protocol.execution.max_seconds_per_call",
+            error = WorkerError(
+                f"Callback exceeded protocol.execution.max_seconds_per_call={budgets.describe(self.config.max_seconds_per_call)} seconds.",
                 kind="code_timeout",
             )
+            error.context["budget"] = {
+                "parameter": "protocol.execution.max_seconds_per_call",
+                "value": self.config.max_seconds_per_call,
+                "unit": "seconds per callback",
+            }
+            raise error
         return min(limit, self.deadline, self.task_deadline()) - now
 
     def _receive(self, limit: float) -> dict[str, Any]:
@@ -119,7 +146,7 @@ class Worker:
             chunk = os.read(self.proc.stdout.fileno(), 65536)
             if not chunk:
                 raise WorkerError(
-                    "worker exited without a complete response (possibly memory limit)",
+                    f"Execution of submitted code stopped before returning a result. The process may have terminated explicitly, crashed, or exceeded a resource limit; the cause is not established. Configured memory limit: protocol.execution.max_memory_mb={budgets.describe(self.config.max_memory_mb)} MiB.",
                     kind="worker_exit",
                 )
             self.buffer += chunk
@@ -145,7 +172,14 @@ class Worker:
                     view = view[sent:]
 
     def call(self, op: str, **kwargs: Any) -> Any:
-        limit = time.monotonic() + self.config.max_seconds_per_call
+        try:
+            return self._call(op, **kwargs)
+        except WorkerError as exc:
+            exc.context.setdefault("callback", op)
+            raise
+
+    def _call(self, op: str, **kwargs: Any) -> Any:
+        limit = budgets.deadline(self.config.max_seconds_per_call)
         self._remaining(limit)
         self.seq += 1
         request = (canonical({"id": self.seq, "op": op, **kwargs}) + "\n").encode()

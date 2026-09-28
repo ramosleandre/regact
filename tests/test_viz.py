@@ -356,3 +356,21 @@ def test_api_games_scopes_to_a_subtree(tmp_path: Path) -> None:
     assert len(client.get("/api/games").json()["games"]) == 2  # no scope = every game
     scoped = client.get("/api/games", params={"under": "bench/claude_arc/2026_10"}).json()["games"]
     assert len(scoped) == 1 and scoped[0]["name"] == "bench/claude_arc/2026_10/ft09"
+
+
+def test_game_lookup_is_direct_and_rejects_path_escape(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from regact.viz import reader
+    from regact.viz.app import build_app
+
+    root = _make_experiment(tmp_path)
+    client = TestClient(build_app(root))
+    monkeypatch.setattr(reader, "list_games", lambda *a, **kw: pytest.fail("unneeded tree scan"))
+    assert client.get("/api/game", params={"name": "ls20"}).status_code == 200
+    outside = tmp_path / "outside"
+    (outside / "logs").mkdir(parents=True)
+    (outside / "logs/experiment_state.json").write_text("{}")
+    (Path(root) / "escape").symlink_to(outside, target_is_directory=True)
+    for name in ("../outside", str(outside), "escape", "missing"):
+        assert client.get("/api/game", params={"name": name}).status_code == 404

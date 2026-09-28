@@ -135,8 +135,9 @@ def handle(request: dict[str, Any]) -> Any:
 
 if __name__ == "__main__":
     BUNDLE = Path(sys.argv[1]).resolve()
-    memory = int(sys.argv[2]) * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
+    if sys.argv[2] != "None":
+        memory = int(sys.argv[2]) * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
     resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024 * 1024, 16 * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     if hasattr(resource, "RLIMIT_NPROC"):
@@ -164,8 +165,6 @@ if __name__ == "__main__":
             payload = json.dumps({"id": request["id"], "result": result}, allow_nan=False)
         except BaseException as exc:
             # Only submitted-code paths go back; no trusted traceback/credentials.
-            payload = json.dumps(
-                {"id": request["id"], "error": f"{type(exc).__name__}: {exc}"[:4000]}
-            )
+            payload = json.dumps({"id": request["id"], "error": f"{type(exc).__name__}: {exc}"})
         wire.write(payload + "\n")
         wire.flush()

@@ -18,7 +18,7 @@ from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
-from regact.problems.base import BaseProblem, register_problem
+from regact.problems.base import BaseProblem, observation_prompt, register_problem
 from regact.problems.minigrid.tasks import ALL_MINIGRID_TASKS
 from regact.workspace.templates import TemplateFile
 
@@ -189,15 +189,26 @@ class MiniGridProblem(BaseProblem):
         }
 
     def build_prompt(
-        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode,
+        obs_mode: ObsMode = ObsMode.RAW,
+        direct_interaction: bool = True,
     ) -> str:
         # obs_mode is accepted for interface parity; MiniGrid renders one obs mode (RAW).
         if info_mode is InfoMode.MINIMAL:
-            return (
+            return observation_prompt(
                 f"# Game: MiniGrid ({task_name})\n\n"
                 "Discover the rules by interaction. Inspect `obs.frame` and "
-                "`obs.available_actions` from your own scripts with `make_env()`; "
-                "the framework tells you nothing more about this task."
+                "`obs.available_actions` "
+                + (
+                    "from your own scripts with `make_env()`; "
+                    if direct_interaction
+                    else "in recorded experience from `framework.data_api`; "
+                )
+                + "the framework tells you nothing more about this task.",
+                direct_interaction=direct_interaction,
             )
         # The observation section is mode-specific: full-map vs egocentric are genuinely
         # different and must never both appear (agents mistook one for the other).
@@ -208,6 +219,20 @@ class MiniGridProblem(BaseProblem):
             _PROMPT.read_text(encoding="utf-8")
             .replace("{task}", task_name)
             .replace("{obs_section}", obs_fragment.strip())
+            .replace(
+                "{interaction_note}",
+                (
+                    "This game may or may not be stochastic: layouts and start states can "
+                    "differ between episodes/seeds. If it is, a fixed action sequence will not "
+                    "generalise - your `act(obs)` must react to the current observation, and "
+                    "you should evaluate your controller across several `make_env()` episodes."
+                )
+                if direct_interaction
+                else (
+                    "Infer the rules from recorded experience. Further real experience is "
+                    "collected through submitted exploration controllers."
+                ),
+            )
         )
         if info_mode is InfoMode.INFORMATIVE_DOCSTRING and (doc := _upstream_docstring(task_name)):
             prompt += (
@@ -216,7 +241,7 @@ class MiniGridProblem(BaseProblem):
                 "differ from the regact contract above, which is authoritative):\n\n"
                 f"{doc}"
             )
-        return prompt
+        return observation_prompt(prompt, direct_interaction=direct_interaction)
 
     def helper_templates(
         self,
@@ -224,12 +249,13 @@ class MiniGridProblem(BaseProblem):
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         helper: HelperConfig | None = None,
+        direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         """Ship the encoding constants in informative modes; minimal mode hands out nothing
         (the agent must discover the encodings by interaction). ``helper`` is unused here."""
         if info_mode is InfoMode.MINIMAL:
             return []
-        return [TemplateFile("code_library/minigrid_helper.py", _MINIGRID_HELPER)]
+        return [TemplateFile("framework/minigrid_helper.py", _MINIGRID_HELPER)]
 
     def warmup(self) -> None:
         # Preimport the heavy libs so the first make_env (server-side) is instant - the import

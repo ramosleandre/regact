@@ -186,7 +186,7 @@ class FinalizeControllerHook(Hook):
         deps: RunDeps,
         *,
         n_episodes: int,
-        max_moves: int,
+        max_moves: int | None,
         n_videos: int,
         shadow_replay: bool,
     ) -> None:
@@ -250,13 +250,13 @@ class Controller:
         self,
         *,
         n_episodes: int = 1,
-        max_moves: int = 2500,
+        max_moves: int | None = 2500,
         n_videos: int = 2,
         shadow_replay: bool = False,
         exit_task_enabled: bool = True,
     ) -> None:
         self._n_episodes = int(n_episodes)
-        self._max_moves = int(max_moves)
+        self._max_moves = None if max_moves is None else int(max_moves)
         self._n_videos = int(n_videos)
         self._shadow_replay = bool(shadow_replay)
         self._exit_task_enabled = bool(exit_task_enabled)

@@ -17,5 +17,5 @@ problem:
                              # controller eval (single_instance + eval is refused)
 sandbox: false            # dev convenience; no confinement
 limits:
-  max_turns: 3
+  max_turns_per_task: 3
 experiment_name: dev

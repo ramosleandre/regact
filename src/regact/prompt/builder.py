@@ -35,6 +35,15 @@ _TERMINAL_MD = {
     "hermes_xml": _PROMPT_DIR / "hermes_xml_terminal.md",  # Qwen/hermes <tool_call> markup
     "glm": _PROMPT_DIR / "glm_terminal.md",  # GLM <tool_call>Bash<arg_key>/<arg_value> markup
 }
+_TERMINAL_EXAMPLES = {
+    "EDIT_EXAMPLE": "sed -i 's/return A_MOVE/return A_INTERACT/' code_library/my_controller.py && python code_library/test_controller.py",
+    "SCRIPT_PATH": "code_library/explore.py",
+    "SCRIPT_IMPORT": "from framework.make_env import make_env",
+    "CONTROLLER_PATH": "solution.py",
+    "ACTION_EXAMPLE": "obs.available_actions[0]",
+    "SCRIPT_DIR": "code_library",
+}
+
 _CONTROL_SECTION_HEADING = "## Framework commands through"
 _FEATURES_INTRO = "# Features :\n\nYou are given the following features to help you."
 
@@ -96,7 +105,6 @@ class PromptBuilder:
         # how to solve it - so the mechanics of acting precede the game description.
         sections = [
             _SYSTEM_MD.read_text(encoding="utf-8"),
-            _terminal_block(tool_protocol),
             _ENVIRONMENT_MD.read_text(encoding="utf-8"),
             problem.build_prompt(task_name, info_mode=info_mode, obs_mode=obs_mode),
         ]
@@ -107,12 +115,50 @@ class PromptBuilder:
         if fragments:  # generic intro, then each feature describes its own deliverable
             sections.append(_FEATURES_INTRO)
             sections += fragments
-        sections.append(_framework_tools_block(tool_protocol, tool_names or []))
+        after_tools = []
         if (lifecycle_md := _LIFECYCLE_MD.get(lifecycle)) is not None:
-            sections.append(lifecycle_md.read_text(encoding="utf-8"))
+            after_tools.append(lifecycle_md.read_text(encoding="utf-8"))
+        return self.assemble_system_prompt(
+            sections,
+            tool_protocol=tool_protocol,
+            tool_names=tool_names or [],
+            verbalize_variant=verbalize_variant,
+            after_tools=after_tools,
+            commands_in_workflow=True,
+        )
+
+    def assemble_system_prompt(
+        self,
+        sections: list[str],
+        *,
+        tool_protocol: ToolProtocol,
+        tool_names: list[str],
+        verbalize_variant: str = "off",
+        after_tools: list[str] | None = None,
+        terminal_examples: dict[str, str] | None = None,
+        commands_in_workflow: bool = False,
+    ) -> str:
+        """Shared protocol assembly: role, terminal dialect, content, commands, hints.
+
+        Protocols supply their own role/workspace/game/workflow sections. The terminal
+        fragment follows the first section; command syntax and verbalization remain
+        common. Policy search already teaches terminal commands in its controller
+        fragment, so commands_in_workflow prevents a duplicate command list.
+        """
+        assembled = [
+            *sections[:1],
+            _terminal_block(tool_protocol, terminal_examples),
+            *sections[1:],
+            _framework_tools_block(
+                tool_protocol,
+                tool_names,
+                include_terminal=not commands_in_workflow,
+            ),
+            *(after_tools or []),
+        ]
         if (hint := _VERBALIZE_VARIANTS.get(verbalize_variant)) is not None:
-            sections.append(hint)
-        return "\n\n".join(s.strip() for s in sections if s and s.strip())
+            assembled.append(hint)
+        return "\n\n".join(s.strip() for s in assembled if s and s.strip())
 
     def build_first_message(self, rendered_obs: str | None = None) -> str:
         """The first user message: the first observation (for reference) + a generic, agnostic
@@ -124,14 +170,20 @@ class PromptBuilder:
         return start
 
 
-def _terminal_block(tool_protocol: ToolProtocol) -> str:
+def _terminal_block(
+    tool_protocol: ToolProtocol,
+    examples: dict[str, str] | None = None,
+) -> str:
     """The "# Working in the terminal" fragment: the one-command-per-turn loop and shell idioms.
 
     Bash-only dialects each have one (they differ only in the tool-call markup); native and
     client_cli drive their own loop and read none.
     """
     path = _TERMINAL_MD.get(tool_protocol)
-    return path.read_text(encoding="utf-8") if path is not None else ""
+    text = path.read_text(encoding="utf-8") if path is not None else ""
+    for key, value in {**_TERMINAL_EXAMPLES, **(examples or {})}.items():
+        text = text.replace("__" + key + "__", value)
+    return text
 
 
 def _fill_control_commands(
@@ -163,6 +215,8 @@ def _fill_control_commands(
 def _framework_tools_block(
     tool_protocol: ToolProtocol,
     tool_names: list[str],
+    *,
+    include_terminal: bool = False,
 ) -> str:
     """How a NON-terminal agent invokes the framework tools - selected by ``tool_protocol``,
     never by a feature or a concrete agent name.
@@ -177,8 +231,14 @@ def _framework_tools_block(
         return ""
     if not uses_control_cli(tool_protocol):
         return f"# Framework tools\n\nCall the framework tools directly: {', '.join(tool_names)}."
-    if tool_protocol in _TERMINAL_MD:
+    if tool_protocol in _TERMINAL_MD and not include_terminal:
         return ""
+    if include_terminal:
+        lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
+        return (
+            "# Framework commands\n\nRun these from your working directory (no arguments):\n\n"
+            + lines
+        )
     # client_cli (Claude/codex): a plain list of the control commands
     lines = "\n".join(f"- `python framework/control.py {name}`" for name in tool_names)
     return (

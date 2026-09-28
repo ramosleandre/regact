@@ -19,6 +19,6 @@ controller:
   shadow_replay: true     # re-score by replaying the actions on a trusted env (~2x eval)
   n_videos: 2             # record a video of the first min(n_videos, n_episodes) episodes
 limits:
-  max_turns: 350
+  max_turns_per_task: 350
   max_seconds_per_task: 3600   # 1h per game
 experiment_name: research

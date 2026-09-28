@@ -58,12 +58,38 @@ def inspect(task: Path, *, before: int = 0, limit: int = 100) -> dict[str, Any]:
     if not 1 <= limit <= 100 or before < 0:
         raise ValueError("invalid page bounds")
     status = json.loads((task / "cwm" / "status.json").read_text())
+    for new, old in (
+        ("n_unique_observations", "n_observations"),
+        ("n_unique_transitions", "n_transitions"),
+        ("n_total_transitions", "n_step_events"),
+    ):
+        if new not in status:
+            status[new] = status.get(old, 0)
+
+    def names(value: Any) -> Any:
+        if isinstance(value, list):
+            return [names(item) for item in value]
+        if isinstance(value, dict):
+            aliases = {
+                "dataset_revision": "dataset_version",
+                "cwm_revision": "cwm_version",
+                "dream_actions": "simulation_actions",
+                "dream_action_sequence": "simulation_action_sequence",
+                "dream_prediction_hashes": "simulation_prediction_hashes",
+            }
+            return {aliases.get(k, k): names(v) for k, v in value.items()}
+        return value
+
+    status = names(status)
+    status["phase"] = {0: "Dataset preparation", 1: "CWM Modeling", 2: "Active Exploration"}.get(
+        status.get("phase"), status.get("phase")
+    )
     with database(task) as db:
         rows = db.execute(
             "SELECT * FROM records WHERE (?=0 OR id<?) ORDER BY id DESC LIMIT ?",
             (before, before, limit),
         ).fetchall()
-        records = [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
+        records = [{**dict(row), "payload": names(json.loads(row["payload"]))} for row in rows]
         for record in records:
             record["payload"].pop("manifest", None)
         episodes = [
@@ -139,8 +165,8 @@ class Playback:
                     "episode": dict(episode),
                     "source": "recorded observation IDs",
                 }
-        if kind not in ("plan", "dream"):
-            raise ValueError("playback kind must be episode or plan")
+        if kind not in ("plan", "simulation"):
+            raise ValueError("playback kind must be episode, plan or simulation")
         with self.lock:
             key = (str(task.resolve()), kind, identifier)
             if key not in self.plans:
@@ -166,12 +192,17 @@ class Playback:
             if kind == "plan" and not record.get("candidate_found"):
                 raise ValueError("this search produced no candidate")
             initial = _obs(db, record["initial_observation_id"])
-        actions = record.get("actions" if kind == "plan" else "dream_action_sequence")
+        actions = record.get("actions" if kind == "plan" else "simulation_action_sequence")
         hashes = record.get(
-            "predicted_observation_hashes" if kind == "plan" else "dream_prediction_hashes"
+            "predicted_observation_hashes" if kind == "plan" else "simulation_prediction_hashes"
         )
+        if kind == "simulation":
+            actions = record.get("simulation_action_sequence", record.get("dream_action_sequence"))
+            hashes = record.get(
+                "simulation_prediction_hashes", record.get("dream_prediction_hashes")
+            )
         if actions is None or hashes is None:
-            raise ValueError("no completed dream trajectory recorded")
+            raise ValueError("no completed simulation trajectory recorded")
         bundle = task / "cwm" / "bundles" / record["model_bundle"]
         if not bundle.resolve().is_relative_to((task / "cwm" / "bundles").resolve()):
             raise ValueError("invalid bundle path")
@@ -190,7 +221,13 @@ class Playback:
             bundle,
             cfg.execution,
             deny_read=denied,
-            deadline=time.monotonic() + min(120, cfg.execution.max_seconds_per_rollout),
+            deadline=time.monotonic()
+            + min(
+                120,
+                cfg.execution.max_seconds_per_episode
+                if cfg.execution.max_seconds_per_episode is not None
+                else 120,
+            ),
         ) as worker:
             state = worker.call("parse", obs=initial)
             for action, expected in zip(actions, hashes, strict=True):
@@ -209,7 +246,7 @@ class Playback:
     def frame(self, task: Path, kind: str, identifier: int, index: int) -> dict[str, Any]:
         if index < 0:
             raise ValueError("negative frame index")
-        if kind in ("plan", "dream"):
+        if kind in ("plan", "simulation"):
             with self.lock:
                 frames = self.plans.get((str(task.resolve()), kind, identifier))
                 if frames is None:

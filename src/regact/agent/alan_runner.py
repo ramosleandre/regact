@@ -23,6 +23,7 @@ import json
 import sys
 from typing import Any
 
+from regact.agent.events import ToolResult
 from regact.obs.transcript import event_to_json
 
 # Control frames the runner emits alongside events; underscore-prefixed so they can
@@ -82,7 +83,7 @@ def _model_info(agent: Any) -> dict[str, Any]:
     return info
 
 
-async def _run_turn(agent: Any, message: str) -> None:
+async def _run_turn(agent: Any, message: str, *, synchronize_tools: bool = False) -> None:
     """Stream one turn's events, then close it with a ``_turn_end`` frame (carrying the resolved
     model info, so the parent can record what window the run actually got)."""
     from regact.agent.alan_adapter import map_alan_events
@@ -90,7 +91,21 @@ async def _run_turn(agent: Any, message: str) -> None:
     try:
         async for native in agent.query_events_async(message):
             for event in map_alan_events(native):
-                _write(dict(event_to_json(event)))
+                frame = dict(event_to_json(event))
+                if synchronize_tools and isinstance(event, ToolResult):
+                    frame["_await_continue"] = True
+                _write(frame)
+                if frame.get("_await_continue"):
+                    while True:
+                        command = await _read_command()
+                        if command is None or command.get("cmd") == "close":
+                            return
+                        if command.get("cmd") == "continue":
+                            break
+                        if command.get("cmd") == "inject":
+                            agent.inject_message(str(command.get("message", "")))
+                        else:
+                            raise ValueError("Expected inject or continue after a tool result")
     except BaseException as exc:  # any fault must reach the parent, not die silently
         _write({"type": FATAL, "message": f"{type(exc).__name__}: {exc}"})
         if not isinstance(exc, Exception):
@@ -118,9 +133,14 @@ async def _serve() -> int:
         kind = command.get("cmd")
         if kind == "start":
             agent = _build(command)
-            _write({"type": READY, "system_prompt": _assembled_prompt(agent)})
+            ready = {"type": READY, "system_prompt": _assembled_prompt(agent)}
+            remote_server = getattr(getattr(agent, "_backend", None), "_server", None)
+            address = getattr(remote_server, "server_address", None)
+            if isinstance(address, tuple) and len(address) >= 2:
+                ready["remote_endpoint"] = f"http://{address[0]}:{address[1]}"
+            _write(ready)
         elif kind == "send" and agent is not None:
-            await _run_turn(agent, str(command.get("message", "")))
+            await _run_turn(agent, str(command.get("message", "")), synchronize_tools=True)
         elif kind == "inject" and agent is not None:
             agent.inject_message(str(command.get("message", "")))
         elif kind == "close":

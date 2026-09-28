@@ -150,14 +150,14 @@ class PolicySearchProtocol(ExperimentProtocol):
             )
         self.config = config
         self.controller = Controller.from_config(config.controller)
-        self.features = build_features(config.features)
-
-    def validate(self) -> None:
-        if "cwm" in self.config.features:
+        if "cwm" in config.features:
             raise ValueError(
                 "CWM v3 is retired: replace features=cwm with protocol=cwm features=none; "
                 "use protocol.* settings"
             )
+        self.features = build_features(config.features)
+
+    def validate(self) -> None:
         if self.config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and (
             self.controller.evaluates_on_env
             or any(feature.evaluates_on_env for feature in self.features)

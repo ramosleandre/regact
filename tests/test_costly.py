@@ -55,13 +55,13 @@ async def test_real_agent_smoke(
             name="minigrid", tasks=["MiniGrid-Empty-5x5-v0"], kwargs={"fully_obs": True}
         ),
         controller=ControllerConfig(n_episodes=1, max_moves=50, n_videos=0, shadow_replay=True),
-        limits=LimitsConfig(max_turns=_MAX_TURNS, max_seconds_per_task=_MAX_SECONDS),
+        limits=LimitsConfig(max_turns_per_task=_MAX_TURNS, max_seconds_per_task=_MAX_SECONDS),
         sandbox=True,
     )
     # The caps are the whole safety story - assert them before spending anything.
     assert config.limits.max_seconds_per_task is not None
     assert config.limits.max_seconds_per_task <= _MAX_SECONDS
-    assert config.limits.max_turns <= _MAX_TURNS
+    assert config.limits.max_turns_per_task <= _MAX_TURNS
 
     reasons = await run_experiment(config, output_root=str(tmp_path))
     assert set(reasons) == {"MiniGrid-Empty-5x5-v0"}  # the task ran

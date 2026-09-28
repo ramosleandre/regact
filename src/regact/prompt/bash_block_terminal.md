@@ -20,34 +20,34 @@ Your answer is your reasoning as plain prose, then exactly ONE fenced bash block
 From the last run I confirmed the action ids for moving and for interacting with the cell ahead, and that my controller reaches the target but never interacts with it. Next I will fix that step in the controller and re-run the test script.
 
 ```bash
-sed -i 's/return A_MOVE/return A_INTERACT/' code_library/my_controller.py && python code_library/test_controller.py
+__EDIT_EXAMPLE__
 ```
 
 ## Typical commands
 
 Create or overwrite a file and run it in the same command (a bare `cat > ... <<'EOF'` prints nothing, so on its own you cannot tell whether the file was written):
 ```bash
-cat > code_library/explore.py <<'EOF'
-from framework.make_env import make_env
+cat > __SCRIPT_PATH__ <<'EOF'
+__SCRIPT_IMPORT__
 # ... your code ...
 EOF
-python code_library/explore.py
+python __SCRIPT_PATH__
 ```
 
 Edit a file in place with sed:
 ```bash
-sed -i 's/old/new/g' code_library/explore.py                      # replace every occurrence
-sed -i '5s/.*/        return obs.available_actions[0]/' solution.py   # rewrite line 5
+sed -i 's/old/new/g' __SCRIPT_PATH__                      # replace every occurrence
+sed -i '5s/.*/        return __ACTION_EXAMPLE__/' __CONTROLLER_PATH__   # rewrite line 5
 ```
 
 Read a file, or a slice with line numbers:
 ```bash
-cat solution.py
-nl -ba solution.py | sed -n '1,40p'
+cat __CONTROLLER_PATH__
+nl -ba __CONTROLLER_PATH__ | sed -n '1,40p'
 ```
 
 Run a script, or list a directory:
 ```bash
-python code_library/explore.py
-ls code_library
+python __SCRIPT_PATH__
+ls __SCRIPT_DIR__
 ```

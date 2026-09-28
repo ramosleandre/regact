@@ -29,7 +29,10 @@ class ToolCallView:
     input: dict[str, Any]
     result: str | None = None
     is_error: bool = False
-    tag: str | None = None  # "cheat" | "submit" | "submit_win" — drives the UI's call coloring
+    images: list[dict[str, str]] = field(default_factory=list)
+    tag: str | None = None  # policy submissions, CWM commands, or flagged calls
+    framework_tool: str | None = None
+    succeeded: bool | None = None
     flags: list[str] = field(default_factory=list)  # why a call was tagged "cheat" (the reasons)
 
 
@@ -241,13 +244,15 @@ def _enrich_derived_metrics(
 
 
 def list_artifacts(experiment_dir: str, game: str) -> list[ArtifactFile]:
-    """The agent-authored Python in the workdir (solution.py, code_library/…)."""
+    """Python and Markdown workspace files, including generated interface guides."""
     workdir = Path(experiment_dir) / game / "workdir"
     out: list[ArtifactFile] = []
     if not workdir.is_dir():
         return out
-    for path in sorted(workdir.rglob("*.py")):
-        if "__pycache__" in path.parts:
+    for path in sorted(workdir.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in (".py", ".md") or "__pycache__" in path.parts:
+            continue
+        if path.is_symlink() or not path.resolve().is_relative_to(workdir.resolve()):
             continue
         rel = str(path.relative_to(workdir))
         try:
@@ -332,6 +337,7 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
             if target is not None:
                 target.result = str(event.get("output", ""))
                 target.is_error = bool(event.get("is_error", False))
+                target.images = event.get("images") or []
         elif kind in ("IterationComplete", "TurnComplete"):  # "TurnComplete" = pre-rename bench 01
             current.usage = event.get("usage")
             flush()
@@ -385,16 +391,90 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
     submit_index = 0
     for turn in turns:
         for call in turn.tools:
-            if _is_submit_call(call):
+            if command := _cwm_command(call):
+                call.framework_tool = command
+                call.tag = "cwm"
+                feedback = _cwm_feedback(call.result or "")
+                call.succeeded = (
+                    feedback.get("status") in ("Accepted", "Plan found", "Completed")
+                    and not call.is_error
+                ) if feedback else None
+            elif _is_submit_call(call):
                 won = wins[submit_index] if submit_index < len(wins) else False
                 call.tag = "submit_win" if won else "submit"
                 submit_index += 1
             else:
                 kw = flag_tool_call(call.name, call.input, policy)
                 denied = flag_os_denial(call.result or "")
-                if kw or denied:  # forbidden in args (open) or denied in result (sandboxed)
+                cwm_denied = "cwm_direct_environment_disabled" in (call.result or "") or "Direct environment access is unavailable in CWM" in (call.result or "")
+                if kw or denied or cwm_denied:
                     call.tag = "cheat"
-                    call.flags = [*kw, *(["OS/proxy denial in result"] if denied else [])]
+                    call.flags = [*kw, *(["OS/proxy denial in result"] if denied else []), *(["Direct CWM environment access denied"] if cwm_denied else [])]
+
+
+def _cwm_command(call: ToolCallView) -> str | None:
+    """Recognize native calls or actual Python CLI invocations, not grep/echo mentions."""
+    import shlex
+
+    from regact.protocols.cwm.commands import COMMANDS
+
+    if call.name in COMMANDS:
+        return call.name
+    raw = call.input if isinstance(call.input, dict) else {}
+    text = raw.get("command", raw.get("cmd", ""))
+    if not isinstance(text, str):
+        return None
+    lines = []
+    delimiter = None
+    for line in text.splitlines(keepends=True):
+        if delimiter is not None:
+            if line.strip() == delimiter:
+                delimiter = None
+            continue
+        lines.append(line)
+        match = re.search(r"<<-?\s*['\"]?(\w+)['\"]?\s*$", line)
+        if match:
+            delimiter = match.group(1)
+    text = "".join(lines)
+    try:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        statements: list[list[str]] = [[]]
+        for token in lexer:
+            if token and all(c in ";&|()\n" for c in token):
+                statements.append([])
+            else:
+                statements[-1].append(token)
+        for tokens in statements:
+            if tokens[:2] == ["uv", "run"]:
+                tokens = tokens[2:]
+            if not tokens or not Path(tokens[0]).name.startswith("python"):
+                continue
+            # -c and stdin execute code; their text is not a CLI invocation.
+            if "-c" in tokens or "-" in tokens:
+                continue
+            for i, token in enumerate(tokens[:-1]):
+                if Path(token).name == "control.py" and tokens[i + 1] in COMMANDS:
+                    return tokens[i + 1]
+    except ValueError:
+        pass
+    return None
+
+
+def _cwm_feedback(text: str) -> dict[str, Any]:
+    """Read the result JSON after optional stage messages; no claim from missing output."""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        start, offset = offset, offset + len(line)
+        if line.lstrip().startswith("{"):
+            try:
+                value, _ = json.JSONDecoder().raw_decode(text[start:].lstrip())
+            except ValueError:
+                continue
+            if isinstance(value, dict) and "status" in value:
+                return value
+    return {}
 
 
 def _is_submit_call(call: ToolCallView) -> bool:

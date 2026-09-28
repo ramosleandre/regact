@@ -52,6 +52,10 @@ def test_http_roundtrip() -> None:
     assert obs.frame == {"pos": 0, "grid": [1, 0, 0, 0]}
     assert obs.available_actions == [0, 1]
     assert client.action_count == 0
+    assert obs.reward == client.last_reward == 0.0
+    assert obs.info["milestones"] == []
+    assert client.step(0).to_json() == obs.to_json()
+    client.reset()
     obs = client.step(1)
     assert obs.frame["pos"] == 1
     assert client.action_count == 1

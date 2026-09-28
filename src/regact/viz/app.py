@@ -82,7 +82,7 @@ def build_app(experiment_dir: str) -> FastAPI:
                     best_exploration_aggregate=(state.get("best_exploration") or {}).get(
                         "aggregate", {}
                     ),
-                    env_moves=state.get("n_step_events"),
+                    env_moves=state.get("n_total_transitions", state.get("n_step_events")),
                     success_rate=latest.get("aggregate", {}).get("success_rate"),
                 )
         return result
@@ -113,6 +113,9 @@ def build_app(experiment_dir: str) -> FastAPI:
                     # config (config.experiment_name), and one experiment holds many runs of many
                     # tasks (some tasks repeated across timestamps -> aggregated in the UI).
                     "experiment": game.config.get("experiment_name") or _experiment_of(name),
+                    "agent": {
+                        key: (game.config.get("agent") or {}).get(key) for key in ("name", "model")
+                    },
                     "task": game.state.get("task_name") or name.rsplit("/", 1)[-1],
                     "state": game.state,
                     "metrics": metrics(game, name),
@@ -121,9 +124,13 @@ def build_app(experiment_dir: str) -> FastAPI:
         return {"experiment": root.name, "games": out}
 
     def _require_game(name: str) -> None:
-        # ``name`` is a query param (a run's path relative to the root, possibly nested for a
-        # sweep). Validating against list_games both 404s the unknown and blocks path traversal.
-        if name not in reader.list_games(experiment_dir):
+        # Validate this run directly: frame playback must not scan the experiment tree.
+        candidate = (root / name).resolve()
+        if (
+            Path(name).is_absolute()
+            or not candidate.is_relative_to(root.resolve())
+            or not (candidate / "logs/experiment_state.json").is_file()
+        ):
             raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
 
     @app.get("/api/game")
@@ -167,6 +174,44 @@ def build_app(experiment_dir: str) -> FastAPI:
     @app.get("/api/game/cwm/evidence")
     def cwm_evidence(name: str, kind: str, identifier: int) -> Any:
         return cwm_call(name, lambda task: cwm_viewer.evidence(task, kind, identifier))
+
+    @app.get("/api/game/cwm/evidence-image")
+    def cwm_evidence_image(name: str, kind: str, identifier: int, side: str = "observed") -> Any:
+        def read(task: Path) -> Any:
+            evidence = cwm_viewer.evidence(task, kind, identifier)
+            if kind == "observation":
+                obs = evidence
+            elif kind == "diagnostic" and side in (
+                "predicted",
+                "observed",
+                "first_output",
+                "second_output",
+            ):
+                obs = evidence.get(side)
+            else:
+                raise ValueError("unsupported evidence image source")
+            if not isinstance(obs, dict) or "frame" not in obs:
+                raise ValueError("this evidence has no observation image for that side")
+            return Response(
+                cwm_viewer.png(cwm_viewer.problem_for(task), obs), media_type="image/png"
+            )
+
+        return cwm_call(name, read)
+
+    @app.get("/api/game/tool-image")
+    def tool_image(name: str, filename: str) -> Any:
+        _require_game(name)
+        if not re.fullmatch(r"[0-9a-f]{64}\.(png|jpg|webp|gif)", filename):
+            raise HTTPException(422, detail="invalid image identifier")
+        directory = (root / name / "logs" / "media").resolve()
+        path = directory / filename
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not directory.is_relative_to((root / name).resolve())
+        ):
+            raise HTTPException(404, detail="recorded tool image unavailable")
+        return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     @app.get("/api/game/cwm/source")
     def cwm_source(name: str, bundle: str, filename: str = "") -> Any:

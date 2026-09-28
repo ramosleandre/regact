@@ -71,17 +71,16 @@ def model(root, bad=False):
     d.mkdir(exist_ok=True, parents=True)
     (d / "model_state.py").write_text(
         "from dataclasses import dataclass\n@dataclass(frozen=True)\nclass S"
-        "tate:\n n:int\n started:bool=True\n"
+        "tate:\n n:int\n"
     )
     (d / "model_parser.py").write_text(
         'from model_state import State\ndef parse(o): return State(o["frame'
-        '"][0], o["reward"] is not None)\n'
+        '"][0])\n'
     )
     (d / "model_render.py").write_text(
-        'def render(s): return {"frame":[s.n]*30, "reward":float(s.n>=6) i'
-        'f s.started else None,"is_done":s.n>=6,"available_actions":[1],"i'
-        'nfo":{"available_actions":[1],**({"milestones":[]} if s.started e'
-        "lse {})}}\n"
+        'def render(s): return {"frame":[s.n]*30, "reward":float(s.n>=6),'
+        '"is_done":s.n>=6,"available_actions":[1],"i'
+        'nfo":{"available_actions":[1],"milestones":[]}}\n'
     )
     (d / "model_transition.py").write_text(
         "from model_state import State\ndef step(s,a): return State(s.n+"
@@ -100,7 +99,7 @@ def rig(tmp_path):
     cfg = RunConfig(
         AgentConfig(AgentName.SCRIPTED),
         ProblemConfig("fake", seed=0),
-        protocol=ProtocolConfig("cwm", {"initial_unique_observations": 3}),
+        protocol=ProtocolConfig("cwm", {"n_unique_observations_in_initial_collection": 3}),
     )
     (tmp_path / "config.json").write_text(json.dumps(redacted_config_dict(cfg)))
     register_problem("fake", lambda _: Problem())
@@ -116,6 +115,7 @@ def rig(tmp_path):
     Workspace(str(tmp_path / "workdir")).bootstrap(
         [],
         templates=protocol.templates,
+        expose_environment=False,
         problem_name="fake",
         task_name="counter",
         env_base_url="http://unused",
@@ -130,8 +130,7 @@ def rig(tmp_path):
 
 
 def collect(c):
-    for i in range(2):
-        c.public_environment("step", {"action": 1, "request_id": str(i)})
+    c.collect_initial()
 
 
 def accept(c, bad=False):
@@ -144,7 +143,7 @@ def accept(c, bad=False):
 def exploration(c, actions=(1, 1, 1, 1), extra=""):
     (c.workdir / "exploration.py").write_text(
         (
-            '"""Reach a new position."""\nfrom framework.exploration import Exp'
+            '"""Reach a new position."""\nfrom framework.action_list_controller import Exp'
             "lorationControllerFromListActions\n"
         )
         + extra
@@ -154,32 +153,58 @@ def exploration(c, actions=(1, 1, 1, 1), extra=""):
     )
 
 
-def test_phase_gate_and_http_retry(rig):
+def test_prefill_and_direct_environment_denial(rig):
     c, server = rig
+    for filename in ("make_env.py", "cwm_client.py"):
+        assert not (c.workdir / "framework" / filename).exists()
     with TestClient(server.app) as http:
-        a = http.post("/env/counter/step", json={"action": 1, "request_id": "a"})
-        assert a.status_code == 200
-        b = http.post("/env/counter/step", json={"action": 1, "request_id": "b"})
-        assert b.json()["cwm_phase"] == 1
-        retry = http.post("/env/counter/step", json={"action": 1, "request_id": "b"})
-        assert retry.json() == b.json()
-        assert http.post("/env/counter/reset", json={}).status_code == 409
-        assert http.post("/env/counter/step", json={"action": 1}).status_code == 409
-    assert c.store.summary()["n_step_events"] == 2
-    assert c.store.summary()["n_episodes"] == 1
+        for _ in range(2):
+            assert c.phase == "CWM Modeling"
+            for op, body in (("step", {"action": 1}), ("reset", {})):
+                reply = http.post(f"/env/counter/{op}", json=body)
+                assert reply.status_code == 409
+                assert reply.json()["detail"]["code"] == "cwm_direct_environment_disabled"
+            collect(c)
+    assert c.store.summary()["n_unique_observations"] == 3
+    assert c.store.summary()["n_total_transitions"] == 2
+    assert c.store.summary()["n_started_episodes"] == 1
+    assert c.initial_collection["target_reached"]
 
 
-def test_concurrent_request_id_executes_once(rig):
+def test_concurrent_prefill_executes_once(rig):
     c, _ = rig
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        replies = list(
-            pool.map(
-                lambda _: c.public_environment("step", {"action": 1, "request_id": "same"}),
-                range(4),
-            )
-        )
-    assert all(r == replies[0] for r in replies)
-    assert c.store.summary()["n_step_events"] == 1
+        list(pool.map(lambda _: c.collect_initial(), range(4)))
+    assert c.store.summary()["n_total_transitions"] == 2
+
+
+def test_prefill_action_cap_allows_modelling_with_less_data(rig):
+    c, _ = rig
+    c.options.max_actions_per_initial_collection = 1
+    collect(c)
+    assert c.phase == "CWM Modeling" and c.terminal is None
+    assert c.initial_collection["stop_reason"] == "action_cap"
+    assert not c.initial_collection["target_reached"]
+    assert c.store.summary()["n_unique_observations"] == 2
+
+
+def test_prefill_respects_global_budget(rig):
+    c, _ = rig
+    c.config.limits.max_actions_per_task = 1
+    collect(c)
+    assert c.terminal == "real_action_limit"
+    assert c.env.live.action_count == 1
+
+
+def test_prefill_interrupt_before_first_action(rig):
+    from regact.orchestration.signals import StopSignal
+
+    c, _ = rig
+    stop = StopSignal()
+    stop.set()
+    c.collect_initial(stop)
+    assert c.terminal == "interrupted"
+    assert c.store.summary()["n_total_transitions"] == 0
 
 
 def test_plan_real_exploration_and_replay(rig):
@@ -190,19 +215,19 @@ def test_plan_real_exploration_and_replay(rig):
     result = c.tool("PlanInCWM", {"request_id": "plan"})
     assert result["achieved"], result
     assert c.store.summary() == before
-    assert c.tool("PlanInCWM", {"request_id": "plan"}) == result
+    assert c.tool("PlanInCWM", {"request_id": "plan"}) == {**result, "replayed": True}
     playback = Playback()
     assert playback.load(c.output, "plan", result["plan_id"])["frames"] == 5
     assert playback.frame(c.output, "plan", result["plan_id"], 4)["obs"]["frame"][0] == 4
     exploration(c)
     result = c.tool("SubmitExplorationController", {})
-    assert result["real_actions"] == result["dream_actions"] == 4, result
+    assert result["real_actions"] == result["simulation_actions"] == 4, result
     assert result["actual_novel_observations"] == 2
     assert result["objective_reached"] is None
     assert result["stop_reason"] == "plan_exhausted"
     assert playback.load(c.output, "episode", result["episode_id"])["frames"] == 5
     assert playback.frame(c.output, "episode", result["episode_id"], 4)["obs"]["frame"][0] == 4
-    assert c.phase == 2
+    assert c.phase == "Active Exploration"
 
 
 def test_first_mismatch_recorded_then_requires_repair(rig):
@@ -212,7 +237,7 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     result = c.tool("SubmitExplorationController", {})
     assert result["stop_reason"] == "prediction_mismatch", result
     assert result["real_actions"] == 3
-    assert c.phase == 1
+    assert c.phase == "CWM Modeling"
     diagnostic = c.store.get_diagnostic(result["diagnostic_id"])
     assert diagnostic["predicted"]["frame"][0] == 4 and diagnostic["observed"]["frame"][0] == 3
     assert "error" in c.tool("PlanInCWM", {})
@@ -241,7 +266,7 @@ def test_invalid_controller_action_gets_worst_metrics(rig):
     assert result["real_actions"] == 1
     assert result["metrics"]["success"] is False
     assert result["error_type"] == "InvalidActionError"
-    assert c.phase == 2
+    assert c.phase == "Active Exploration"
 
 
 def test_controller_cannot_monkeypatch_model(rig):
@@ -280,7 +305,7 @@ def test_callback_timeout_is_recorded_and_not_accepted(rig):
     assert time.monotonic() - started < 4
     assert result["error_type"] == "code_timeout", result
     assert result["observations_checked"] == 3 and not result["complete"]
-    assert c.phase == 1 and c.accepted is None
+    assert c.phase == "CWM Modeling" and c.accepted is None
     assert c.store.db.execute("SELECT status FROM records").fetchone()[0] == "rejected"
 
 
@@ -295,7 +320,7 @@ def test_bad_reconstruction_and_compression_are_rejected(rig):
     assert result["failures"]["reconstruction_mismatch"] == 2
     assert result["counterexamples"][0]["diagnostic_id"]
     model(c.workdir)
-    c.options.threshold_state_obs_size_ratio = 0.01
+    c.options.threshold_max_state_obs_size_ratio = 0.01
     assert "compression_ratio" in c.tool("UpdateCodeWorldModel", {})["failures"]
 
 
@@ -305,13 +330,13 @@ def test_independent_action_budgets_and_global_real_budget(rig):
     exploration(c)
     c.options.max_actions_per_exploration = 4
     result = c.tool("SubmitExplorationController", {})
-    assert result["dream_actions"] == result["real_actions"] == 4
+    assert result["simulation_actions"] == result["real_actions"] == 4
     # New proposal predicts position 5, but only two real actions remain.
     exploration(c, (1, 1, 1, 1, 1))
     c.options.max_actions_per_exploration = 5
-    c.config.limits.max_real_actions_per_task = 8
+    c.config.limits.max_actions_per_task = 8
     result = c.tool("SubmitExplorationController", {})
-    assert result["dream_actions"] == 5 and result["real_actions"] == 2, result
+    assert result["simulation_actions"] == 5 and result["real_actions"] == 2, result
     assert c.terminal == "real_action_limit"
 
 
@@ -322,7 +347,7 @@ def test_observation_determinism_preserves_both_witnesses(tmp_path):
         a = store.record_step(ep, {"x": 0}, 1, {"x": 1})
         b = store.record_step(ep, {"x": 0}, 1, {"x": 2})
         assert b["conflicting_witnesses"][0]["event_id"] == a["event_id"]
-        assert store.summary()["n_transitions"] == 2
+        assert store.summary()["n_unique_transitions"] == 2
     finally:
         store.close()
 
@@ -396,14 +421,10 @@ def test_storage_failure_blocks_retry_of_uncertain_action(rig, monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(c.store, "record_step", failed_record)
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException):
-        c.public_environment("step", {"action": 1, "request_id": "uncertain"})
+    collect(c)
     assert c.terminal == "environment_or_storage_failure"
     assert c.env.live.action_count == 1
-    with pytest.raises(HTTPException):
-        c.public_environment("step", {"action": 1, "request_id": "uncertain"})
+    collect(c)
     assert c.env.live.action_count == 1
 
 
@@ -447,7 +468,7 @@ def test_planner_time_budget_returns_best_partial_candidate(rig):
     assert result["search_stop_reason"] == "max_seconds_per_planner_call"
 
 
-def test_dream_playback_and_frozen_source(rig):
+def test_simulation_playback_and_frozen_source(rig):
     from regact.protocols.cwm.viewer import source
 
     c, _ = rig
@@ -455,7 +476,7 @@ def test_dream_playback_and_frozen_source(rig):
     exploration(c)
     result = c.tool("SubmitExplorationController", {})
     playback = Playback()
-    assert playback.load(c.output, "dream", result["exploration_id"])["frames"] == 5
+    assert playback.load(c.output, "simulation", result["exploration_id"])["frames"] == 5
     listing = source(c.output, result["bundle"])
     assert "exploration.py" in listing["files"]
     assert "Reach a new position" in source(c.output, result["bundle"], "exploration.py")["source"]
@@ -466,7 +487,7 @@ def test_dream_playback_and_frozen_source(rig):
 @pytest.mark.parametrize(
     "options",
     [
-        {"initial_unique_observations": "15"},
+        {"n_unique_observations_in_initial_collection": "15"},
         {"max_actions_per_exploration": False},
         {"planner": {"algorithm": "astar"}},
         {"execution": {"max_seconds_per_call": 0}},
@@ -500,3 +521,62 @@ async def test_cwm_runner_dry_run_has_only_its_own_tools(tmp_path):
     assert "SubmitExplorationController" in transcript and "SubmitSolution" not in transcript
     assert "ExitTask" not in transcript
     assert json.loads((tmp_path / "cwm/status.json").read_text())["exit_reason"] == "dry_run"
+
+
+def test_prefill_time_cap(rig, monkeypatch):
+    from regact.protocols.cwm import session
+
+    c, _ = rig
+    clock = iter([0, 0, 2, 2])
+    monkeypatch.setattr(session.time, "monotonic", lambda: next(clock))
+    c.options.max_seconds_per_initial_collection = 1
+    collect(c)
+    assert c.initial_collection["stop_reason"] == "time_cap"
+    assert c.store.summary()["n_total_transitions"] == 0
+    assert c.phase == "CWM Modeling"
+
+
+def test_prefill_empty_action_space(rig, monkeypatch):
+    c, _ = rig
+    monkeypatch.setattr(c.problem, "enumerate_actions", lambda obs: iter(()))
+    collect(c)
+    assert c.initial_collection["stop_reason"] == "no_available_actions"
+    assert c.phase == "CWM Modeling"
+
+
+def test_prefill_episode_limit_reset(rig):
+    c, _ = rig
+    c.config.limits.max_actions_per_episode = 1
+    c.options.max_actions_per_initial_collection = 4
+    collect(c)
+    assert c.initial_collection["stop_reason"] == "action_cap"
+    assert c.store.summary()["n_total_transitions"] == 4
+    assert c.store.summary()["n_unique_transitions"] == 1
+    assert c.store.summary()["n_started_episodes"] == 4
+
+
+def test_prediction_replay_with_relative_output_root(rig, monkeypatch):
+    from pathlib import Path
+
+    c, _ = rig
+    accept(c)
+    (c.workdir / "goal.py").write_text('"""Reach 4."""\ndef achieved(s): return s.n==4\n')
+    result = c.tool("PlanInCWM", {})
+    monkeypatch.chdir(c.output.parent)
+    relative = Path(c.output.name)
+    playback = Playback()
+    assert playback.load(relative, "plan", result["plan_id"])["frames"] == 5
+    assert playback.frame(relative, "plan", result["plan_id"], 4)["obs"]["frame"][0] == 4
+
+
+def test_noop_after_reset_does_not_create_artificial_dataset_novelty(rig, monkeypatch):
+    c, _ = rig
+    monkeypatch.setattr(
+        c.env.live._native,
+        "step",
+        lambda action: ([0] * 30, 0, False, False, {"available_actions": [1]}),
+    )
+    c._step(1)
+    assert c.current_id == c.initial_id
+    assert c.store.summary()["n_unique_observations"] == 1
+    assert c.store.summary()["n_total_observations"] == 2

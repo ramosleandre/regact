@@ -76,16 +76,16 @@ on the CLI. The defaults live in [`src/regact/conf/config.yaml`](src/regact/conf
 ```yaml
 agent:   scripted        # who writes the code   - scripted | claude | codex | alan
 problem: arc_agi         # the environment       - arc_agi | minigrid
-controller: default      # always-on: the agent writes + submits a policy (knobs: controller.*)
-features: none           # OPTIONAL extra capabilities - none | cwm
+controller: default      # policy_search evaluation settings (controller.*)
+features: none           # optional additive capabilities inside policy_search
 sandbox: true            # confine the agent + block egress (false = off)
 limits:
-  max_turns: 350             # agent turns per task
+  max_turns_per_task: 350             # outer send cycles per task; null = unlimited
   max_seconds_per_task: null # wall-clock per task
-  max_actions_per_env: null  # env.step cap per env instance
+  max_actions_per_episode: null  # env.step cap per episode; reset renews it
 ```
 
-The always-on controller's eval knobs live under `controller.*` (e.g. `controller.n_episodes`);
+The default policy_search protocol's evaluation knobs live under `controller.*` (e.g. `controller.n_episodes`);
 each optional feature owns its knobs under `features.<name>.*`. A few examples:
 
 ```bash
@@ -95,8 +95,8 @@ make run ARGS="experiment=dev"
 # MiniGrid with Claude:
 make run ARGS="agent=claude problem=minigrid"
 
-# ARC-AGI-3 with Alan, add the Code World Model feature, 3 eval episodes:
-make run ARGS="agent=alan problem=arc_agi features=cwm controller.n_episodes=3"
+# ARC-AGI-3 with Alan using the CWM protocol:
+make run ARGS="agent=alan problem=arc_agi protocol=cwm features=none"
 ```
 
 See a config composed without running it: `make run ARGS="... --cfg job"`.

@@ -92,7 +92,7 @@ class _Stack:
         self.transcript = TranscriptWriter(str(self.logs / "transcript.jsonl"))
         self.logger = RunLogger(str(self.logs), task="g")
         self.state_path = str(self.logs / "experiment_state.json")
-        self.limits = LimitsConfig(max_turns=10)
+        self.limits = LimitsConfig(max_turns_per_task=10)
 
     async def run(
         self, agent: ScriptedAgent, *, stop: StopSignal | None = None, is_perfect=None
@@ -231,7 +231,7 @@ async def test_pipeline_survives_a_transient_backend_error(tmp_path: Path) -> No
 
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=2)
+    stack.limits = LimitsConfig(max_turns_per_task=2)
     agent = ScriptedAgent([])  # never calls ExitTask: each turn defaults to IterationComplete
     reason = await stack.run(agent)
 
@@ -242,7 +242,7 @@ async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
 async def test_pipeline_stops_on_tool_call_limit(tmp_path: Path) -> None:
     """max_tool_calls caps TOTAL tool calls across the run - agent-agnostic, turn-independent."""
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
+    stack.limits = LimitsConfig(max_turns_per_task=100, max_tool_calls=3)
     # One Bash call per turn (never submits/exits); the loop counts every ToolCall event.
     agent = ScriptedAgent(
         [
@@ -261,7 +261,7 @@ async def test_pipeline_aborts_mid_send_at_the_tool_call_budget(tmp_path: Path) 
     """The budget is enforced MID-send: one send() emitting more calls than the budget is cut off at
     it, not after (the CLI agents run their whole loop in one send() with no inner tool knob)."""
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=100, max_tool_calls=3)
+    stack.limits = LimitsConfig(max_turns_per_task=100, max_tool_calls=3)
     # A single send() emitting five Bash calls: the loop must stop after the third, not run all 5.
     calls = [
         event
@@ -321,12 +321,12 @@ async def test_doom_loop_breaker_stops_a_no_tool_agent(tmp_path: Path) -> None:
     burn the full budget. (Off by default -> test_pipeline_is_stable_over_many_turns runs 200
     no-tool turns to loop_limit, guarding the default.)"""
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=50, max_consecutive_no_tool_turns=3)
+    stack.limits = LimitsConfig(max_turns_per_task=50, max_consecutive_no_tool_turns=3)
     agent = ScriptedAgent([])  # every turn is a no-tool turn
     reason = await stack.run(agent)
 
     assert reason == "no_tool_progress"
-    assert len(agent.sent) == 3  # gave up at the breaker, not at max_turns=50
+    assert len(agent.sent) == 3  # gave up at the breaker, not at max_turns_per_task=50
 
 
 async def test_pipeline_is_stable_over_many_turns(tmp_path: Path) -> None:
@@ -334,7 +334,7 @@ async def test_pipeline_is_stable_over_many_turns(tmp_path: Path) -> None:
     streams the transcript to disk and offloads the growing conversation to the agent,
     so it stays stable across many turns rather than accumulating state to failure."""
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=200)
+    stack.limits = LimitsConfig(max_turns_per_task=200)
     agent = ScriptedAgent([])  # never exits: drives straight to the turn limit
     reason = await stack.run(agent)
 
@@ -411,7 +411,7 @@ async def test_the_verdict_is_on_disk_before_teardown_runs(tmp_path: Path) -> No
 async def test_stop_waits_for_enclosing_shell_result(tmp_path: Path, stop_kind: str) -> None:
     """A submission/exit inside a shell command must not interrupt its remaining writes."""
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=1 if stop_kind == "budget" else None)
+    stack.limits = LimitsConfig(max_turns_per_task=10, max_tool_calls=1 if stop_kind == "budget" else None)
     solution = stack.workdir / "solution.py"
 
     class WritingAgent(ScriptedAgent):
@@ -449,7 +449,7 @@ async def test_stop_waits_for_enclosing_shell_result(tmp_path: Path, stop_kind: 
 
 async def test_tool_budget_waits_for_all_started_calls(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=2)
+    stack.limits = LimitsConfig(max_turns_per_task=10, max_tool_calls=2)
 
     class ParallelAgent(ScriptedAgent):
         async def send(self, message):
@@ -469,7 +469,7 @@ async def test_tool_budget_waits_for_all_started_calls(tmp_path: Path) -> None:
 
 async def test_inline_framework_result_satisfies_tool_budget(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=1)
+    stack.limits = LimitsConfig(max_turns_per_task=10, max_tool_calls=1)
     agent = ScriptedAgent(
         [[ToolCall("submit", "SubmitSolution", {}), ToolCall("extra", "Bash", {})]]
     )
@@ -485,7 +485,7 @@ async def test_codex_completion_only_patch_counts_and_finishes_before_stop(
     from regact.agent.codex_adapter import CodexAgent
 
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns=10, max_tool_calls=1)
+    stack.limits = LimitsConfig(max_turns_per_task=10, max_tool_calls=1)
     parser = CodexAgent()
 
     class PatchAgent(ScriptedAgent):
@@ -510,3 +510,34 @@ async def test_codex_completion_only_patch_counts_and_finishes_before_stop(
     assert stack.experiment.tool_calls_total == 1
     assert stack.transcript_types().count("ToolResult") == 1
     assert agent.aborted
+
+
+@pytest.mark.parametrize("pending, force", [(False, False), (True, False), (True, True)])
+async def test_interrupt_during_long_turn(tmp_path, pending, force):
+    import asyncio
+
+    stack = _Stack(tmp_path, tools=[])
+    stop = StopSignal()
+    completed = False
+
+    class WaitingAgent(ScriptedAgent):
+        async def send(self, message):
+            nonlocal completed
+            if pending:
+                yield ToolCall("write", "Bash", {"command": "write file"})
+            stop.set()
+            if force:
+                stop.set()
+            await asyncio.sleep(0.15)
+            if pending and not force:
+                assert not self.aborted
+                completed = True
+                yield ToolResult("write", "saved")
+                pytest.fail("Must stop after the pending result")
+            await asyncio.Event().wait()
+
+    agent = WaitingAgent()
+    assert await asyncio.wait_for(stack.run(agent, stop=stop), 2) == "interrupted"
+    assert agent.aborted
+    assert completed == (pending and not force)
+    assert "agent_error" not in (stack.logs / "events.jsonl").read_text()

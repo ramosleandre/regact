@@ -38,7 +38,7 @@ def test_camera_flags_forbidden_paths_and_imports() -> None:
     assert flag_tool_call("Bash", {"command": "ls .. && cd ../foo"}, policy) == []
     assert flag_tool_call("Bash", {"command": "python -c 'import inspect'"}, policy) == []
     # the legit workdir helper (named arc_agi_helper.py) must NOT trip the 'arc_agi/' rule:
-    assert flag_tool_call("Bash", {"command": "cat code_library/arc_agi_helper.py"}, policy) == []
+    assert flag_tool_call("Bash", {"command": "cat framework/arc_agi_helper.py"}, policy) == []
 
 
 def test_os_denial_recognizes_blocked_egress_only() -> None:

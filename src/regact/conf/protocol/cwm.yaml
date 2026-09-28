@@ -1,9 +1,15 @@
+# Every max_* option accepts null to disable that particular cap.
 # CWM v4. Settings apply only with protocol=cwm.
 name: cwm
-initial_unique_observations: 15
-threshold_state_obs_size_ratio: 0.5
+n_unique_observations_in_initial_collection: 20
+max_actions_per_initial_collection: 1000
+max_seconds_per_initial_collection: 30
+threshold_max_state_obs_size_ratio: 0.5
 cwm_validation_policy: required
 max_actions_per_exploration: 2500
+# Set 0 to disable automatic preview images.
+n_tmp_images_saved_per_exploration: 8
+workspace_helpers_enabled: true
 planner:
   algorithm: bfs
   max_seconds_per_planner_call: 30
@@ -12,8 +18,8 @@ planner:
   max_depth_per_planner_call: 100
 execution:
   max_seconds_per_call: 5
-  max_seconds_per_validation: 120
-  max_seconds_per_rollout: 120
+  max_seconds_per_UpdateCodeWorldModel: 120
+  max_seconds_per_episode: 120
   max_memory_mb: 512
 feedback:
   max_counterexamples: 5

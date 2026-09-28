@@ -78,6 +78,7 @@ class AlanSubprocessAgent(CodeAgent):
         self._pending: list[str] = []  # queued by inject(), prepended to the next turn
         self._stderr_tail: collections.deque[str] = collections.deque(maxlen=_STDERR_TAIL_LINES)
         self._stderr_task: asyncio.Task[None] | None = None
+        self._at_tool_result = False  # child is waiting for post-tool notices
         self._needs_drain = False  # a prior turn's stream was abandoned before its _turn_end
         self._model_info: dict[str, Any] | None = None  # resolved window/source, from _turn_end
 
@@ -157,12 +158,23 @@ class AlanSubprocessAgent(CodeAgent):
                 return
             event = self._to_event(frame)
             if event is not None:
-                yield event
+                self._at_tool_result = bool(frame.get("_await_continue"))
+                try:
+                    yield event
+                finally:
+                    # Only acknowledge if the stream is resumed normally. Abort/close
+                    # owns cleanup if the consumer stops at this result boundary.
+                    self._at_tool_result = False
+                if frame.get("_await_continue"):
+                    self._send_command({"cmd": "continue"})
         yield AgentError(ErrorCategory.AGENT_API, await self._exit_message())
 
     async def inject(self, message: str) -> None:
-        """Queue a message; it is prepended to the next turn (mirrors the CLI agents)."""
-        self._pending.append(message)
+        """Deliver at a paused tool result; otherwise prepend to the next turn."""
+        if self._at_tool_result:
+            self._send_command({"cmd": "inject", "message": message})
+        else:
+            self._pending.append(message)
 
     def resolved_model_info(self) -> dict[str, Any] | None:
         """alancode's resolved context window + source, captured from the child's ``_turn_end``
@@ -208,7 +220,7 @@ class AlanSubprocessAgent(CodeAgent):
             tool_protocol=protocol,
             permission_hooks=False,  # alancode's hooks are not reachable across the boundary
             streams_tool_calls=True,
-            supports_inject=True,  # queued, delivered on the next turn
+            supports_inject=True,  # synchronized post-tool delivery; otherwise next turn
             writes_native_transcript=True,  # <workdir>/.alan
             executes_tools=False,  # framework tools run behind the control channel
         )
@@ -283,6 +295,11 @@ class AlanSubprocessAgent(CodeAgent):
             if kind == READY:
                 prompt = frame.get("system_prompt")
                 self._display_prompt = prompt if isinstance(prompt, str) else None
+                endpoint = frame.get("remote_endpoint")
+                if isinstance(endpoint, str):
+                    from regact.obs.console import console
+
+                    console(f"Alan remote endpoint: {endpoint}")
                 return
             if kind == FATAL:
                 raise RuntimeError(f"alan runner failed to start: {frame.get('message')}")
@@ -295,7 +312,7 @@ class AlanSubprocessAgent(CodeAgent):
         """Map one child frame to an event (a ``_fatal`` control frame becomes an error)."""
         if frame.get("type") == FATAL:
             return AgentError(ErrorCategory.AGENT_API, str(frame.get("message", "runner fault")))
-        return event_from_json(frame)
+        return event_from_json({k: v for k, v in frame.items() if k != "_await_continue"})
 
     async def _drain_stale_turn(self) -> None:
         """Consume frames left over when a turn's consumer stopped early (the loop breaks

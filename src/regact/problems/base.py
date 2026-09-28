@@ -46,12 +46,17 @@ class BaseProblem(ABC):
         """Optional per-step milestone detector for the wrapper."""
         return None
 
+    def milestone_kind(self, milestone: str) -> str:
+        """Classify an event for CWM notices; unknown events are not assumed successes."""
+        return "event"
+
     def helper_templates(
         self,
         task_name: str,
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         helper: HelperConfig | None = None,
+        direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         """Game-specific helper files dropped into the agent's workdir.
 
@@ -163,7 +168,12 @@ class BaseProblem(ABC):
 
     @abstractmethod
     def build_prompt(
-        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode,
+        obs_mode: ObsMode = ObsMode.RAW,
+        direct_interaction: bool = True,
     ) -> str:
         """The game prompt for the first message, built per task, info level and obs mode."""
         ...
@@ -196,3 +206,12 @@ def build_problem(name: str, kwargs: dict[str, Any]) -> BaseProblem:
 def _load_builtins() -> None:
     """Import built-in problem modules so they self-register (no game lib needed to import)."""
     from regact.problems import arc_agi, minigrid  # noqa: F401
+
+
+def observation_prompt(text: str, *, direct_interaction: bool) -> str:
+    """Use object fields for EnvClient, dictionary fields for recorded experience."""
+    if direct_interaction:
+        return text
+    for name in ("frame", "available_actions", "is_done", "reward", "info"):
+        text = text.replace(f"obs.{name}", f'obs["{name}"]')
+    return text

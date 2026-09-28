@@ -33,7 +33,7 @@ class SubmitSolution(Tool):
         task_name: str,
         lifecycle: Lifecycle,
         n_episodes: int = 1,
-        max_moves: int = 400,
+        max_moves: int | None = 400,
         n_videos: int = 0,
         feature_metrics: Callable[[], dict[str, Any]] | None = None,
     ) -> None:

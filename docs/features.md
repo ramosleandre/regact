@@ -1,8 +1,3 @@
-> This page describes additive **policy-search** capabilities. CWM v4 is a separate
-> [experiment protocol](protocols.md): use `protocol=cwm features=none`.
-> The `features=cwm` examples below describe the retired v3 implementation and are
-> retained temporarily for migration reference; that launch now gives an explicit error.
-
 # Features
 
 The **controller** is always-on core: every `policy_search` run has the agent write an
@@ -11,26 +6,13 @@ scored by rolling episodes on the env. It is **not** a feature - see
 [Controller](#controller) below. The controller may keep internal state between
 actions; evaluation constructs a new controller for each episode.
 
-A **feature** is an OPTIONAL capability layered on top of the controller. It bundles four
-things: workdir **templates** (scaffolding), a **prompt fragment**, **tools** the agent can
-call, and teardown **hooks**. regact ships one:
+A **feature** is an optional additive capability inside `policy_search`. It bundles
+workspace templates, a prompt fragment, tools and teardown hooks. The default is
+`features=none`; no additional built-in feature currently ships.
 
-| `features=` | What it does | Scores on env? |
-|---|---|---|
-| `none` | no extra feature (the default) | - |
-| `cwm` | Code World Model: records transitions and scaffolds a representation and transition model with an agent-run verifier | no |
-
-### What CWM checks
-
-CWM scaffolds a `world_model/` directory containing `State`, `parse`, `render`, and
-`step` implementations for the agent to fill in. The agent runs `verify.py` against
-recorded transitions to inspect parser injectivity, observation reconstruction,
-transition accuracy, and code/state size. These checks describe agreement with the
-collected data.
-
-Separately, CWM adds model-independent transition counts and conflict counts to
-submission results through `submission_metrics`. Those recorded metrics are distinct
-from the agent-run verifier output.
+CWM is a separate [experiment protocol](protocols.md), selected with
+`protocol=cwm features=none`. The retired `features=cwm` setting produces a migration
+error. Its verifier and controller-coupled implementation have been removed.
 
 ## Controller
 
@@ -46,31 +28,9 @@ set it to `0` to disable video. Numbered submissions are scored without recordin
 make run ARGS="controller.n_episodes=3 controller.n_videos=0"
 ```
 
-## Use a feature
-
-Each feature **owns its own knobs**, so run-level config stays small. Select a feature by
-name and override a knob with its dotted path:
-
-```bash
-# add the Code World Model feature on top of the always-on controller
-make run ARGS="features=cwm features.cwm.max_tested_transitions_per_verify=500"
-```
-
-The config groups in [`conf/features/`](../src/regact/conf/features/):
-
-- **`none.yaml`** - no feature (the default).
-- **`cwm.yaml`** — `max_tested_transitions_per_verify`,
-  `max_printed_incoherence_transitions_per_verify`.
-
-A feature is additive: `features=cwm` keeps the always-on controller (SubmitSolution/ExitTask)
-and adds cwm on top. The `features:` mapping order is also the order env wrappers are applied
-(first = innermost).
-
 ## Add a feature
 
-A feature implements the [`Feature`](../src/regact/features/base.py) ABC;
-[`cwm.py`](../src/regact/features/cwm.py) is the worked example (templates + a prompt
-fragment + an env wrapper). The always-on controller lives in
+A feature implements the [`Feature`](../src/regact/features/base.py) ABC. The policy-search controller lives in
 [`controller.py`](../src/regact/features/controller.py) - it uses the same
 `templates`/`prompt_fragment`/`tools`/`hooks` seams but is core, built from `config.controller`,
 not registered as a feature.
@@ -102,7 +62,7 @@ runtime dependencies the orchestrator owns.
 Optional extension points:
 
 - `env_wrapper(ctx)` returns an `env -> wrapped env` factory applied server-side
-  (CWM uses it to record transitions). It must preserve the `WrappedEnv` surface.
+  and must preserve the `WrappedEnv` surface.
 - `submission_metrics(deps)` returns a JSON-serializable metric mapping after an
   evaluation. It is stored under `results.json` → `features` → the feature's name;
   this is how a feature contributes metrics without replacing the controller score.

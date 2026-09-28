@@ -1,8 +1,9 @@
 """Workdir bootstrap.
 
 Lays out the agent's working directory. The common base is **agnostic**: the
-directory tree (``code_library/``, ``framework/``) and the
-env/lifecycle-specific ``framework/make_env.py``. The selected experiment protocol
+``framework/`` directory (plus ``code_library/`` for direct-interaction workflows) and the
+optional env/lifecycle-specific ``framework/make_env.py`` (controlled by the protocol).
+The selected experiment protocol
 supplies the remaining templates. The controller/features arguments are retained
 for callers of the older composition API; the runner uses ``templates``.
 """
@@ -123,6 +124,7 @@ class Workspace:
         game_id: str,
         lifecycle: Lifecycle,
         helper_templates: list[TemplateFile] | None = None,
+        expose_environment: bool = True,
     ) -> None:
         """Write the base and problem helpers, then call the protocol template provider.
 
@@ -130,16 +132,15 @@ class Workspace:
         after the base exists, so generated files see the same context as before.
         """
         os.makedirs(self.root, exist_ok=True)
-        for sub in ("code_library", "framework"):
+        for sub in (("framework", "code_library") if expose_environment else ("framework",)):
             os.makedirs(os.path.join(self.root, sub), exist_ok=True)
-
-        self._write("framework/__init__.py", "")
-        self._write("code_library/__init__.py", "")
+            self._write(f"{sub}/__init__.py", "")
         template = _MAKE_ENV_SINGLE if lifecycle is Lifecycle.SINGLE_INSTANCE else _MAKE_ENV_MULTI
-        self._write(
-            "framework/make_env.py",
-            template.format(base_url=env_base_url, game_id=game_id),
-        )
+        if expose_environment:
+            self._write(
+                "framework/make_env.py",
+                template.format(base_url=env_base_url, game_id=game_id),
+            )
         self._write(
             "framework/control.py",
             _CONTROL_CLI.replace("__BASE_URL__", env_base_url).replace("__GAME_ID__", game_id),

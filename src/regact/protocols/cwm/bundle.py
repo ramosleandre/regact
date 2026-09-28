@@ -122,7 +122,7 @@ def snapshot(
             raise ValueError(f"symlinks are not supported in submitted bundles: {rel}")
         if not path.resolve().is_relative_to(root) or not path.is_file() or path.suffix != ".py":
             raise ValueError(f"missing/invalid submitted Python file: {rel}")
-        # Accepted model always wins over mutable workdir copies for planning/rollouts.
+        # Accepted model always wins over mutable workdir copies for planning/episodes.
         if rel not in sources or model is None:
             sources[rel] = read_source(root, rel)
         if len(sources) > MAX_BUNDLE_FILES or sum(map(len, sources.values())) > MAX_BUNDLE_BYTES:

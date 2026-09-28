@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException
 
 from regact.env.session import EnvSession
 from regact.env.wrapped_env import WrappedEnv
@@ -164,7 +164,7 @@ class EnvServer:
                 raise HTTPException(422, detail=str(exc)) from exc
 
         @app.post("/control/{game_id}/tool")
-        async def control_tool(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        async def control_tool(game_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
             binding = self._control.get(game_id)
             if binding is None:
                 raise HTTPException(status_code=503, detail="control channel not bound")
@@ -173,8 +173,14 @@ class EnvServer:
             tool = tools_by_name.get(name)
             if tool is None:
                 raise HTTPException(status_code=404, detail=f"unknown tool {name!r}")
-            output = await tool.call(body.get("input") or {}, ToolContext(cwd=cwd))
-            return {"output": str(output.data), "is_error": output.is_error}
+            detail = {}
+            if token := request.headers.get("X-Regact-Request-ID"):
+                detail["request_id"] = token
+            output = await tool.call(body.get("input") or {}, ToolContext(cwd=cwd, detail=detail))
+            result = {"output": str(output.data), "is_error": output.is_error}
+            if output.messages:
+                result["messages"] = output.messages
+            return result
 
         return app
 

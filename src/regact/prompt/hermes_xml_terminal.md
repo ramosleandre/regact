@@ -32,7 +32,7 @@ From the last run I confirmed the action ids for moving and for interacting with
 <tool_call>
 <function=Bash>
 <parameter=command>
-sed -i 's/return A_MOVE/return A_INTERACT/' code_library/my_controller.py && python code_library/test_controller.py
+__EDIT_EXAMPLE__
 </parameter>
 </function>
 </tool_call>
@@ -40,19 +40,19 @@ sed -i 's/return A_MOVE/return A_INTERACT/' code_library/my_controller.py && pyt
 ## Typical commands (the `command` value)
 
 Create or overwrite a file:
-cat > code_library/explore.py <<'EOF'
-from framework.make_env import make_env
+cat > __SCRIPT_PATH__ <<'EOF'
+__SCRIPT_IMPORT__
 # ... your code ...
 EOF
 
 Edit a file in place with sed:
-sed -i 's/old/new/g' code_library/explore.py                      # replace every occurrence
-sed -i '5s/.*/        return obs.available_actions[0]/' solution.py   # rewrite line 5
+sed -i 's/old/new/g' __SCRIPT_PATH__                      # replace every occurrence
+sed -i '5s/.*/        return __ACTION_EXAMPLE__/' __CONTROLLER_PATH__   # rewrite line 5
 
 Read a file, or a slice with line numbers:
-cat solution.py
-nl -ba solution.py | sed -n '1,40p'
+cat __CONTROLLER_PATH__
+nl -ba __CONTROLLER_PATH__ | sed -n '1,40p'
 
 Run a script, or list a directory:
-python code_library/explore.py
-ls code_library
+python __SCRIPT_PATH__
+ls __SCRIPT_DIR__

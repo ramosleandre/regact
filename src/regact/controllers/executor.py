@@ -49,7 +49,7 @@ class Executor(Protocol):
         output_path: str,
         lifecycle: Lifecycle,
         n_episodes: int = ...,
-        max_moves: int = ...,
+        max_moves: int | None = ...,
         n_videos: int = ...,
     ) -> EvalResult: ...
 
@@ -82,7 +82,7 @@ def run_episodes_raw(
     *,
     lifecycle: Lifecycle,
     n_episodes: int,
-    max_moves: int,
+    max_moves: int | None,
     n_videos: int = 0,
     seed: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -388,7 +388,7 @@ class ControllerExecutor:
         output_path: str,
         lifecycle: Lifecycle,
         n_episodes: int = 1,
-        max_moves: int = 400,
+        max_moves: int | None = 400,
         n_videos: int = 0,
     ) -> EvalResult:
         """Drive the controller via the env client and persist the result."""
@@ -472,7 +472,7 @@ class SandboxedExecutor:
         output_path: str,
         lifecycle: Lifecycle,
         n_episodes: int = 1,
-        max_moves: int = 400,
+        max_moves: int | None = 400,
         n_videos: int = 0,
     ) -> EvalResult:
         """Run the eval subprocess, score its raw outcomes here, and persist the result."""
@@ -494,7 +494,7 @@ class SandboxedExecutor:
         raw_path: str,
         lifecycle: Lifecycle,
         n_episodes: int,
-        max_moves: int,
+        max_moves: int | None,
         n_videos: int,
     ) -> EvalResult:
         argv = [

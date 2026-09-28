@@ -201,7 +201,7 @@ def _build_server(
         renderer=problem.obs_renderer(task_name, mode=config.problem.obs_mode),
         lifecycle=_lifecycle_policy(config.problem.lifecycle),
         milestone_detector=problem.milestone_detector(task_name),
-        step_budget=config.limits.max_actions_per_env,
+        step_budget=config.limits.max_actions_per_episode,
         wrappers=wrappers,
     )
     server = EnvServer()
@@ -222,13 +222,17 @@ def _bootstrap_workdir(
     Workspace(workdir).bootstrap(
         [],
         templates=protocol.templates,
+        expose_environment=protocol.exposes_environment,
         problem_name=problem.name,
         task_name=task_name,
         env_base_url=conn.base_url,
         game_id=task_name,
         lifecycle=config.problem.lifecycle,
         helper_templates=problem.helper_templates(
-            task_name, info_mode=config.problem.info_mode, helper=config.problem.helper
+            task_name,
+            info_mode=config.problem.info_mode,
+            helper=config.problem.helper,
+            **({"direct_interaction": False} if not protocol.exposes_environment else {}),
         ),
     )
 
@@ -491,6 +495,22 @@ async def run_task(
                 )
                 return "dry_run"
             try:
+                await session.prepare(stop)
+                initial_reason = (
+                    "interrupted" if stop is not None and stop.is_set() else session.stop_reason()
+                )
+                if initial_reason is not None:
+                    experiment.exit_reason = initial_reason
+                    experiment.env_moves = server.total_action_count(task_name)
+                    experiment.save(os.path.join(logs_dir, "experiment_state.json"))
+                    logger.log(
+                        LogComponent.ORCHESTRATOR,
+                        "INFO",
+                        "session_end",
+                        phase="bootstrap",
+                        reason=initial_reason,
+                    )
+                    return initial_reason
                 await agent.start(
                     cwd=workdir,
                     model=config.agent.model,

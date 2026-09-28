@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -48,10 +49,10 @@ from regact.tools.base import Tool, ToolContext
 
 _ABORTED_REASONS = frozenset({"loop_crash"})
 
-# Injected on the agent's next turn when a tool call is flagged (see config.flagging_warning_cap),
+# Delivered after completed tools (CLI adapters: next outer turn), subject to flagging_warning_cap,
 # so a model reaching for a sandboxed action learns why it failed and stops wasting budget on it.
 _FLAGGING_WARNING = (
-    "WARNING: your last command was flagged by the environment's monitoring as conflicting with "
+    "WARNING: a command was flagged by the environment's monitoring as conflicting with "
     "this benchmark's isolation and security rules. Those rules block, among others: installing "
     "packages (pip / uv / apt / npm ...); any internet or outbound network access (only the model "
     "host is reachable); reading or writing files outside your working directory; reading the "
@@ -60,7 +61,6 @@ _FLAGGING_WARNING = (
     "tricks (exec/eval, ctypes, importlib) to bypass the above.\n"
     "If that's what happened, please stop: (a) it isn't the purpose of this benchmark, and (b) the "
     "environment is strongly sandboxed, so these attempts simply fail and waste your budget. "
-    "Discover the game only by playing it through framework/make_env."
 )
 
 # A single backend error (one 500/timeout from a slow local server) must not end the
@@ -88,8 +88,17 @@ class _LoopContext:
     start: float = 0.0  # time.monotonic() at the run's start, for the live duration
     move_count: Callable[[], int] | None = None  # polls the env's step count, for the live state
     flagging_warning_cap: int = 0  # max flagging warnings to inject this task (0 = never)
-    warnings_injected: int = 0  # how many have been injected so far (mutated as they fire)
+    warnings_injected: int = 0  # warning allowance consumed
+    flags_observed: int = 0  # flags already considered at a completed-tool boundary
+    pending_warnings: list[str] = field(default_factory=list)
+    # Keep bounded excerpts until a parallel group has completed. CLI warnings may
+    # be delivered much later, so never describe the command as "your last command".
+    warning_calls: dict[str, str] = field(default_factory=dict)
+    flagged_call_ids: set[str] = field(default_factory=set)
+    attributed_flags: int = 0
     max_tool_calls: int | None = None  # hard tool-call budget, enforced mid-send (None = off)
+    stop: StopSignal | None = None
+    interrupted: bool = False
 
 
 @dataclass
@@ -136,6 +145,7 @@ async def run_session(
         flagging_warning_cap=flagging_warning_cap,
         max_tool_calls=limits.max_tool_calls,
         protocol=protocol,
+        stop=stop,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -163,6 +173,9 @@ async def run_session(
 
             experiment.turn = turns + 1  # 1-indexed: the turn now starting
             outcome = await _run_turn(message, ctx)
+            if ctx.interrupted or (stop is not None and stop.is_set()):
+                reason = "interrupted"
+                break
 
             budget = limits.max_seconds_per_task
             if budget is not None and time.monotonic() - start >= budget:
@@ -193,7 +206,10 @@ async def run_session(
             turns += 1
             # Doom-loop breaker: a degenerate model that makes no tool call just burns walltime.
             no_tool_turns = 0 if outcome.saw_tool_call else no_tool_turns + 1
-            if 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns:
+            if (
+                limits.max_consecutive_no_tool_turns is not None
+                and 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns
+            ):
                 reason = "no_tool_progress"
                 break
             reminders += 1
@@ -295,7 +311,7 @@ def _decide_stop(
         return "interrupted"
     if protocol_reason is not None:
         return protocol_reason
-    if turns >= limits.max_turns:
+    if limits.max_turns_per_task is not None and turns >= limits.max_turns_per_task:
         return "loop_limit"
     if limits.max_tool_calls is not None and tool_calls_total >= limits.max_tool_calls:
         return "tool_call_limit"
@@ -307,10 +323,45 @@ def _decide_stop(
 async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
     """Send one message, consume the event stream, dispatch each event."""
     outcome = _TurnOutcome()
-    ctx.transcript.write(UserMessage(message))  # record what was sent before the reply
+    if ctx.pending_warnings:
+        message = "\n\n".join([*ctx.pending_warnings, message])
+        ctx.pending_warnings.clear()
+    ctx.transcript.write(UserMessage(message))  # record the actual next-turn input
     _save_state(ctx)
+    consumer = asyncio.current_task()
+
+    async def watch_interrupt() -> None:
+        assert ctx.stop is not None and consumer is not None
+        announced = False
+        while True:
+            await asyncio.sleep(0.05)
+            if not ctx.stop.is_set():
+                continue
+            if not announced:
+                ctx.logger.log(
+                    LogComponent.ORCHESTRATOR,
+                    "INFO",
+                    "stop_requested",
+                    message="Finishing active tools; interrupt again to force stop.",
+                )
+                announced = True
+            if outcome.pending_tools and not ctx.stop.force_requested():
+                continue
+            ctx.interrupted = True
+            try:
+                async with asyncio.timeout(5):
+                    await ctx.agent.abort()
+            except Exception:
+                pass
+            finally:
+                consumer.cancel()
+            return
+
+    interrupt_watch = asyncio.create_task(watch_interrupt()) if ctx.stop is not None else None
     try:
         async for event in ctx.agent.send(message):
+            if ctx.interrupted:
+                break
             ctx.transcript.write(event)
             await _dispatch_event(event, ctx, outcome)
             _save_state(ctx)  # live: duration + cheat counter update during a long turn
@@ -326,9 +377,17 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
                 ctx.max_tool_calls is not None
                 and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
             )
-            if budget_reached or ctx.protocol.stop_reason() is not None:
+            if (
+                budget_reached
+                or ctx.protocol.stop_reason() is not None
+                or (ctx.stop is not None and ctx.stop.is_set())
+            ):
+                ctx.interrupted = ctx.stop is not None and ctx.stop.is_set()
                 await ctx.agent.abort()
                 break
+    except asyncio.CancelledError:
+        if not ctx.interrupted:
+            raise
     except Exception as exc:  # an unexpected fault in a tool or the adapter
         ctx.logger.log(
             LogComponent.LOOP,
@@ -338,6 +397,11 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
             error=f"{type(exc).__name__}: {exc}",
         )
         outcome.crashed = True
+    finally:
+        if interrupt_watch is not None:
+            interrupt_watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await interrupt_watch
     return outcome
 
 
@@ -350,9 +414,12 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
         await _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution
-            result = await _execute_framework_tool(tool, event, ctx)
+            result, notices = await _execute_framework_tool(tool, event, ctx)
             ctx.transcript.write(result)
             await ctx.agent.inject(result.output)
+            for notice in notices:
+                ctx.transcript.write(UserMessage(notice))
+                await ctx.agent.inject(notice)
             outcome.pending_tools.discard(event.id)
     elif isinstance(event, ToolResult):
         outcome.pending_tools.discard(event.id)
@@ -366,16 +433,96 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             message=event.message,
         )
         outcome.error_category = event.category
+    # Include flags raised by trusted HTTP handlers during the tool, even if the
+    # shell caught the denial and returned success. Wait for parallel calls too.
+    if isinstance(event, (ToolCall, ToolResult)) and not outcome.pending_tools:
+        await _maybe_warn_flagged(ctx)
 
 
 async def _maybe_warn_flagged(ctx: _LoopContext) -> None:
-    """Inject the flagging warning on the agent's next turn, up to ``flagging_warning_cap`` times
-    (0 = never). Capped because the message itself says repeat attempts waste budget - re-warning on
-    every flag would be self-defeating and burn the agent's context."""
+    """Deliver once at a completed-tool boundary, subject to the per-task message cap.
+
+    CLI adapters queue for the next send; Alan can inject before its next model request.
+    A terminal boundary has no subsequent request, so do not claim message delivery.
+    """
+    flags = ctx.experiment.flagged_tool_calls
+    new_flags = flags - ctx.flags_observed
+    commands = _flagged_command_context(ctx, unattributed=new_flags > ctx.attributed_flags)
+    ctx.warning_calls.clear()
+    ctx.flagged_call_ids.clear()
+    ctx.attributed_flags = 0
+    if new_flags <= 0:
+        return
+    ctx.flags_observed = flags
+    if (
+        ctx.protocol.stop_reason() is not None
+        or (ctx.stop is not None and ctx.stop.is_set())
+        or (
+            ctx.max_tool_calls is not None and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
+        )
+    ):
+        return
     if ctx.flagging_warning_cap <= 0 or ctx.warnings_injected >= ctx.flagging_warning_cap:
         return
     ctx.warnings_injected += 1
-    await ctx.agent.inject(_FLAGGING_WARNING)
+    message = _FLAGGING_WARNING + "\n\n" + commands + "\n\n" + ctx.protocol.interaction_guidance()
+    immediate = ctx.agent.capabilities().supports_inject
+    ctx.logger.log(
+        LogComponent.AGENT,
+        "WARNING",
+        "flagging_warning",
+        delivery="after_tool" if immediate else "next_turn",
+        warning_number=ctx.warnings_injected,
+    )
+    if immediate:
+        await ctx.agent.inject(message)
+        ctx.transcript.write(UserMessage(message))
+    else:
+        # CLI adapters cannot accept messages inside their current send().
+        # Add to the next send here, so the transcript shows its actual delivery.
+        ctx.pending_warnings.append(message)
+
+
+def _command_excerpt(call: ToolCall) -> str:
+    """Keep the original command (or tool arguments), with bounded middle truncation."""
+    value = call.input.get("command", call.input.get("cmd"))
+    text = (
+        value
+        if isinstance(value, str)
+        else call.name + " " + json.dumps(call.input, ensure_ascii=False)
+    )
+    if len(text) > 800:
+        text = text[:390] + " ... [truncated] ... " + text[-390:]
+    return text
+
+
+def _flagged_command_context(ctx: _LoopContext, *, unattributed: bool) -> str:
+    """Quote exact known calls; do not invent attribution for an HTTP-side flag.
+
+    Trusted HTTP handlers share a flag counter, but cannot know which concurrent
+    shell request triggered them. One pending call is unambiguous; several calls
+    are listed as candidates instead of blaming the last completed clean call.
+    """
+    known = [value for key, value in ctx.warning_calls.items() if key in ctx.flagged_call_ids]
+    uncertain = []
+    if unattributed:
+        if len(ctx.warning_calls) == 1:
+            known = list(ctx.warning_calls.values())
+        else:
+            uncertain = list(ctx.warning_calls.values())
+    lines = [f"Command flagged : '{text}'" for text in known[:5]]
+    if len(known) > 5:
+        lines.append(f"{len(known) - 5} additional flagged commands omitted.")
+    if uncertain:
+        lines.append(
+            "A flag also occurred during concurrent commands; exact attribution is unavailable. Commands in that group:"
+        )
+        lines.extend(f"- '{text}'" for text in uncertain[:5])
+        if len(uncertain) > 5:
+            lines.append(f"{len(uncertain) - 5} additional commands omitted.")
+    if not lines:
+        lines.append("Command flagged : '<command unavailable in the tool event stream>'")
+    return "\n".join(lines)
 
 
 async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
@@ -385,10 +532,13 @@ async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
     :func:`_flag_blocked_result`, which catches egress the keyword list cannot enumerate.
     Never blocks — it records a forensic count + WARNING, and (capped) nudges the agent to stop.
     """
+    ctx.warning_calls[call.id] = _command_excerpt(call)
     flags = flag_tool_call(call.name, call.input, ctx.policy)
     if not flags:
         return
     ctx.experiment.flagged_tool_calls += len(flags)
+    ctx.attributed_flags += len(flags)
+    ctx.flagged_call_ids.add(call.id)
     ctx.logger.log(
         LogComponent.AGENT,
         "WARNING",
@@ -396,7 +546,6 @@ async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
         tool=call.name,
         flags=flags,
     )
-    await _maybe_warn_flagged(ctx)
 
 
 async def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
@@ -409,15 +558,20 @@ async def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
     if not result.is_error or not flag_os_denial(result.output):
         return
     ctx.experiment.flagged_tool_calls += 1
+    ctx.attributed_flags += 1
+    ctx.flagged_call_ids.add(result.id)
     ctx.logger.log(LogComponent.AGENT, "WARNING", "flagged_tool_call", reason="egress_denied")
-    await _maybe_warn_flagged(ctx)
 
 
-async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:
+async def _execute_framework_tool(
+    tool: Tool, call: ToolCall, ctx: _LoopContext
+) -> tuple[ToolResult, list[str]]:
     """Run one framework tool and normalize its result (controlled failures stay results).
 
     Execution logging lives on the tool itself (``LoggingTool``), shared with the
     HTTP control channel and backend-executed dispatch paths.
     """
     output = await tool.call(call.input, ToolContext(cwd=ctx.cwd))
-    return ToolResult(id=call.id, output=str(output.data), is_error=output.is_error)
+    return ToolResult(
+        id=call.id, output=str(output.data), is_error=output.is_error
+    ), output.messages

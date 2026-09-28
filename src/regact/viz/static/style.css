@@ -47,19 +47,31 @@ details.think pre { color: var(--think); opacity: .85; }
 .tag-submit { background: var(--accent); }
 .tag-submit_win { background: var(--good); }
 .tag-cheat { background: var(--bad); color: #fff; }
+.tool.cwm-model { border: 2px solid #4ec9a4; }
+.tool.cwm-plan { border: 2px solid #b589f6; }
+.tool.cwm-explore { border: 2px solid #55aaff; }
+.tag-cwm-model { background: #4ec9a4; }
+.tag-cwm-plan { background: #b589f6; }
+.tag-cwm-explore { background: #55aaff; }
+.tool-success { float: right; color: var(--good); font-weight: bold; margin-left: 8px; }
 
 /* conversation: left jump-nav (submissions + cheats) beside the transcript */
 .convlayout { display: flex; gap: 16px; align-items: flex-start; }
-.convnav { width: 190px; flex: 0 0 auto; position: sticky; top: 64px; max-height: 82vh; overflow: auto;
+.convnav { width: 235px; flex: 0 0 auto; position: sticky; top: 64px; max-height: 82vh; overflow: auto;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 8px; }
 .convnav .h { color: var(--muted); font-size: 12px; padding: 4px 6px 6px; }
 .conv { flex: 1 1 auto; min-width: 0; }
-.navitem { display: block; padding: 4px 8px; margin: 2px 0; border-radius: 6px; font-size: 13px;
+.navitem { display: flex; align-items: center; gap: 8px; padding: 4px 8px; margin: 2px 0; border-radius: 6px; font-size: 13px;
   cursor: pointer; border-left: 3px solid var(--line); color: var(--fg); }
 .navitem:hover { background: var(--panel2); }
 .navitem.nav-submit { border-left-color: var(--accent); }
 .navitem.nav-submit_win { border-left-color: var(--good); }
 .navitem.nav-cheat { border-left-color: var(--bad); }
+.navitem.nav-cwm-model { border-left-color: #4ec9a4; }
+.navitem.nav-cwm-plan { border-left-color: #b589f6; }
+.navitem.nav-cwm-explore { border-left-color: #55aaff; }
+.navitem .nav-label { min-width: 0; overflow-wrap: anywhere; }
+.navitem .tool-success { float: none; flex-shrink: 0; margin-left: auto; }
 .tool .t { padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 13px; }
 .tool .t b { color: var(--accent); }
 /* Long call args scroll in place, same as a long result body (no "…" truncation). */

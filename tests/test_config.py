@@ -23,7 +23,7 @@ def test_run_config_defaults() -> None:
     assert cfg.problem.tasks == []
     assert cfg.problem.lifecycle is Lifecycle.MULTI_INSTANCE
     assert cfg.problem.obs_mode is ObsMode.RAW
-    assert cfg.limits.max_turns > 0
+    assert cfg.limits.max_turns_per_task > 0
     assert cfg.sandbox is False
 
 
