@@ -89,6 +89,7 @@ class ManagedCoordinator:
         self.milestones: list[dict[str, Any]] = []
         self.terminal: str | None = None
         self.deadline = float("inf")
+        self.step_timings: dict[str, float] = {}  # per RunController call; see _note_timing
         self.context: ProtocolContext | None = None
         self.accepted: dict[str, Any] | None = None
         self.states: dict[int, Any] = {}
@@ -268,6 +269,13 @@ class ManagedCoordinator:
             self.event("dataset_prepared", **self.initial_collection)
             self.persist()
 
+    def _note_timing(self, phase: str, seconds: float) -> None:
+        """Total and slowest duration per phase, so a call that overruns its deadline shows
+        which uninterruptible part (native step, durable store commit) took the time."""
+        total, slowest = f"{phase}_seconds", f"{phase}_max_seconds"
+        self.step_timings[total] = self.step_timings.get(total, 0.0) + seconds
+        self.step_timings[slowest] = max(self.step_timings.get(slowest, 0.0), seconds)
+
     def _reset(self, purpose: str, **metadata: Any) -> dict[str, Any]:
         if self.episode is not None:
             self.store.finish_episode(self.episode, "reset", {})
@@ -294,8 +302,12 @@ class ManagedCoordinator:
         self.problem.validate_controller_action(action)
         before = json.loads(canonical(self.env.live.last_obs.to_json()))
         try:
+            started = time.monotonic()
             after = self.env.live.step(action).to_json()
+            stepped = time.monotonic()
             evidence = self.store.record_step(self.episode, before, action, after)
+            self._note_timing("native_step", stepped - started)
+            self._note_timing("record_step", time.monotonic() - stepped)
         except InvalidActionError:
             raise
         except Exception:
@@ -609,6 +621,8 @@ class ManagedCoordinator:
             evidence: dict[str, Any] = {}
             role = "model"
             call_started = time.monotonic()
+            self.step_timings = {}
+            worker = controller = None
             try:
                 deadline = min(
                     self.deadline,
@@ -740,6 +754,14 @@ class ManagedCoordinator:
                 result["error_type"] = "framework_failure"
                 result["history_complete"] = False
             result["elapsed_seconds"] = time.monotonic() - call_started
+            result["timings"] = {
+                **self.step_timings,
+                **{
+                    f"{name}_close_seconds": proc.close_seconds
+                    for name, proc in (("model_worker", worker), ("controller_worker", controller))
+                    if getattr(proc, "close_seconds", None) is not None
+                },
+            }
             result["stop_reason"] = reason
         metrics = self.problem.compute_episode_metrics(
             Obs.from_json(obs), steps=result["real_actions"]

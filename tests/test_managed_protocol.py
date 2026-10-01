@@ -341,3 +341,15 @@ async def test_vanilla_feedback_transport_and_limits(make_rig):
     assert value["current_observation_id"] == 4
     reset = await ManagedTool("ResetEnvironment", c).call({}, ToolContext(cwd=str(c.workdir)))
     assert json.loads(reset.data)["current_observation_id"] == 1
+
+
+@pytest.mark.parametrize("protocol", ["vanilla", "cwm"])
+def test_controller_call_reports_where_its_time_went(make_rig, protocol):
+    """A call that overran its deadline on a cluster could not say whether the native step,
+    the durable store commit or the worker teardown held it; each call now records them."""
+    c = make_rig(protocol)
+    exploration(c, (1, 1))
+    timings = c.tool("RunController", {})["timings"]
+    for phase in ("native_step", "record_step"):
+        assert timings[f"{phase}_seconds"] >= timings[f"{phase}_max_seconds"] >= 0
+    assert timings["controller_worker_close_seconds"] >= 0

@@ -20,6 +20,8 @@ from regact.protocols.cwm.config import ExecutionConfig
 from regact.protocols.cwm.store import canonical
 from regact.security.runtime import SandboxRuntime, make_wrapper, resolve
 
+_KILL_WAIT_SECONDS = 10
+
 
 class WorkerError(RuntimeError):
     def __init__(self, message: str, *, kind: str = "code_error") -> None:
@@ -69,7 +71,15 @@ class Worker:
             deny_read=deny_read or [],
         )
         argv = wrap(
-            [sys.executable, "-I", "-B", str(entry), str(bundle), str(config.max_memory_mb), str(int(load_model))]
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(entry),
+                str(bundle),
+                str(config.max_memory_mb),
+                str(int(load_model)),
+            ]
         )
         if backend is SandboxRuntime.SEATBELT:
             # Generic agent profile allows host localhost; workers must not.
@@ -202,10 +212,20 @@ class Worker:
         if self.closed:
             return
         self.closed = True
+        started = time.monotonic()
+        try:
+            self._shutdown()
+        finally:
+            self.close_seconds = time.monotonic() - started
+
+    def _shutdown(self) -> None:
         if hasattr(self, "proc"):
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self.proc.pid, signal.SIGKILL)
-            self.proc.wait()
+            # A process stuck in uninterruptible I/O (shared storage) ignores SIGKILL until the
+            # I/O returns; waiting on it unbounded held the coordinator for minutes.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self.proc.wait(timeout=_KILL_WAIT_SECONDS)
             for stream in (self.proc.stdin, self.proc.stdout):
                 if stream:
                     stream.close()
