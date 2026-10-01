@@ -118,6 +118,42 @@ async def test_alan_runner_waits_before_next_iteration(monkeypatch):
     assert frames[1]["text"] == "continued after warning"
 
 
+async def test_alan_runner_close_while_paused_shuts_agent_down(monkeypatch):
+    """A close received at a paused tool result must end the command loop and run agent.close(),
+    not leave the child waiting until the parent SIGKILLs it (transcript never finalized)."""
+    from regact.agent import alan_runner
+
+    frames = []
+    commands = iter([{"cmd": "start"}, {"cmd": "send", "message": "go"}, {"cmd": "close"}])
+
+    async def read():
+        return next(commands, None)
+
+    class Agent:
+        closed = False
+        stream_closed = False
+
+        async def query_events_async(self, message):
+            try:
+                yield ToolResult("tool", "result")
+                yield ToolResult("tool", "never reached")
+            finally:
+                Agent.stream_closed = True
+
+        async def close(self):
+            Agent.closed = True
+
+    monkeypatch.setattr(alan_runner, "_read_command", read)
+    monkeypatch.setattr(alan_runner, "_write", frames.append)
+    monkeypatch.setattr(alan_runner, "_build", lambda command: Agent())
+    monkeypatch.setattr(alan_runner, "_assembled_prompt", lambda agent: "")
+    monkeypatch.setattr("regact.agent.alan_adapter.map_alan_events", lambda event: [event])
+
+    assert await asyncio.wait_for(alan_runner._serve(), timeout=2) == 0
+    assert Agent.closed and Agent.stream_closed
+    assert frames[-1]["type"] == alan_runner.TURN_END
+
+
 async def test_alan_parent_injects_before_acknowledgement(tmp_path):
     from regact.agent.alan_subprocess import AlanSubprocessAgent
     from test_alan_subprocess import _start_scripted_child
