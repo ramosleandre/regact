@@ -3,7 +3,7 @@
 The **controller** is always-on core: every `policy_search` run has the agent write an
 `act(obs) -> action` policy in `solution.py` and submit it (`SubmitSolution` / `ExitTask`),
 scored by rolling episodes on the env. It is **not** a feature - see
-[Controller](#controller) below. The controller may keep internal state between
+[Policy-search controller](#policy-search-controller) below. The controller may keep internal state between
 actions; evaluation constructs a new controller for each episode.
 
 A **feature** is an optional additive capability inside `policy_search`. It bundles
@@ -14,7 +14,9 @@ CWM is a separate [experiment protocol](protocols.md), selected with
 `protocol=cwm features=none`. The retired `features=cwm` setting produces a migration
 error. Its verifier and controller-coupled implementation have been removed.
 
-## Controller
+Vanilla is also a protocol, not a feature. Both managed protocols require `features=none` and use `protocol.*` settings; `controller.*` does not tune their `RunController` command. See [Managed execution](managed_protocols.md) for their controller and budget contracts.
+
+## Policy-search controller
 
 The controller is configured under `controller.*` (group
 [`conf/controller/`](../src/regact/conf/controller/)), not as a feature. Its knobs:

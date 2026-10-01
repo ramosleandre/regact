@@ -9,6 +9,8 @@ The **agent** is the backend that writes the code. regact ships four:
 | `codex` | codex CLI | the `codex` CLI, authenticated |
 | `alan` | Alan Code, run in a sandboxable child process against an OpenAI-compatible endpoint | `make install-agents` |
 
+Agent selection is independent of the [experiment protocol](protocols.md). The selected protocol supplies its instructions and framework commands. A backend's `tool_protocol` describes how it invokes tools; it does not select `vanilla`, `cwm` or `policy_search`.
+
 ## Use an agent
 
 Pick a backend by group name and override any field with a dotted path. The fields come
@@ -30,10 +32,13 @@ The config groups are in [`conf/agent/`](../src/regact/conf/agent/):
 
 - **`claude.yaml`** — `model` (`opus`/`sonnet`/a full id), `args.permission_mode`,
   `args.effort` (`low…max`).
-- **`codex.yaml`** — `model` (e.g. `gpt-5.5`), `args.reasoning_effort` (`low|medium|high`).
+- **`codex.yaml`** — `model`, `args.reasoning_effort`, and `args.subagents_enabled`. Supported model/effort combinations depend on the installed CLI and account; the YAML is a preset, not a complete model catalogue.
 - **`alan.yaml`** — `model` (`openai/<name>`), `base_url`, `api_key`, and `args`
   (`permission_mode`, `max_output_tokens`, `context_window`, `backend`).
 - **`scripted.yaml`** — just `name`.
+- **`alan_remote.yaml`** — the Alan backend driven through its HTTP remote interface, without model API calls. It selects `backend: scripted` and structured native tool calls (`tool_protocol: client_cli`), rather than asking Alan to extract tool calls from prose. Choose it with `agent=alan_remote`; it is a preset, not another agent implementation.
+
+For a manual remote session, read the endpoint emitted by the Alan runner and use its `/api/respond` interface with structured `tool_calls`. The outer Regact tool/task budgets still apply while the remote session is waiting. This is distinct from `agent=scripted`, Regact's deterministic test backend. Exposing the local remote endpoint through the agent sandbox may require an appropriate local-network configuration; changing that does not grant submitted vanilla/CWM workers network access.
 
 ### Installing the CLI agents
 
@@ -87,6 +92,6 @@ Then declare the sandbox seams so the OS sandbox can confine it:
 > **`tool_protocol`.** The scripted backend uses `native` (in-process framework tools).
 > Subprocess agents use `client_cli` (their own bash/file tools), `bash_block` (a fenced
 > Bash command), `hermes_xml` (Qwen/Hermes-style markup), or `glm` (GLM-style markup).
-> All subprocess protocols invoke SubmitSolution/ExitTask through the workdir's HTTP
-> control channel. For Alan, select the dialect with `agent.args.tool_protocol`; the
+> Subprocess agents reach the selected protocol's framework commands through the workdir's HTTP
+> control channel: `framework/control.py` for policy search, `framework/commands.py` for vanilla/CWM. For Alan, select the dialect with `agent.args.tool_protocol`; the
 > prompt and the backend parser must agree on that format.

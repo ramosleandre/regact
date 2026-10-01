@@ -1,66 +1,71 @@
 # Experiment protocols
 
-## Status
+A **protocol** defines what the coding agent is asked to produce, which framework commands it can use, how interaction is controlled, and when the task is complete. Select one protocol per task with `protocol=...`.
 
-There are two runnable protocols:
+This page describes the current architecture, including **CWM v5**. “v5” names the design generation, not a CLI value or an accepted CWM's `cwm_version`.
+
+## Choose a protocol
+
+There are three runnable protocols:
 
 - **`policy_search`** (default): write and evaluate `solution.py`.
-- **`cwm`**: pre-fill real observations with a bounded random policy, start the
-  agent with model construction, then validate the model and simulation-check
-  exploration controllers before running them in a fresh real environment.
+- **`vanilla`**: inspect recorded experience and run observation-based controllers through `RunController`.
+- **`cwm`**: use the same managed environment and controller execution, with mandatory CWM validation and per-action prediction checks. Controllers receive parsed CWM States instead of observations.
 
-Select CWM with `protocol=cwm features=none`. Its options are in
-[`conf/protocol/cwm.yaml`](../src/regact/conf/protocol/cwm.yaml). It requires
-`problem.lifecycle=multi_instance` and OS-isolated code workers. Its three tools
-are UpdateCodeWorldModel, PlanInCWM and SubmitExplorationController. It does not
-register SubmitSolution or ExitTask and does not perform a final policy re-score.
+| | `vanilla` | `cwm` | `policy_search` |
+|---|---|---|---|
+| Main artifacts | `controller.py` | `world_model/*.py`, `controller.py` | `solution.py` |
+| Main commands | `RunController` | `UpdateCodeWorldModel`, `RunController` | `SubmitSolution`, optional `ExitTask` |
+| Direct agent environment access | No | No | Through the environment client |
+| `single_instance` | Supported | Supported | Rejected with the current on-environment evaluator |
+| `multi_instance` | Fresh start per call | Fresh start per call | Fresh evaluation episodes |
+| Independent final policy evaluation | No | No | Yes |
 
-CWM initialization targets `protocol.n_unique_observations_in_initial_collection=20`, bounded by
-`protocol.max_actions_per_initial_collection=1000` and
-`protocol.max_seconds_per_initial_collection=30`. Action selection uses the problem
-seed (0 if unspecified); environment resets still use `problem.seed` as configured.
-All initial actions are logged and charged to the total real-action budget.
-The agent starts in **CWM Modeling**, even if a collection cap stops prefill below target.
-The other phase is **Active Exploration**; initialization is not an agent phase.
-The current dataset API hides prefill targets and uses explicit unique/total counters.
-CWM workspaces expose data/control/exploration helpers, without `make_env.py` or
-`cwm_client.py`; direct environment endpoints reject and flag calls in every phase. Exploration feedback provides compact observation/transition ID ranges and up to `protocol.n_tmp_images_saved_per_exploration=8` temporary PNG previews.
+For the agent workflow, API and complete parameter tables, read [Managed execution](managed_protocols.md), then [CWM v5](cwm.md) for the additional modeling contract. Both problem config groups still default to `multi_instance`; explicitly select `problem.lifecycle=single_instance` for persistent interaction.
 
-`protocol.workspace_helpers_enabled=true` additionally supplies `framework/simulation.py`,
-containing the local `EnvCWM` environment, its convenience factory and a controller runner.
-These use current workspace code; acceptance and real interaction remain the
-responsibility of the three framework tools.
+`controller.*` configures policy-search evaluation, not vanilla/CWM. `features.*` is also specific to policy search; managed protocols require `features=none`.
 
-“Policy search” means that the code agent develops and evaluates a policy in
-`solution.py`. “Controller” remains the name of that Python artifact and its
-existing `controller.*` evaluation settings. An experiment protocol is different
-from `agent.args.tool_protocol`, which selects the syntax used to invoke tools.
+Protocol configuration lives in [conf/protocol/](../src/regact/conf/protocol/). CWM's planner is disabled by default and its instructions/files are omitted when disabled. Both managed protocols require OS-isolated submitted-code workers, even when the coding agent's own sandbox is disabled.
+
+“Policy search” means developing and evaluating a reusable policy in `solution.py`. An experiment protocol is distinct from `agent.args.tool_protocol`, which selects the syntax used to invoke tools. `problem.lifecycle` controls environment persistence, not the lifetime of a controller object.
 
 ## Agent instructions and workspace helpers
 
-Both protocols use `PromptBuilder` for terminal syntax, command presentation and
+All protocols use `PromptBuilder` for terminal syntax, command presentation and
 optional verbalization hints. Each supplies its own workflow content. CWM wording
 lives in `src/regact/protocols/cwm/prompts/`; the generated workspace contains:
 
 - `docs/CWM_modeling_phase.md`: CWM implementation, validation, code isolation and shared limits.
-- `docs/active_exploration_phase.md`: controller submission and two-stage feedback.
+- `docs/active_exploration_phase.md`: real controller submission, feedback and stopping conditions.
 - `docs/plan_in_CWM.md`: optional goal-based planning.
 
 The docstrings in `framework/data_api.py` document data access, returned fields and examples.
 There is no additional CWM_INTERFACE.md. `world_model/` contains only agent-managed CWM files.
 
 The system prompt gives the workflow and an inventory of the files actually supplied
-for that game/configuration. Phase documents show the configured limits. The game
+for that game/configuration. The modeling and optional planner documents show relevant configured limits; runtime budget errors name their effective parameter and value. The game
 section comes from the problem's prompt method; under CWM it uses observation
 dictionaries and does not suggest policy-search submission commands.
 
 Game helpers are supplied as `framework/arc_agi_helper.py` or
-`framework/minigrid_helper.py`. Import them from `framework`, in either protocol.
+`framework/minigrid_helper.py`. Import them from `framework`, in any protocol.
 CWM no longer creates an unused `code_library/`; policy search retains that directory
 for its controller templates and agent-authored scripts. Existing run workspaces
 and frozen submissions are not rewritten.
 
 ## Ownership
+
+`protocols/managed/` owns shared environment lifetime, resets, initial collection, dataset access, isolated fresh controllers, action/time limits, metrics and tool transport. CWM specializes validation, planning and prediction hooks; vanilla uses observations directly. Vanilla does not inherit the CWM protocol. The existing policy-search evaluator remains separate.
+
+The scientific comparison is **requiring and validating an explicit CWM versus not requiring one**. Vanilla agents remain free to write predictive code. Match agent/model, game, seed, lifecycle, collection settings and budgets when comparing protocols; CWM validation/prediction adds computation even with equal real-action budgets.
+
+## Execution references
+
+- [Managed execution](managed_protocols.md) defines call versus episode, single-/multi-instance behavior, explicit resets, controller callbacks, dataset access and all shared budget scopes.
+- [CWM v5](cwm.md) defines the two phases, accepted snapshots, per-action validation, optional local simulation/planning, CWM-specific parameters and limitations.
+- [Experiments](experiments.md) describes saved evidence and conversation/CWM playback. Call trajectories are reconstructed on demand from recorded observations.
+
+## Runtime extension points
 
 | Shared runtime | Selected protocol |
 | --- | --- |
@@ -73,8 +78,8 @@ and frozen submissions are not rewritten.
 The runner selects one `ExperimentProtocol` per task. After the environment and
 workspace exist, `bind(ProtocolContext)` creates its `ProtocolSession`. A session
 provides tools, hooks, a reminder, a stop reason, and an optional `prepare(stop)`
-step before the agent starts. The default preparation is a no-op; CWM uses it for
-random prefill. Protocols also choose whether the workspace exposes an environment
+step before the agent starts. The default preparation is a no-op; both managed protocols use it for
+random prefill. Dry runs skip preparation and agent execution. Protocols also choose whether the workspace exposes an environment
 client (`exposes_environment`). The shared loop does not
 interpret submission counts, scores, or CWM phases.
 
@@ -87,7 +92,7 @@ retain their existing behavior.
 
 ## Preserving existing experiments
 
-Existing launch commands require no changes. The explicit selection is:
+Existing policy-search launch commands retain their workflow. The explicit selection is:
 
 ```sh
 python -m regact.run_exp protocol=policy_search agent=codex problem=minigrid
@@ -103,7 +108,7 @@ without a model call.
 The feature mechanism is composed **inside policy_search**. It remains an
 extension point for additive capabilities, not alternative workflows. The old
 `features=cwm` launch is retired and fails with a migration message: use
-`protocol=cwm features=none` and `protocol.*` parameters. The old implementation, verifier and launchers have been removed. Only the config
+`protocol=cwm features=none` and `protocol.*` parameters. The old feature implementation and verifier have been removed. Only the config
 sentinel remains so old invocations receive that migration message.
 
 ## Adding another protocol
@@ -132,42 +137,23 @@ CWM's viewer tab reads its database and reconstructs real episodes or saved
 predicted paths on demand; it does not store videos or reinterpret explorations
 as policy-search submissions.
 
-## Regression evidence
+## Regression coverage
 
-`tests/test_protocols.py` checks 60 supported prompt variants and two workspace layouts
-against SHA-256 fingerprints captured from pre-refactor commit
-`728aa2079aeaa947cb8cb215a481160995d99d9a`. The matrix covers every tool syntax,
-ExitTask on/off, both lifecycle prompt variants and the optional
-verbalization hints. The fingerprint comparison allows the explicit numeric-reward wording update from September 28; all other shared policy-search prompt text is checked unchanged. Testing single-instance text does not enable its rejected
-on-environment evaluation configuration.
+Vanilla and CWM assemble their briefs through [managed/prompting.py](../src/regact/protocols/managed/prompting.py) and its Markdown templates. Role, game instructions, terminal syntax, dataset access, preview images and execution rules are shared. [test_managed_prompt.py](../tests/test_managed_prompt.py) checks that only Working directory, Workflow and Framework commands differ for matching settings.
 
-The existing integration tests cover evaluation failures, perfect-score stopping,
-ExitTask, finalization, retries and waiting for enclosing/parallel tool results.
-An independent toy protocol test verifies that the common runner can operate
-without controller artifacts or submission semantics and still enforces limits.
+[test_protocols.py](../tests/test_protocols.py) covers the protocol boundary and retained policy-search behavior, including prompt compatibility. Evaluation tests cover failed episodes, perfect-score stopping, ExitTask, finalization, retries and outstanding tool completion. A toy protocol exercises the shared runner without policy artifacts.
 
-`tests/test_cwm_protocol.py` exercises phase boundaries, validation, planning,
-fresh simulation/real controllers, counterexamples, request deduplication, deadlines,
-shutdown, immutable snapshots, filesystem isolation and reconstructed playback.
-`scripts/local/cwm_v4_remote.sh` provides a no-token-cost Alan remote walkthrough.
+[test_managed_protocol.py](../tests/test_managed_protocol.py) and [test_cwm_protocol.py](../tests/test_cwm_protocol.py) exercise lifecycle, resets, fresh controllers, validation, planning, counterexamples, deduplication, deadlines, isolated snapshots and replay. The `agent=alan_remote` preset enables manual interface checks without model API calls; see [Agents](agents.md).
 
 ## Feedback and diagnostics
 
-CWM tool arguments are empty: fixed world-model files, `goal.py`, and `exploration.py`.
-Validation returns Accepted / Refused / Incomplete. Accepted models use stable
-`cwm_version` values; internal dataset freshness uses `dataset_version`. Transport
-retry IDs and source-bundle hashes are not ordinary agent feedback.
+Managed commands take no arguments and read fixed workspace files. Transport retry IDs and source hashes are retained for bookkeeping rather than presented as ordinary agent tasks. CWM validation returns Accepted / Refused / Incomplete; `cwm_version` and `dataset_version` identify accepted code and evidence, not quality scores.
 
-The coordinator produces phase notices centrally. Tool output carries optional
-messages; CLI-backed agents see them after the JSON in their shell result, while
-native dispatch injects them separately. A replay repeats no work or phase notice.
-First-time real milestones appear in the exploration result with evidence IDs.
+The coordinator creates phase notices centrally. CLI-backed agents see them after the JSON result, while native dispatch injects them separately. A replay repeats no work or phase notice. Keep-alive reminders use the same phase description as transitions.
 
-The CWM viewer compares diagnostic images and retains raw evidence. Tool-result
-images are shown only when their bytes were delivered in the backend event; a
-printed file path is not an image delivery. Some backends omit native image events.
+First-time real milestones and evidence IDs appear in controller feedback. See [the data API](managed_protocols.md#dataset-api) for counters, pagination and images, and [CWM validation](cwm.md#interpret-validation-feedback) for counterexamples and error meanings.
 
-All Regact-owned `max_*` settings accept `null` to disable that cap. `limits.max_turns_per_task` counts outer agent send cycles; `limits.max_actions_per_episode` renews on reset. CWM simulation and real episodes have independent `protocol.execution.max_seconds_per_episode` allowances. Data byte limits guard bulk queries; single records/images remain readable.
+## Flagging
 
 Flagging warnings quote the originating command (up to 800 characters, with middle
 truncation). Exact tool-call/result flags keep their call ID internally. A trusted
@@ -176,3 +162,19 @@ the warning lists candidate commands and states that uncertainty. Alan receives
 warnings after completed tools; CLI agents receive queued warnings on their next
 outer send cycle, if the task continues. `flagging_warning_cap=0` disables warning
 messages but retains flag recording.
+
+## Migration from earlier CWM versions
+
+| Earlier interface | Current interface |
+|---|---|
+| Agent-operated initial collection / phase 0 | Framework prepares bounded random data before the agent starts |
+| Numbered phases | **CWM Modeling** and **Active Exploration** |
+| `SubmitExplorationController` | `RunController` |
+| `exploration.py` | `controller.py` |
+| Managed `framework/control.py` | `framework/commands.py` |
+| `framework/cwm_data.py` | `framework/data_api.py` |
+| `framework/simulation.py` or an agent-owned model environment | `framework/cwm_env.py` plus editable `simulate.py` |
+| Preliminary simulated episode / novelty gate | Direct real execution with per-action checks; local simulation is optional |
+| `protocol.execution.max_seconds_per_episode` | Removed; use `protocol.execution.max_seconds_per_controller_call` |
+
+Policy search retains its own `solution.py`, `framework/control.py` and evaluation settings. Existing saved runs/workspaces are not rewritten. Historical field names in their logs describe the implementation that produced them. Current limitations and deferred changes are listed in [CWM v5](cwm.md#scientific-and-operational-limitations).
