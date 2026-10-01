@@ -39,7 +39,7 @@ print(obs["available_actions"])
 data_api.save_image("current.png", observation_id=obs_id)
 ```
 
-The agent then opens `current.png` with its own image-reading tool. Dataset reads and image creation take no game actions. The default `first_obs_in_prompt=false` keeps the initial grid out of the first message.
+A vision agent then opens `current.png` with its own image-reading tool; a text-only agent is told to analyse the arrays instead. Dataset reads and image creation take no game actions. The default `first_obs_in_prompt=false` keeps the initial grid out of the first message.
 
 ### 3. Implement a controller
 
@@ -170,7 +170,7 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 | `protocol.max_actions_per_exploration` | `2500` | Real actions in one `RunController`; the name remains for compatibility |
 | `protocol.n_tmp_images_saved_per_exploration` | `8` | Maximum automatic previews per call; `0` disables them |
 | `protocol.execution.max_seconds_per_call` | `5` | One isolated callback/startup, including communication and serialization |
-| `protocol.execution.max_seconds_per_controller_call` | `120` | One `RunController` execution, including submitted-code startup and CWM/controller computation |
+| `protocol.execution.max_seconds_per_controller_call` | `90` | One `RunController` execution, including submitted-code startup and CWM/controller computation; below the agents' 120 s shell timeout |
 | `protocol.execution.max_memory_mb` | `512` | MiB per isolated submitted-code process |
 | `protocol.feedback.max_counterexamples` | `5` | Counterexamples included in CWM feedback; shared schema, normally unused by vanilla |
 | `protocol.feedback.max_diff_items` | `6` | Structural differences displayed per comparison |

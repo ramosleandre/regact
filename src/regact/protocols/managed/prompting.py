@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from regact.agent.capabilities import ToolProtocol
+from regact.agent.capabilities import ToolProtocol, is_vision_agent
 from regact.config.schema import Lifecycle, RunConfig
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
@@ -70,7 +70,12 @@ def workspace_tree(
     return "\n".join(rows)
 
 
-def image_preview_instructions(count: int) -> str:
+def image_preview_instructions(count: int, *, can_view_images: bool = True) -> str:
+    if not can_view_images:
+        return (
+            "Your tools cannot display images: read observations as arrays through "
+            "`framework.data_api` and analyse them in code."
+        )
     if count == 0:
         return (
             "Automatic image previews are disabled. Use `framework.data_api.save_image` "
@@ -119,7 +124,10 @@ def build_prompt(
         "workspace.md",
         WORKSPACE_TREE=tree,
         WORKSPACE_EXTENSIONS=workspace_extensions.strip() + " " if workspace_extensions else "",
-        IMAGE_PREVIEWS=image_preview_instructions(options.n_tmp_images_saved_per_exploration),
+        IMAGE_PREVIEWS=image_preview_instructions(
+            options.n_tmp_images_saved_per_exploration,
+            can_view_images=is_vision_agent(config.agent.name),
+        ),
     )
     workflow = _render(
         "workflow.md",

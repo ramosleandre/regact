@@ -41,7 +41,7 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
     prompts = {}
     for name in ("vanilla", "cwm"):
         config = RunConfig(
-            AgentConfig(AgentName.SCRIPTED),
+            AgentConfig(AgentName.CLAUDE),  # a vision agent: image previews are offered
             ProblemConfig(problem.name, lifecycle=lifecycle),
             protocol=ProtocolConfig(
                 name,
@@ -116,3 +116,25 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
     )
     commands_file = next(f.content for f in files if f.relpath == "framework/commands.py")
     assert "Run a framework command" in commands_file and "CWM" not in commands_file
+
+
+@pytest.mark.parametrize("name", ["vanilla", "cwm"])
+def test_text_only_agent_is_not_told_to_open_images(name):
+    """An Alan agent has no image-reading tool; pointing it at one wasted pilot calls."""
+    problem = ArcAgiProblem(
+        environments_dir=str(Path(__file__).resolve().parents[1] / "environnement")
+    )
+    config = RunConfig(
+        AgentConfig(AgentName.ALAN), ProblemConfig(problem.name), protocol=ProtocolConfig(name)
+    )
+    protocol = build_protocol(config)
+    commands = enabled_commands(protocol.options) if name == "cwm" else {"RunController": ""}
+    prompt = protocol.build_system_prompt(
+        problem,
+        "ls20",
+        tool_protocol="hermes_xml",
+        tool_names=[*commands, *problem.reset_commands()],
+        verbalize_variant="off",
+    )
+    assert "image-reading tool" not in prompt
+    assert "cannot display images" in prompt

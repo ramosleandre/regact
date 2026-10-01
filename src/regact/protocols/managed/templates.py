@@ -60,7 +60,7 @@ Example from a workspace script:
     print(observations[0]["available_actions"])
     data_api.save_image("observation.png", observation_id=ids[0])
 
-Then open observation.png with your image-reading tool. Saving a PNG prints its path and returns None; it does not display the image to you automatically. The function docstrings also cover transition and diagnostic images.
+If your tools can display images, open observation.png; otherwise analyse the arrays from load_observations. Saving a PNG prints its path and returns None; it does not display the image to you automatically. The function docstrings also cover transition and diagnostic images.
 """
 import base64
 from pathlib import Path
