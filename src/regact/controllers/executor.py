@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -31,6 +32,12 @@ from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
+
+# The agent's own modules, zipped per submission: a solution.py importing its policy from
+# code_library/ would otherwise leave the real controller unrecorded. One file keeps inodes flat.
+_POLICY_ARCHIVE = "policy.zip"
+_POLICY_ARCHIVE_SKIP_DIRS = frozenset({"framework", "submissions", "__pycache__"})
+_POLICY_ARCHIVE_MAX_FILE_BYTES = 1_000_000
 
 # Metric callables: the problem supplies these (it knows what its score means);
 # a generic default is used when none is injected.
@@ -638,6 +645,30 @@ def _snapshot_solution(solution_path: str, output_path: str) -> None:
     os.makedirs(dest_dir, exist_ok=True)
     with contextlib.suppress(OSError):
         shutil.copyfile(solution_path, os.path.join(dest_dir, "solution.py"))
+    with contextlib.suppress(OSError, zipfile.BadZipFile):
+        _archive_policy(os.path.dirname(os.path.abspath(solution_path)), dest_dir)
+
+
+def _archive_policy(workdir: str, dest_dir: str) -> None:
+    """Zip every ``.py`` the agent can import from its workdir (framework code, submissions,
+    hidden dirs and symlinks excluded, so nothing outside the workdir is read)."""
+    with zipfile.ZipFile(os.path.join(dest_dir, _POLICY_ARCHIVE), "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(workdir):
+            dirs[:] = sorted(
+                d
+                for d in dirs
+                if d not in _POLICY_ARCHIVE_SKIP_DIRS
+                and not d.startswith(".")
+                and not os.path.islink(os.path.join(root, d))
+            )
+            for name in sorted(files):
+                path = os.path.join(root, name)
+                if (
+                    name.endswith(".py")
+                    and not os.path.islink(path)
+                    and os.path.getsize(path) <= _POLICY_ARCHIVE_MAX_FILE_BYTES
+                ):
+                    zf.write(path, os.path.relpath(path, workdir))
 
 
 def _src_dir() -> str:

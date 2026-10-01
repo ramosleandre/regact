@@ -51,7 +51,9 @@ def _server() -> EnvServer:
 
 
 @pytest.mark.parametrize("max_moves", [10, None])
-async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path, max_moves: int | None) -> None:
+async def test_sandboxed_executor_scores_via_subprocess(
+    tmp_path: Path, max_moves: int | None
+) -> None:
     workdir = str(tmp_path / "wd")
     server = _server()
     async with serve_env(server, "g", in_process=False) as conn:
@@ -178,3 +180,30 @@ async def test_sandboxed_executor_shadow_replay_scores_on_trusted_env(tmp_path: 
         )
     assert result.executor == "shadow_replay"  # scored by the trusted replay, not the subprocess
     assert result.aggregate["success_rate"] == 1.0
+
+
+def test_snapshot_archives_the_agents_modules_not_framework_or_outside_files(tmp_path) -> None:
+    """A shim solution.py (``from code_library.policy import ...``) must not lose the real
+    controller: every agent .py is zipped next to it, and nothing outside the workdir is read."""
+    import zipfile
+
+    from regact.controllers.executor import _snapshot_solution
+
+    work = tmp_path / "workdir"
+    (work / "code_library").mkdir(parents=True)
+    (work / "framework").mkdir()
+    (work / ".alan").mkdir()
+    (work / "solution.py").write_text("from code_library.policy import get_controller\n")
+    (work / "code_library" / "policy.py").write_text("def get_controller(): ...\n")
+    (work / "framework" / "make_env.py").write_text("# ours\n")
+    (work / ".alan" / "hidden.py").write_text("# agent harness state\n")
+    outside = tmp_path / "secret.py"
+    outside.write_text("TOKEN = 'x'\n")
+    (work / "code_library" / "leak.py").symlink_to(outside)
+    out = work / "submissions" / "0" / "results.json"
+
+    _snapshot_solution(str(work / "solution.py"), str(out))
+
+    with zipfile.ZipFile(out.parent / "policy.zip") as zf:
+        assert sorted(zf.namelist()) == ["code_library/policy.py", "solution.py"]
+    assert (out.parent / "solution.py").read_text().startswith("from code_library")
