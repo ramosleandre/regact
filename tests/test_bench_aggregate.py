@@ -580,3 +580,82 @@ def test_budget_used_separates_a_run_that_died_at_its_budget_from_one_that_died_
     assert rows["at_budget"]["budget_used"] == 1.0
     assert rows["died_early"]["budget_used"] == 0.003
     assert rows["at_budget"]["outcome"] == "no-final"  # the verdict itself is unchanged
+
+
+def _mk_managed_run(task_dir: Path, *, protocol: str, calls: list[dict], validations=()) -> None:
+    """A vanilla/CWM run dir: no submissions, its evidence in cwm/experience.sqlite3."""
+    import sqlite3
+
+    task_dir.mkdir(parents=True)
+    config = {"agent": {"name": "alan", "model": "m"}, "protocol": {"name": protocol}}
+    (task_dir / "config.json").write_text(json.dumps(config))
+    (task_dir / "logs").mkdir()
+    (task_dir / "logs" / "experiment_state.json").write_text(
+        json.dumps({"exit_reason": "walltime_limit", "submission_count": 0})
+    )
+    (task_dir / "workdir").mkdir()
+    (task_dir / "cwm").mkdir()
+    con = sqlite3.connect(task_dir / "cwm" / "experience.sqlite3")
+    con.execute(
+        "CREATE TABLE records(id INTEGER PRIMARY KEY, kind TEXT, status TEXT, payload TEXT)"
+    )
+    for call in calls:
+        con.execute(
+            "INSERT INTO records(kind, status, payload) VALUES ('exploration', 'completed', ?)",
+            (json.dumps(call),),
+        )
+    for status in validations:
+        con.execute(
+            "INSERT INTO records(kind, status, payload) VALUES ('validation', ?, '{}')", (status,)
+        )
+    con.commit()
+    con.close()
+
+
+def test_managed_run_scores_its_best_call_and_counts_cwm_evidence(tmp_path: Path) -> None:
+    """vanilla/CWM have no final re-score: the cell is the BEST controller call, a walltime end
+    is their designed ending (not an unreliable `walltime`), and CWM evidence is counted."""
+    calls = [
+        {
+            "aggregate": {
+                "n_episodes": 1,
+                "mean_levels_completion_rate": 0.25,
+                "mean_levels_completed": 2.0,
+            },
+            "stop_reason": "prediction_mismatch",
+        },
+        {
+            "aggregate": {
+                "n_episodes": 1,
+                "mean_levels_completion_rate": 0.5,
+                "mean_levels_completed": 4.0,
+            },
+            "stop_reason": "plan_exhausted",
+        },
+    ]
+    _mk_managed_run(
+        tmp_path / "cwm-arm" / "2026-10-01_00-00-00" / "ls20",
+        protocol="cwm",
+        calls=calls,
+        validations=("accepted", "accepted", "rejected"),
+    )
+    (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert row["protocol"] == "cwm"
+    assert row["success_rate"] == 0.5 and row["mean_levels_completed"] == 4.0
+    assert (row["controller_calls"], row["mismatches"]) == (2, 1)
+    assert (row["cwm_accepted"], row["cwm_rejected"]) == (2, 1)
+    assert row["outcome"] == "genuine-fail"
+    assert bench_aggregate._walltime_bucket(row) is None
+
+
+def test_managed_run_without_controller_calls_is_not_a_failed_policy(tmp_path: Path) -> None:
+    _mk_managed_run(tmp_path / "v" / "2026-10-01_00-00-00" / "ls20", protocol="vanilla", calls=[])
+    (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert row["success_rate"] is None
+    assert row["outcome"] == "no-calls"
+
+
+def test_runs_before_the_protocol_boundary_read_as_policy_search(tmp_path: Path) -> None:
+    _mk_run(tmp_path / "exp" / "2026-01-01_00-00-00" / "T", model="M", success=1.0)
+    (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert row["protocol"] == "policy_search" and row["outcome"] == "solve"

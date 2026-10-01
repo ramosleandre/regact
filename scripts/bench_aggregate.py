@@ -4,7 +4,8 @@
 Walks <bench_root>/<experiment>/<stamp>/<task>/ run dirs (the layout run_exp
 writes; `bench_regact.sh` makes one experiment dir per task), reads each run's
 config.json + experiment_state.json + final results, and prints a success-rate
-pivot (rows = tasks, columns = models) plus a per-run detail table.
+pivot (rows = tasks, columns = models) plus a per-run detail table. vanilla/CWM runs have no
+final result; they are read from their own experience store (see ``_managed_metrics``).
 
     python scripts/bench_aggregate.py experiments/bench_2026-08-08
     python scripts/bench_aggregate.py <root> --csv out.csv --json out.json
@@ -22,6 +23,7 @@ import collections
 import csv
 import json
 import re
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -459,6 +461,91 @@ def _classify_outcome(
     return "no-final"  # no exit reason recorded: still running / killed before teardown
 
 
+# vanilla and CWM never submit a policy for independent evaluation: their evidence is the run's
+# own experience store, so they get their own reader and outcome classes.
+_MANAGED_PROTOCOLS = frozenset({"vanilla", "cwm"})
+
+
+def _protocol(config: dict[str, Any]) -> str:
+    """The run's workflow; runs written before the protocol boundary are policy_search."""
+    raw = config.get("protocol")
+    name = raw.get("name") if isinstance(raw, dict) else raw
+    return str(name or "policy_search")
+
+
+def _managed_metrics(task_dir: Path) -> dict[str, Any]:
+    """Best progress and call counts of a vanilla/CWM run, read from its experience store.
+
+    The score is the best controller call, not a final re-score (there is none): progress the
+    agent's own controllers reached, so the initial random collection is never credited to it.
+    """
+    metrics: dict[str, Any] = {
+        "success_rate": None,
+        "mean_levels_completed": None,
+        "controller_calls": None,
+        "mismatches": None,
+        "cwm_accepted": None,
+        "cwm_rejected": None,
+    }
+    store = task_dir / "cwm" / "experience.sqlite3"
+    if not store.exists():
+        return metrics
+    try:
+        with sqlite3.connect(f"file:{store}?mode=ro", uri=True) as con:
+            records = con.execute("SELECT kind, status, payload FROM records").fetchall()
+    except sqlite3.Error:
+        return metrics
+    calls = [json.loads(payload) for kind, _, payload in records if kind == "exploration"]
+    validations = collections.Counter(status for kind, status, _ in records if kind == "validation")
+    scored = [
+        (score, (call.get("aggregate") or {}).get("mean_levels_completed"))
+        for call in calls
+        if (score := _primary_score(call.get("aggregate") or {})) is not None
+    ]
+    best = max(scored, key=lambda item: item[0]) if scored else (None, None)
+    metrics.update(
+        success_rate=best[0],
+        mean_levels_completed=best[1],
+        controller_calls=len(calls),
+        mismatches=sum(call.get("stop_reason") == "prediction_mismatch" for call in calls),
+        cwm_accepted=validations.get("accepted", 0),
+        cwm_rejected=validations.get("rejected", 0),
+    )
+    return metrics
+
+
+def _managed_controller_path(workdir: Path) -> Path:
+    """The agent's controller file; runs from before the v5 rename named it exploration.py."""
+    current = workdir / "controller.py"
+    legacy = workdir / "exploration.py"
+    return legacy if not current.exists() and legacy.exists() else current
+
+
+def _classify_managed_outcome(
+    success_rate: float | None,
+    exit_reason: str | None,
+    controller_calls: int | None,
+    reasoning_only_rate: float | None = None,
+    unparsed_markup_rate: float | None = None,
+) -> str:
+    """:func:`_classify_outcome` for vanilla/CWM. These runs cannot end themselves, so every
+    budget limit is the designed ending; what stays unreliable is a harness loss, and a run
+    whose controllers never ran (``no-calls``) - its empty score is not a policy failing."""
+    if success_rate is not None and success_rate >= _SOLVE_THRESHOLD:
+        return "solve"
+    if exit_reason == "agent_api":
+        return "harness-killed"
+    if not exit_reason:
+        return "no-final"
+    if not controller_calls:
+        return "no-calls"
+    if reasoning_only_rate is not None and reasoning_only_rate >= _REASONING_ONLY_DEGRADED:
+        return "truncated"
+    if unparsed_markup_rate is not None and unparsed_markup_rate >= _UNPARSED_MARKUP_DEGRADED:
+        return "unparsed-markup"
+    return "genuine-fail"
+
+
 def _run_row(
     experiment: str,
     stamp: str,
@@ -496,13 +583,14 @@ def _run_row(
         ("agent_errors", "agent_error"),
         ("error_retries", "agent_error_retry"),
     )
-    return {
+    row = {
         "experiment": experiment,
         "stamp": stamp,
         "task": task,
         "attempt": attempt,
         "agent": agent.get("name", "?"),
         "model": model,
+        "protocol": _protocol(config),
         "seed": (config.get("problem") or {}).get("seed"),
         "controller": _classify_controller(task_dir / "workdir" / "solution.py"),
         "outcome": _classify_outcome(
@@ -535,6 +623,24 @@ def _run_row(
         "agent_errors": events["agent_errors"],
         "error_retries": events["error_retries"],
     }
+    if row["protocol"] in _MANAGED_PROTOCOLS:
+        managed = _managed_metrics(task_dir)
+        row.update(
+            managed,
+            controller=_classify_controller(_managed_controller_path(task_dir / "workdir")),
+            outcome=_classify_managed_outcome(
+                managed["success_rate"],
+                state.get("exit_reason"),
+                managed["controller_calls"],
+                reasoning_only_rate=reasoning_only,
+                unparsed_markup_rate=unparsed_markup,
+            ),
+            tail_mean=None,
+            episodes_asked=None,
+            n_episodes=None,
+            n_errors=None,
+        )
+    return row
 
 
 _TAIL_SUBMISSIONS = 20
@@ -577,7 +683,7 @@ def _walltime_bucket(row: dict[str, Any]) -> str | None:
     including the few that submitted something unscoreable, so the three buckets partition
     every walltime run.
     """
-    if row.get("exit_reason") != "walltime_limit":
+    if row.get("exit_reason") != "walltime_limit" or row.get("protocol") in _MANAGED_PROTOCOLS:
         return None
     if row.get("success_rate") is None:
         return "starved"
@@ -728,9 +834,28 @@ def outcome_pivot_markdown(rows: list[dict[str, Any]], column: str = "model") ->
     return _pivot(rows, "outcome", column)
 
 
+def managed_markdown(rows: list[dict[str, Any]]) -> str:
+    """Per-run evidence of vanilla/CWM runs: how many controller calls ran, the best progress
+    one reached, and (CWM) how often the world model was accepted, rejected, or contradicted."""
+    lines = [
+        "| task | model | protocol | outcome | best progress | controller calls "
+        "| CWM accepted | CWM rejected | mismatches | exit_reason |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for row in sorted(rows, key=lambda r: (r["protocol"], r["model"], r["task"])):
+        lines.append(
+            f"| {row['task']} | {row['model']} | {row['protocol']} | {row['outcome']} "
+            f"| {_fmt(row['success_rate'])} | {_fmt(row['controller_calls'])} "
+            f"| {_fmt(row['cwm_accepted'])} | {_fmt(row['cwm_rejected'])} "
+            f"| {_fmt(row['mismatches'])} | {_fmt(row['exit_reason'])} |"
+        )
+    return "\n".join(lines)
+
+
 _DETAIL_COLUMNS = [
     "task",
     "model",
+    "protocol",
     "seed",
     "controller",
     "outcome",
@@ -836,6 +961,16 @@ def main(argv: list[str] | None = None) -> int:
         "discounted / re-run.\n"
     )
     print(outcome_pivot_markdown(rows, column))
+    managed = [row for row in rows if row["protocol"] in _MANAGED_PROTOCOLS]
+    if managed:
+        print("\n## Vanilla / CWM runs - no final re-score\n")
+        print(
+            "These protocols never submit a policy for independent evaluation, so their score is "
+            "the BEST controller call (never the initial random collection), and every budget "
+            "limit is their designed ending. `no-calls` = no controller ever ran. Compare them "
+            "with each other, not with policy_search cells.\n"
+        )
+        print(managed_markdown(managed))
     print(f"\n## Controller written (task x {column})\n")
     print(controller_pivot_markdown(rows, column))
     print(f"\n## Final success rate (task x {column})\n")
