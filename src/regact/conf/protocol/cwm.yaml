@@ -19,8 +19,8 @@ planner:
   max_depth_per_planner_call: 100
 execution:
   max_seconds_per_call: 5
-  max_seconds_per_UpdateCodeWorldModel: 120
-  max_seconds_per_controller_call: 120
+  max_seconds_per_UpdateCodeWorldModel: 90  # < the agents' 120 s shell timeout
+  max_seconds_per_controller_call: 90  # < the agents' 120 s shell timeout
   max_memory_mb: 512
 feedback:
   max_counterexamples: 5
