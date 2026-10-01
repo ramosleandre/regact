@@ -79,8 +79,9 @@ def test_all_cwm_caps_disabled_still_finishes(rig):
     result = c.tool("PlanInCWM", {})
     assert result.get("candidate_found") and result.get("achieved"), result
     exploration(c)
-    result = c.tool("SubmitExplorationController", {})
-    assert result["stage"] == "real" and result["real_actions"] == 4, result
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] == "plan_exhausted", result
+    assert result["real_actions"] == 4
     assert math.isinf(c.deadline)
 
 
