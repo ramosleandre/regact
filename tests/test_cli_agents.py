@@ -483,3 +483,59 @@ def test_codex_disables_web_search_on_every_launch(session_id, sandbox) -> None:
     assert argv.index('web_search="disabled"') < argv.index("exec")
     assert ("resume" in argv) == (session_id is not None)
     assert stdin == "continue"
+
+
+async def test_claude_base_url_points_at_a_local_anthropic_server(tmp_path) -> None:
+    """agent.base_url (already recorded in config.json) drives Claude Code at a self-hosted
+    Anthropic-compatible server, with no egress needed for a loopback one."""
+    root = tmp_path / "claude-home"
+    root.mkdir()
+    (root / ".credentials.json").write_text("{}")
+    agent = ClaudeAgent({"claude_home": str(root), "context_window": "131072"})
+    cwd = tmp_path / "workdir"
+    cwd.mkdir()
+    await agent.start(
+        cwd=str(cwd),
+        model="DeepSeek-V4-Flash",
+        base_url="http://127.0.0.1:8080",
+        api_key=None,
+        system_prompt=None,
+    )
+    try:
+        env = agent._env_overrides
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8080"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "local" and env["ANTHROPIC_API_KEY"] == ""
+        assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "131072"
+        assert agent.host_egress_hosts() == []
+    finally:
+        await agent.close()
+    plain = ClaudeAgent({"claude_home": str(root)})
+    assert plain.host_egress_hosts() == ["api.anthropic.com"]
+
+
+async def test_codex_base_url_writes_a_local_responses_provider(tmp_path, monkeypatch) -> None:
+    agent = CodexAgent(
+        {"codex_home": str(tmp_path / "home"), "context_window": 120000, "max_output_tokens": 8192}
+    )
+    monkeypatch.setattr(agent, "_freshest_auth", lambda: None)
+    cwd = tmp_path / "workdir"
+    cwd.mkdir()
+    await agent.start(
+        cwd=str(cwd),
+        model="DeepSeek-V4-Flash",
+        base_url="http://10.0.0.5:8080",
+        api_key=None,
+        system_prompt="Solve the game.",
+    )
+    try:
+        config = tomllib.loads(Path(agent._env_overrides["CODEX_HOME"], "config.toml").read_text())
+        assert config["developer_instructions"] == "Solve the game."
+        assert config["model_provider"] == "local"
+        assert config["model_context_window"] == 120000
+        assert config["model_max_output_tokens"] == 8192
+        provider = config["model_providers"]["local"]
+        assert provider["base_url"] == "http://10.0.0.5:8080/v1"
+        assert provider["wire_api"] == "responses"
+        assert agent.host_egress_hosts() == ["10.0.0.5"]  # a remote endpoint still needs egress
+    finally:
+        await agent.close()

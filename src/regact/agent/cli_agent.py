@@ -23,6 +23,7 @@ import signal
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable
 from typing import TextIO
+from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent
 from regact.agent.events import AgentError, AgentEvent
@@ -30,6 +31,7 @@ from regact.obs.errors import ErrorCategory
 from regact.tools.base import Tool
 
 _STDOUT_LINE_LIMIT = 64 * 1024 * 1024
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class _CliAgent(CodeAgent):
@@ -39,6 +41,8 @@ class _CliAgent(CodeAgent):
         self._args = dict(args or {})  # backend-specific CLI params (mode, effort, …)
         self._cwd: str = ""
         self._model: str | None = None
+        self._base_url: str | None = None  # a self-hosted endpoint; None = the CLI's own service
+        self._api_key: str | None = None
         self._system_prompt: str | None = None
         self._env_overrides: dict[str, str] = {}
         self._runtime_wrap: Callable[[list[str]], list[str]] | None = None
@@ -59,10 +63,12 @@ class _CliAgent(CodeAgent):
         env: dict[str, str] | None = None,
         runtime_wrap: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
-        # CLI agents default to their own auth (e.g. the Claude subscription);
-        # base_url/api_key are only forwarded by a subclass that needs them.
+        # CLI agents default to their own auth (e.g. the Claude subscription); a base_url points a
+        # subclass at a self-hosted endpoint instead (see its _configure_workdir).
         self._cwd = cwd
         self._model = model
+        self._base_url = base_url
+        self._api_key = api_key
         self._system_prompt = system_prompt
         self._env_overrides = dict(env or {})
         self._runtime_wrap = runtime_wrap
@@ -77,6 +83,14 @@ class _CliAgent(CodeAgent):
 
     def session_id(self) -> str | None:
         return self._session_id
+
+    def _egress_hosts(self, service_hosts: list[str]) -> list[str]:
+        """The service's hosts, or only the self-hosted endpoint's: a loopback one needs no
+        egress, since its port is bridged into the sandbox."""
+        if not self._base_url:
+            return service_hosts
+        host = urlparse(self._base_url).hostname
+        return [host] if host and host not in _LOOPBACK_HOSTS else []
 
     def _configure_workdir(self) -> None:
         """Write any backend-native confinement config into the workdir. Default: none."""

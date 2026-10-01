@@ -4,6 +4,11 @@ name: claude
 # --model passed to the CLI: "opus" | "sonnet" | a full id like "claude-opus-4-8".
 model: opus
 
+# A self-hosted Anthropic-compatible server (e.g. llama.cpp's llama-server) instead of
+# the subscription: agent.base_url=http://127.0.0.1:8080 agent.model=<served name>
+# agent.args.effort=null (+ agent.args.context_window=<served ctx>).
+base_url: null
+
 args:
   # --permission-mode. bypassPermissions = fully headless (no interactive prompts);
   # the workdir .claude/settings.json deny-list still confines the agent's file reads.

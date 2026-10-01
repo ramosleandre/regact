@@ -82,7 +82,7 @@ class CodexAgent(_CliAgent):
 
     def host_egress_hosts(self) -> list[str]:
         # API-key mode needs only api.openai.com; ChatGPT-login adds auth/chatgpt.
-        return ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+        return self._egress_hosts(["api.openai.com", "auth.openai.com", "chatgpt.com"])
 
     def _config_dir(self) -> str:
         """A FRESH per-task codex home, seeded with a minimal config + only the auth token, cached
@@ -125,6 +125,29 @@ class CodexAgent(_CliAgent):
                     + json.dumps(self._system_prompt, ensure_ascii=False)
                     + "\n"
                 )
+            if self._base_url:
+                handle.write(self._local_provider_toml())
+
+    def _local_provider_toml(self) -> str:
+        """A self-hosted Responses-API provider (OPENAI_BASE_URL alone keeps the built-in one).
+        Codex has no metadata for local models, so the window and output cap are stated."""
+        url = str(self._base_url).rstrip("/")
+        url = url if url.endswith("/v1") else url + "/v1"
+        lines = ['model_provider = "local"']
+        for key, arg in (
+            ("model_context_window", "context_window"),
+            ("model_max_output_tokens", "max_output_tokens"),
+        ):
+            if self._args.get(arg):
+                lines.append(f"{key} = {int(self._args[arg])}")
+        lines += [
+            "",
+            "[model_providers.local]",
+            'name = "local"',
+            f"base_url = {json.dumps(url)}",
+            'wire_api = "responses"',
+        ]
+        return "\n".join(lines) + "\n"
 
     async def close(self) -> None:
         """Drop the per-task home on teardown (nothing reads codex's native session store post-run;

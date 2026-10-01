@@ -109,6 +109,17 @@ class ClaudeAgent(_CliAgent):
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
             json.dump(claude_deny_settings(self._cwd), handle, indent=2)
         self._configure_home()
+        if self._base_url:  # an Anthropic-compatible server, e.g. llama.cpp's llama-server
+            self._env_overrides |= {
+                "ANTHROPIC_BASE_URL": self._base_url,
+                "ANTHROPIC_AUTH_TOKEN": self._api_key or "local",
+                "ANTHROPIC_API_KEY": "",
+                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            }
+            if self._args.get("context_window"):
+                window = str(int(self._args["context_window"]))  # sizes its compaction
+                self._env_overrides["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = window
         budget = self._args.get("max_thinking_tokens")
         if budget:
             self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)
@@ -213,7 +224,7 @@ class ClaudeAgent(_CliAgent):
         return [home]
 
     def host_egress_hosts(self) -> list[str]:
-        return ["api.anthropic.com"]  # block statsig.anthropic.com / sentry telemetry
+        return self._egress_hosts(["api.anthropic.com"])  # not statsig / sentry telemetry
 
     def host_write_prefixes(self) -> list[str]:
         if sys.platform != "darwin":
