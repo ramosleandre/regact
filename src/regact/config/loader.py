@@ -8,6 +8,7 @@ config) keeps it simple and avoids ``StrEnum`` round-trip surprises.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from typing import Any
@@ -27,6 +28,8 @@ from regact.config.schema import (
     RunConfig,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
     """Build ``LimitsConfig`` coercing numeric fields to int.
@@ -42,6 +45,16 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
+    # Old launchers still pass limits.max_turns; when set it wins over the YAML default.
+    legacy_turns = fields.pop("max_turns", None)
+    if legacy_turns is not None:
+        logger.warning("limits.max_turns is deprecated, use limits.max_turns_per_task")
+        fields["max_turns_per_task"] = legacy_turns
+    if fields.pop("max_actions_per_env", None) is not None:
+        raise ValueError(
+            "limits.max_actions_per_env was removed: use limits.max_actions_per_episode, "
+            "which renews on every reset (the old cap renewed only on a new make_env)"
+        )
     for name in (
         "max_turns_per_task",
         "max_consecutive_no_tool_turns",

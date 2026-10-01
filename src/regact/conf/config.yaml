@@ -23,9 +23,10 @@ flagging_warning_cap: 3  # after completed tools (CLI: next outer turn); 0 disab
 dry_run: false  # prompt-only: write the prompt + first message to the run and exit (no agent, no cost)
 limits:  # every max_* accepts null to disable its cap
   max_turns_per_task: 350                # agent turns per task before the loop gives up
+  max_turns: null               # deprecated alias of max_turns_per_task (old launchers)
   max_tool_calls: null          # total tool calls across the run (the primary budget); null = off
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit
-  max_actions_per_task: null # CWM: total real steps across collection and explorations
+  max_actions_per_task: null # vanilla/CWM only: total real steps across collection and calls
   max_actions_per_episode: null     # env.step cap per episode; reset renews this budget;
                                 # null = no cap
   max_consecutive_no_tool_turns: 0  # >0 = end the loop after N consecutive REGACT TURNS

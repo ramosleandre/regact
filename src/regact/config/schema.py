@@ -98,7 +98,7 @@ class LimitsConfig:
     # iterations inside each one (alan averages ~5, and a Kimi run measured 4). So this caps
     # roughly 5N wasted model calls, not N - set it in turns and read the cost in calls.
     max_consecutive_no_tool_turns: int | None = 0
-    max_actions_per_task: int | None = None  # CWM: all recorded real steps, resets excluded
+    max_actions_per_task: int | None = None  # vanilla/CWM only: real steps, resets excluded
 
 
 @dataclass
