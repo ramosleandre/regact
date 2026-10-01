@@ -54,7 +54,7 @@ parallel_workers: 1
 # still run. The agent must reach the local vLLM endpoint freely.
 sandbox: false
 limits:
-  max_turns: 3
+  max_turns_per_task: 3
   max_seconds_per_task: ${oc.env:PER_GAME_WALLTIME_S,240}
 output_root: ${oc.env:OUTPUT_ROOT,experiments}
 experiment_name: competition

@@ -8,9 +8,12 @@ agent stream (structured ops logs go to :class:`RunLogger` instead).
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import IO, Any
 
 from regact.agent.events import (
@@ -35,6 +38,7 @@ class TranscriptWriter:
 
     def __init__(self, path: str) -> None:
         # The writer owns this handle for its lifetime; close() / __exit__ release it.
+        self._media = Path(path).parent / "media"
         self._handle: IO[str] = open(path, "w", encoding="utf-8")  # noqa: SIM115
 
     def write(self, event: AgentEvent) -> None:
@@ -42,6 +46,35 @@ class TranscriptWriter:
         # timing signal is a file mtime, which dates the last write and nothing else - three
         # separate questions about a slow serve (was a run degraded from the start, how long did
         # one generation take, did a retry escalate) were unanswerable for exactly that reason.
+        if isinstance(event, ToolResult) and event.images:
+            images = []
+            for item in event.images:
+                if "data" not in item:
+                    images.append(item)
+                    continue
+                extension = {
+                    "image/png": "png",
+                    "image/jpeg": "jpg",
+                    "image/webp": "webp",
+                    "image/gif": "gif",
+                }.get(item.get("mime_type", ""))
+                if extension is None:
+                    continue
+                try:
+                    raw = base64.b64decode(item["data"], validate=True)
+                except ValueError:
+                    images.append({"error": "Backend returned invalid base64 image data."})
+                    continue
+                digest = hashlib.sha256(raw).hexdigest()
+                filename = digest + "." + extension
+                self._media.mkdir(exist_ok=True)
+                destination = self._media / filename
+                if not destination.exists():
+                    destination.write_bytes(raw)
+                images.append(
+                    {"filename": filename, "mime_type": item["mime_type"], "sha256": digest}
+                )
+            event = replace(event, images=images)
         payload = dict(event_to_json(event))
         payload[_TS_KEY] = datetime.now(UTC).isoformat()
         self._handle.write(json.dumps(payload) + "\n")
@@ -60,6 +93,8 @@ class TranscriptWriter:
 def event_to_json(event: AgentEvent) -> dict[str, object]:
     """Serialize one event, tagged by its type; enums rendered as their value."""
     payload = asdict(event)
+    if isinstance(event, ToolResult) and not event.images:
+        payload.pop("images", None)  # preserve the existing text-only event shape
     if isinstance(event, AgentError):
         payload["category"] = event.category.value
     return {"type": type(event).__name__, **payload}

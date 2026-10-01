@@ -68,7 +68,7 @@ class CodeAgent(ABC):
 
     @abstractmethod
     async def inject(self, message: str) -> None:
-        """Queue a user message to be delivered on the next turn."""
+        """Deliver a user message at a supported boundary (otherwise next send)."""
         ...
 
     @abstractmethod

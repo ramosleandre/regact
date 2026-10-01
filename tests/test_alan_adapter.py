@@ -250,29 +250,6 @@ def test_build_alan_agent_restricts_to_bash_only(monkeypatch) -> None:
     assert captured["tools"] == [bash]  # only Bash reaches the agent
 
 
-def test_build_alan_agent_sets_escalated_max_tokens(monkeypatch) -> None:
-    """escalated_max_tokens rides the SETTINGS API (not a ctor kwarg, which would leak to the
-    LLM transport). Default applies; agent.args overrides it (string-coerced)."""
-    captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
-    build_alan_agent(
-        cwd=".", model="m", base_url=None, api_key=None, system_prompt=None, extra_tools=[], args={}
-    )
-    assert captured["settings"]["escalated_max_tokens"] == 12000  # default
-    assert "escalated_max_tokens" not in captured  # NOT a constructor kwarg
-
-    captured2 = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
-    build_alan_agent(
-        cwd=".",
-        model="m",
-        base_url=None,
-        api_key=None,
-        system_prompt=None,
-        extra_tools=[],
-        args={"escalated_max_tokens": "9999"},
-    )
-    assert captured2["settings"]["escalated_max_tokens"] == 9999  # override, coerced to int
-
-
 def test_build_alan_agent_forwards_sweep_settings(monkeypatch) -> None:
     """The empty_response-sweep knobs (persist_thinking, empty_response_retries) ride the
     SETTINGS API - not ctor kwargs, which would leak to the LLM transport - and 'true' coerces
@@ -298,5 +275,19 @@ def test_build_alan_agent_omits_unset_sweep_settings(monkeypatch) -> None:
     build_alan_agent(
         cwd=".", model="m", base_url=None, api_key=None, system_prompt=None, extra_tools=[], args={}
     )
-    assert "persist_thinking" not in captured["settings"]
-    assert "empty_response_retries" not in captured["settings"]
+    assert "persist_thinking" not in captured.get("settings", {})
+    assert "empty_response_retries" not in captured.get("settings", {})
+
+
+def test_remote_agent_does_not_apply_unrequested_settings(monkeypatch) -> None:
+    captured = _fake_alancode(monkeypatch, [types.SimpleNamespace(name="Bash")])
+    build_alan_agent(
+        cwd=".",
+        model="remote",
+        base_url=None,
+        api_key=None,
+        system_prompt=None,
+        extra_tools=[],
+        args={"backend": "scripted"},
+    )
+    assert captured.get("settings", {}) == {}

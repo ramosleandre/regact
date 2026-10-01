@@ -22,7 +22,7 @@ make run ARGS="problem=minigrid 'problem.tasks=[MiniGrid-DoorKey-5x5-v0]' proble
 ```
 
 The `ProblemConfig` fields are `name`, `tasks`, `lifecycle`, `obs_mode`, `info_mode`,
-`seed`, and `kwargs` (environment-construction options). The config groups in
+`helper`, `seed`, and `kwargs` (environment-construction options). The config groups in
 [`conf/problem/`](../src/regact/conf/problem/):
 
 | File | `tasks` | `kwargs` |
@@ -30,20 +30,31 @@ The `ProblemConfig` fields are `name`, `tasks`, `lifecycle`, `obs_mode`, `info_m
 | `arc_agi.yaml` | `[]` (all) | `operation_mode: offline`, `environments_dir` |
 | `minigrid.yaml` | `[MiniGrid-Empty-5x5-v0]` | `fully_obs: true` |
 | `minigrid_lite.yaml` | the curated 20 | `fully_obs: true` |
-| `minigrid_full.yaml` | all 72 | `fully_obs: true` |
+| `minigrid_full.yaml` | the full configured task list | `fully_obs: true` |
 
-**Lifecycle** — both ARC and MiniGrid default to `multi_instance`, which supports
-evaluation on fresh episodes. The older `single_instance` mode keeps one environment
-per game, but the current runner **rejects it**, including with `features=none`: the
-always-on controller evaluates on the environment, so exploration and evaluation would
-share a session instead of measuring an isolated policy. The lifecycle implementation
-remains in the code; it is not a supported configuration for the current runner. See
-[`arc_agi.yaml`](../src/regact/conf/problem/arc_agi.yaml).
+## Lifecycle and protocol
 
-More episodes do not automatically mean more varied evaluation: MiniGrid uses an
+Both problem groups default to `multi_instance`. Support depends on the selected [protocol](protocols.md):
+
+| Lifecycle | Vanilla / CWM | Policy search |
+|---|---|---|
+| `single_instance` | Preserve the live environment across initial collection, controller calls and CWM repair | Rejected: exploration and on-environment evaluation would share a session |
+| `multi_instance` | Reset before each `RunController`; CWM requires the original initial observation | Evaluate policies on fresh episodes |
+
+Every managed call creates a new controller object in either lifecycle. `single_instance` preserves the **environment**, not the Python controller's private memory. Set `problem.lifecycle=single_instance` explicitly to use it.
+
+In vanilla/CWM, `ResetEnvironment` restarts the whole environment. Offline ARC also supports `ResetLevel`, preserving completed levels. An observation with `is_done=True` ends a controller call; full-game success ends the task, while an unsuccessful terminal episode permits inspection/reset. See [Managed execution](managed_protocols.md#explicit-resets) for action accounting and dataset boundaries.
+
+For policy search, more episodes do not automatically mean more varied evaluation: MiniGrid uses an
 episode seed sequence, while deterministic ARC games ignore the seed. Submissions and
 final evaluation reuse the configured seed sequence; these are not automatically
-held-out tests.
+held-out tests. Managed protocols have no independent final evaluation. A fixed `problem.seed` also matters for reproducible multi-instance CWM resets.
+
+## Observations and CWM compatibility
+
+The normalized observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. `frame` contains the last frame rather than an animation history. In managed code these are dictionary fields. Milestones describe events from the preceding action, not cumulative progress.
+
+CWM validates the complete observation, not just its image. Its current assumption is that observation plus action determines the next observation. A fully visible grid does not necessarily satisfy that assumption: MiniGrid's hidden step counter affects terminal reward and truncation, even with `fully_obs=true`. CWM stops if identical complete observation/action inputs have conflicting recorded successors. Vanilla makes no such prediction requirement. See [CWM limitations](cwm.md#scientific-and-operational-limitations) before interpreting failures as modeling mistakes.
 
 ## Add an environment
 
@@ -59,7 +70,7 @@ A problem implements the [`BaseProblem`](../src/regact/problems/base.py) ABC.
   sees.
 - `compute_episode_metrics(final_obs, *, steps)` and `aggregate_episode_metrics(episodes)`
   — the per-episode score and its aggregate.
-- `build_prompt(task_name, *, info_mode, obs_mode)` — the game briefing (keep the prose in a markdown
+- `build_prompt(task_name, *, info_mode, obs_mode, direct_interaction)` — the game briefing (keep the prose in a markdown
   file next to the module).
 - `config_kwargs()` — kwargs to rebuild the problem for trusted-side eval.
 
@@ -70,10 +81,19 @@ Optional hooks (each has a default): `milestone_detector`, `helper_templates`,
 `failure_metrics(*, steps)` (zero credit for controller errors), and
 `is_perfect(aggregate)` (whether a submission should end the run early). The default
 perfect predicate checks `success_rate >= 1.0`; override it if your problem uses a
-different completion metric (ARC uses `win_rate`). The loop also requires a complete,
+different completion metric (ARC uses `win_rate`). In policy search, the loop also requires a complete,
 error-free evaluation before stopping as solved.
 
-Override `failure_metrics` when your problem has additional score fields. Failed
+For managed protocols, also review these extension points:
+
+- `reset_commands()` advertises explicit reset capabilities; the default is `ResetEnvironment`. Additional commands need corresponding trusted reset handling.
+- `validate_controller_action(action)` rejects control operations that must go through an explicit command, such as ARC reset actions.
+- `enumerate_actions(obs)` supplies a finite public action space for initial random collection and optional planning. Parameterized actions need a problem-specific implementation; the default enumerates integer action IDs.
+- `milestone_kind(name)` classifies milestones as progress, failure or other events; `exploration_score(aggregate)` ranks the best observed managed result.
+
+`helper_templates(..., direct_interaction=False)` and the same prompt flag let a problem describe observations/actions without suggesting direct environment access in managed protocols. Helpers must not reveal game implementation code.
+
+Override `failure_metrics` when your problem has additional score fields. In policy search, failed
 controller episodes remain in the scoring denominator: MiniGrid assigns no success
 or reward; ARC assigns no success or level completion, including any partial progress
 before the error. Step counts remain diagnostic. Environment/harness failures instead
@@ -100,5 +120,5 @@ and any `kwargs`.
 
 > **Env wrappers.** Features can wrap the env server-side (see
 > [Features](features.md) — `env_wrapper`), applied in `features:` list order. A wrapper
-> must preserve the [`WrappedEnv`](../src/regact/env/wrapper.py) surface
+> must preserve the [`WrappedEnv`](../src/regact/env/wrapped_env.py) surface
 > (`reset`/`step`/`close`, `action_count`, `last_obs`).

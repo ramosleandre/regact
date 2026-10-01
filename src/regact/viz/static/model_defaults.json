@@ -23,6 +23,10 @@
     "Qwen3-32B": "#8ff0a4",
     "Qwen3.6-27B": "#8ff0a4",
     "Qwen3.8-27B": "#57e389",
-    "SWE-agent-LM-32B": "#63452c"
+    "SWE-agent-LM-32B": "#63452c",
+    "MiMo-V2.6-Flash-RL": "#ff6900"
+  },
+  "family_colors": {
+    "MiMo": "#ff6900"
   }
 }

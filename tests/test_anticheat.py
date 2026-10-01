@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from regact.agent.claude_adapter import claude_deny_settings
+from regact.protocols.policy_search import PolicySearchSession
 from regact.security.detection import flag_os_denial, flag_tool_call
 from regact.security.paths import path_within
 from regact.security.policy import default_policy
@@ -37,7 +38,7 @@ def test_camera_flags_forbidden_paths_and_imports() -> None:
     assert flag_tool_call("Bash", {"command": "ls .. && cd ../foo"}, policy) == []
     assert flag_tool_call("Bash", {"command": "python -c 'import inspect'"}, policy) == []
     # the legit workdir helper (named arc_agi_helper.py) must NOT trip the 'arc_agi/' rule:
-    assert flag_tool_call("Bash", {"command": "cat code_library/arc_agi_helper.py"}, policy) == []
+    assert flag_tool_call("Bash", {"command": "cat framework/arc_agi_helper.py"}, policy) == []
 
 
 def test_os_denial_recognizes_blocked_egress_only() -> None:
@@ -68,6 +69,7 @@ async def test_egress_camera_counts_blocked_curls_not_friction() -> None:
             logger=logger,
             cwd="",
             policy=default_policy(),
+            protocol=PolicySearchSession(experiment=exp),
         )
         curl = ToolResult("1", "curl: (6) Could not resolve host", is_error=True)
         await _flag_blocked_result(curl, ctx)
@@ -107,6 +109,7 @@ async def test_loop_flags_and_counts_flagged_calls(tmp_path: Path) -> None:
             logger=logger,
             cwd="",
             policy=default_policy(),
+            protocol=PolicySearchSession(experiment=exp),
         )
         await _flag_suspicious_call(ToolCall("1", "Bash", {"command": "ls code_library"}), ctx)
         assert exp.flagged_tool_calls == 0  # a benign call is not flagged

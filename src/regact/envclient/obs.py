@@ -23,7 +23,7 @@ class Obs:
     """A single observation as seen by the agent/controller."""
 
     frame: Frame
-    reward: float | None = None
+    reward: float | None = 0.0  # None remains readable in historical payloads
     is_done: bool = False
     available_actions: list[Action] = field(default_factory=list)
     info: dict[str, Any] = field(default_factory=dict)
@@ -33,7 +33,7 @@ class Obs:
         """Rebuild an ``Obs`` from a server payload (dumb deserialization)."""
         return cls(
             frame=payload.get("frame"),
-            reward=payload.get("reward"),
+            reward=payload.get("reward", 0.0),
             is_done=bool(payload.get("is_done", False)),
             available_actions=list(payload.get("available_actions") or []),
             info=dict(payload.get("info") or {}),

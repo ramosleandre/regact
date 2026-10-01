@@ -12,11 +12,12 @@ import dataclasses
 import json
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from regact.viz import reader
@@ -62,6 +63,31 @@ def _experiment_of(game_relpath: str) -> str:
 def build_app(experiment_dir: str) -> FastAPI:
     app = FastAPI(title="regact viz")
     root = Path(experiment_dir)
+    from regact.protocols.cwm import viewer as cwm_viewer
+    from regact.protocols.cwm.worker import WorkerError
+
+    playback = cwm_viewer.Playback()
+
+    def metrics(view: reader.GameView, name: str) -> dict[str, Any]:
+        result = game_metrics(view)
+        protocol_name = view.config.get("protocol", {}).get("name")
+        if protocol_name in ("cwm", "vanilla"):
+            path = root / name / "cwm" / "status.json"
+            if path.is_file():
+                state = json.loads(path.read_text())
+                latest = state.get("latest_exploration") or {}
+                result.update(
+                    protocol=protocol_name,
+                    final_aggregate=latest.get("aggregate", {}),
+                    score_source="latest real exploration",
+                    best_exploration_aggregate=(state.get("best_exploration") or {}).get(
+                        "aggregate", {}
+                    ),
+                    env_moves=state.get("n_total_transitions", state.get("n_step_events", 0))
+                    + state.get("reset_actions", 0),
+                    success_rate=latest.get("aggregate", {}).get("success_rate"),
+                )
+        return result
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -89,17 +115,24 @@ def build_app(experiment_dir: str) -> FastAPI:
                     # config (config.experiment_name), and one experiment holds many runs of many
                     # tasks (some tasks repeated across timestamps -> aggregated in the UI).
                     "experiment": game.config.get("experiment_name") or _experiment_of(name),
+                    "agent": {
+                        key: (game.config.get("agent") or {}).get(key) for key in ("name", "model")
+                    },
                     "task": game.state.get("task_name") or name.rsplit("/", 1)[-1],
                     "state": game.state,
-                    "metrics": game_metrics(game),
+                    "metrics": metrics(game, name),
                 }
             )
         return {"experiment": root.name, "games": out}
 
     def _require_game(name: str) -> None:
-        # ``name`` is a query param (a run's path relative to the root, possibly nested for a
-        # sweep). Validating against list_games both 404s the unknown and blocks path traversal.
-        if name not in reader.list_games(experiment_dir):
+        # Validate this run directly: frame playback must not scan the experiment tree.
+        candidate = (root / name).resolve()
+        if (
+            Path(name).is_absolute()
+            or not candidate.is_relative_to(root.resolve())
+            or not (candidate / "logs/experiment_state.json").is_file()
+        ):
             raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
 
     @app.get("/api/game")
@@ -112,7 +145,7 @@ def build_app(experiment_dir: str) -> FastAPI:
             "config": view.config,
             "turns": [dataclasses.asdict(t) for t in view.turns],
             "submissions": [dataclasses.asdict(s) for s in view.submissions],
-            "metrics": game_metrics(view),
+            "metrics": metrics(view, name),
         }
 
     @app.get("/api/game/artifacts")
@@ -128,6 +161,83 @@ def build_app(experiment_dir: str) -> FastAPI:
     def logs(name: str) -> dict[str, Any]:
         _require_game(name)
         return reader.load_logs(experiment_dir, name)
+
+    def cwm_call(name: str, operation: Callable[[Path], Any]) -> Any:
+        _require_game(name)
+        try:
+            return operation(root / name)
+        except (ValueError, OSError, WorkerError) as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+
+    @app.get("/api/game/cwm")
+    def cwm(name: str, before: int = 0) -> Any:
+        return cwm_call(name, lambda task: cwm_viewer.inspect(task, before=before))
+
+    @app.get("/api/game/cwm/evidence")
+    def cwm_evidence(name: str, kind: str, identifier: int) -> Any:
+        return cwm_call(name, lambda task: cwm_viewer.evidence(task, kind, identifier))
+
+    @app.get("/api/game/cwm/evidence-image")
+    def cwm_evidence_image(name: str, kind: str, identifier: int, side: str = "observed") -> Any:
+        def read(task: Path) -> Any:
+            evidence = cwm_viewer.evidence(task, kind, identifier)
+            if kind == "observation":
+                obs = evidence
+            elif kind == "diagnostic" and side in (
+                "predicted",
+                "observed",
+                "first_output",
+                "second_output",
+            ):
+                obs = evidence.get(side)
+            else:
+                raise ValueError("unsupported evidence image source")
+            if not isinstance(obs, dict) or "frame" not in obs:
+                raise ValueError("this evidence has no observation image for that side")
+            return Response(
+                cwm_viewer.png(cwm_viewer.problem_for(task), obs), media_type="image/png"
+            )
+
+        return cwm_call(name, read)
+
+    @app.get("/api/game/tool-image")
+    def tool_image(name: str, filename: str) -> Any:
+        _require_game(name)
+        if not re.fullmatch(r"[0-9a-f]{64}\.(png|jpg|webp|gif)", filename):
+            raise HTTPException(422, detail="invalid image identifier")
+        directory = (root / name / "logs" / "media").resolve()
+        path = directory / filename
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not directory.is_relative_to((root / name).resolve())
+        ):
+            raise HTTPException(404, detail="recorded tool image unavailable")
+        return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+    @app.get("/api/game/cwm/source")
+    def cwm_source(name: str, bundle: str, filename: str = "") -> Any:
+        return cwm_call(name, lambda task: cwm_viewer.source(task, bundle, filename))
+
+    @app.post("/api/game/cwm/load")
+    def cwm_load(name: str, kind: str, identifier: int) -> Any:
+        return cwm_call(name, lambda task: playback.load(task, kind, identifier))
+
+    @app.get("/api/game/cwm/frame")
+    def cwm_frame(
+        name: str, kind: str, identifier: int, index: int = 0, image: bool = False
+    ) -> Any:
+        def read(task: Path) -> Any:
+            frame = playback.frame(task, kind, identifier, index)
+            if image:
+                return Response(
+                    cwm_viewer.png(cwm_viewer.problem_for(task), frame["obs"]),
+                    media_type="image/png",
+                    headers={"Cache-Control": "no-store"},
+                )
+            return frame
+
+        return cwm_call(name, read)
 
     @app.get("/video")
     def video(game: str, submission: str, filename: str) -> FileResponse:
@@ -146,7 +256,7 @@ def build_app(experiment_dir: str) -> FastAPI:
         path = _settings_path(scope)
         if path.is_file():
             try:
-                return json.loads(path.read_text(encoding="utf-8"))
+                return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
             except (OSError, ValueError):
                 return {}
         return {}

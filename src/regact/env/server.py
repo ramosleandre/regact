@@ -7,9 +7,10 @@ aliasing). Inspired by arc-3-agents-baseline1 ``server.py``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException
 
 from regact.env.session import EnvSession
 from regact.env.wrapped_env import WrappedEnv
@@ -48,12 +49,29 @@ class EnvServer:
         self._port = port
         self._sessions: dict[str, EnvSession] = {}
         self._control: dict[str, tuple[dict[str, Tool], str]] = {}
+        self._environment: dict[str, Callable[..., dict[str, Any]]] = {}
+        self._initial: dict[str, Callable[[], Obs]] = {}
+        self._data: dict[str, Callable[..., Any]] = {}
         self.app = self._build_app()
 
     def register(self, game_id: str, session: EnvSession) -> str:
         """Attach a session under its real ``game_id``; return that id."""
         self._sessions[game_id] = session
         return game_id
+
+    def bind_environment(
+        self,
+        game_id: str,
+        handler: Callable[..., dict[str, Any]],
+        initial: Callable[[], Obs],
+        data: Callable[..., Any],
+    ) -> None:
+        """A protocol may own all public operations for its environment."""
+        self._environment[game_id], self._initial[game_id], self._data[game_id] = (
+            handler,
+            initial,
+            data,
+        )
 
     def bind_control(self, game_id: str, tools: list[Tool], *, cwd: str) -> None:
         """Bind the framework tools a CLI agent reaches via ``/control``. Idempotent."""
@@ -62,6 +80,8 @@ class EnvServer:
     def first_obs(self, game_id: str) -> Obs:
         """The game's first observation (in-process; the loop calls this once to build
         the prompt, before the agent starts, so there is no concurrent access)."""
+        if game_id in self._initial:
+            return self._initial[game_id]()
         return self._session(game_id).first_obs()
 
     def total_action_count(self, game_id: str) -> int:
@@ -90,6 +110,8 @@ class EnvServer:
 
         @app.post("/env/{game_id}/reset")
         def reset(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            if game_id in self._environment:
+                return self._environment[game_id]("reset", body)
             session = self._session(game_id)
             env = session.make()
             try:
@@ -100,6 +122,8 @@ class EnvServer:
 
         @app.post("/env/{game_id}/step")
         def step(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            if game_id in self._environment:
+                return self._environment[game_id]("step", body)
             env = self._require_live(game_id)
             try:
                 obs = env.step(body.get("action"))
@@ -109,6 +133,8 @@ class EnvServer:
 
         @app.get("/env/{game_id}/current")
         def current(game_id: str) -> dict[str, Any]:
+            if game_id in self._environment:
+                return self._environment[game_id]("current", {})
             env = self._require_live(game_id)
             if env.last_obs is None:
                 raise HTTPException(status_code=409, detail="no observation yet")
@@ -116,15 +142,29 @@ class EnvServer:
 
         @app.get("/env/{game_id}/last-step")
         def last_step(game_id: str) -> dict[str, int]:
+            if game_id in self._environment:
+                return self._environment[game_id]("last-step", {})
             return {"action_count": self._require_live(game_id).action_count}
 
         @app.post("/env/{game_id}/stop")
         def stop(game_id: str) -> dict[str, bool]:
+            if game_id in self._environment:
+                return self._environment[game_id]("stop", {})
             self._session(game_id).close()
             return {"ok": True}
 
+        @app.post("/data/{game_id}")
+        def protocol_data(game_id: str, body: dict[str, Any]) -> Any:
+            handler = self._data.get(game_id)
+            if handler is None:
+                raise HTTPException(404, detail="no data API for this protocol")
+            try:
+                return handler(body)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise HTTPException(422, detail=str(exc)) from exc
+
         @app.post("/control/{game_id}/tool")
-        async def control_tool(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        async def control_tool(game_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
             binding = self._control.get(game_id)
             if binding is None:
                 raise HTTPException(status_code=503, detail="control channel not bound")
@@ -133,8 +173,14 @@ class EnvServer:
             tool = tools_by_name.get(name)
             if tool is None:
                 raise HTTPException(status_code=404, detail=f"unknown tool {name!r}")
-            output = await tool.call(body.get("input") or {}, ToolContext(cwd=cwd))
-            return {"output": str(output.data), "is_error": output.is_error}
+            detail = {}
+            if token := request.headers.get("X-Regact-Request-ID"):
+                detail["request_id"] = token
+            output = await tool.call(body.get("input") or {}, ToolContext(cwd=cwd, detail=detail))
+            result = {"output": str(output.data), "is_error": output.is_error}
+            if output.messages:
+                result["messages"] = output.messages
+            return result
 
         return app
 

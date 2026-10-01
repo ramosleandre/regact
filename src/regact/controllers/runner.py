@@ -41,7 +41,7 @@ def run_controller(
     controller: Controller,
     *,
     name: str = "controller",
-    max_steps: int = 400,
+    max_steps: int | None = 400,
     collect_frames: bool = False,
 ) -> ControllerSummary:
     """Roll ``controller`` out on ``env`` (already reset) until done or ``max_steps``.
@@ -63,7 +63,7 @@ def run_controller(
     while True:
         if obs.is_done:
             return done("env_done", "environment signalled done")
-        if steps >= max_steps:
+        if max_steps is not None and steps >= max_steps:
             return done("max_steps", f"reached max_steps={max_steps}")
 
         try:

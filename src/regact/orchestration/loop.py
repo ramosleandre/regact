@@ -7,7 +7,7 @@ mirrors everything to the canonical ``transcript.jsonl``, and stops on the agent
 request, a limit, an interrupt, a persistent backend error, or a crash.
 
 It is deliberately agnostic of controllers/games/eval: it only knows agents,
-framework tools, hooks, limits, and writers — all generic interfaces. It imports
+framework tools, protocol sessions, hooks, limits, and writers — all generic interfaces. It imports
 neither the executor nor a problem. Feature-specific teardown work (e.g. re-scoring
 the final solution) arrives as :class:`Hook` objects it fires by phase, the same
 way feature ``tools`` arrive as :class:`Tool` objects it executes on demand.
@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from regact.agent.base import CodeAgent
 from regact.agent.events import (
@@ -41,6 +41,7 @@ from regact.obs.errors import ErrorCategory, LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.signals import StopSignal
+from regact.protocols.base import ProtocolSession
 from regact.security.detection import flag_os_denial, flag_tool_call
 from regact.security.policy import SecurityPolicy, default_policy
 from regact.session.state import ExperimentState
@@ -48,41 +49,10 @@ from regact.tools.base import Tool, ToolContext
 
 _ABORTED_REASONS = frozenset({"loop_crash"})
 
-_KEEP_ALIVE_MESSAGE = (
-    "Keep-alive reminder - continue working or finish your work: 1) produce a controller in "
-    "solution.py, 2) submit it by running `python framework/control.py SubmitSolution`, 3) if you "
-    "are satisfied with your solution, end the task with `python framework/control.py ExitTask`."
-)
-# Used when the agent cannot end its own run (exit_task_enabled=False): no ExitTask mention.
-_KEEP_ALIVE_MESSAGE_NO_EXIT = (
-    "Keep-alive reminder - keep improving your controller: 1) refine the controller in "
-    "solution.py, 2) submit it via `python framework/control.py SubmitSolution`, 3) keep "
-    "iterating until fully solving the task."
-)
-
-# Repeating one sentence does not convert a non-submitter: over 43 runs, submitters and
-# non-submitters got the same number of reminders (29.1 vs 27.9) and two ignored it 57 times.
-_ESCALATE_AFTER_REMINDERS = 10
-_KEEP_ALIVE_MESSAGE_ESCALATED = (
-    "You have now received {n} reminders and have not submitted anything. Submit NOW, even if "
-    "your controller is unfinished: run `python framework/control.py SubmitSolution`. Every "
-    "submission is scored and the result is returned to you, so submitting is how you find out "
-    "whether your controller works - keep improving it afterwards."
-)
-
-
-def _keep_alive_message(base: str, reminders: int, submissions: int) -> str:
-    """The reminder to send. Escalates once a run has been reminded repeatedly and still submitted
-    nothing - firing early only costs a stronger sentence, never the run."""
-    if submissions == 0 and reminders >= _ESCALATE_AFTER_REMINDERS:
-        return _KEEP_ALIVE_MESSAGE_ESCALATED.format(n=reminders)
-    return base
-
-
-# Injected on the agent's next turn when a tool call is flagged (see config.flagging_warning_cap),
+# Delivered after completed tools (CLI adapters: next outer turn), subject to flagging_warning_cap,
 # so a model reaching for a sandboxed action learns why it failed and stops wasting budget on it.
 _FLAGGING_WARNING = (
-    "WARNING: your last command was flagged by the environment's monitoring as conflicting with "
+    "WARNING: a command was flagged by the environment's monitoring as conflicting with "
     "this benchmark's isolation and security rules. Those rules block, among others: installing "
     "packages (pip / uv / apt / npm ...); any internet or outbound network access (only the model "
     "host is reachable); reading or writing files outside your working directory; reading the "
@@ -91,7 +61,6 @@ _FLAGGING_WARNING = (
     "tricks (exec/eval, ctypes, importlib) to bypass the above.\n"
     "If that's what happened, please stop: (a) it isn't the purpose of this benchmark, and (b) the "
     "environment is strongly sandboxed, so these attempts simply fail and waste your budget. "
-    "Discover the game only by playing it through framework/make_env."
 )
 
 # A single backend error (one 500/timeout from a slow local server) must not end the
@@ -114,13 +83,22 @@ class _LoopContext:
     logger: RunLogger
     cwd: str
     policy: SecurityPolicy  # for flagging (not blocking) suspicious tool calls
+    protocol: ProtocolSession
     state_path: str = ""  # where to persist ExperimentState (saved live, per event)
     start: float = 0.0  # time.monotonic() at the run's start, for the live duration
     move_count: Callable[[], int] | None = None  # polls the env's step count, for the live state
     flagging_warning_cap: int = 0  # max flagging warnings to inject this task (0 = never)
-    warnings_injected: int = 0  # how many have been injected so far (mutated as they fire)
+    warnings_injected: int = 0  # warning allowance consumed
+    flags_observed: int = 0  # flags already considered at a completed-tool boundary
+    pending_warnings: list[str] = field(default_factory=list)
+    # Keep bounded excerpts until a parallel group has completed. CLI warnings may
+    # be delivered much later, so never describe the command as "your last command".
+    warning_calls: dict[str, str] = field(default_factory=dict)
+    flagged_call_ids: set[str] = field(default_factory=set)
+    attributed_flags: int = 0
     max_tool_calls: int | None = None  # hard tool-call budget, enforced mid-send (None = off)
-    is_perfect: Callable[[dict[str, Any]], bool] | None = None  # perfect-score test, mid-send
+    stop: StopSignal | None = None
+    interrupted: bool = False
 
 
 @dataclass
@@ -145,16 +123,14 @@ async def run_session(
     state_path: str,
     cwd: str,
     system_prompt: str | None = None,
-    hooks: list[Hook] | None = None,
+    protocol: ProtocolSession,
     stop: StopSignal | None = None,
     move_count: Callable[[], int] | None = None,
     flagging_warning_cap: int = 0,
-    exit_task_enabled: bool = True,
-    is_perfect: Callable[[dict[str, Any]], bool] | None = None,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
-    keep_alive = _KEEP_ALIVE_MESSAGE if exit_task_enabled else _KEEP_ALIVE_MESSAGE_NO_EXIT
+    protocol.on_start(start)
     ctx = _LoopContext(
         agent=agent,
         experiment=experiment,
@@ -168,7 +144,8 @@ async def run_session(
         move_count=move_count,
         flagging_warning_cap=flagging_warning_cap,
         max_tool_calls=limits.max_tool_calls,
-        is_perfect=is_perfect,
+        protocol=protocol,
+        stop=stop,
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
@@ -184,19 +161,21 @@ async def run_session(
     try:
         while True:
             reason = _decide_stop(
-                exit_requested=experiment.exit_requested,
                 interrupted=stop.is_set() if stop is not None else False,
                 turns=turns,
                 tool_calls_total=experiment.tool_calls_total,
                 elapsed_s=time.monotonic() - start,
                 limits=limits,
-                solved=_solved(experiment, is_perfect),
+                protocol_reason=protocol.stop_reason(),
             )
             if reason is not None:
                 break
 
             experiment.turn = turns + 1  # 1-indexed: the turn now starting
             outcome = await _run_turn(message, ctx)
+            if ctx.interrupted or (stop is not None and stop.is_set()):
+                reason = "interrupted"
+                break
 
             budget = limits.max_seconds_per_task
             if budget is not None and time.monotonic() - start >= budget:
@@ -227,11 +206,14 @@ async def run_session(
             turns += 1
             # Doom-loop breaker: a degenerate model that makes no tool call just burns walltime.
             no_tool_turns = 0 if outcome.saw_tool_call else no_tool_turns + 1
-            if 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns:
+            if (
+                limits.max_consecutive_no_tool_turns is not None
+                and 0 < limits.max_consecutive_no_tool_turns <= no_tool_turns
+            ):
                 reason = "no_tool_progress"
                 break
             reminders += 1
-            message = _keep_alive_message(keep_alive, reminders, experiment.submission_count)
+            message = protocol.reminder(reminders)
     finally:
         if watchdog is not None:
             watchdog.cancel()
@@ -243,15 +225,8 @@ async def run_session(
     # final re-score, having correctly decided walltime_limit.
     experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
     _save_state(ctx)
-    await _run_teardown_hooks(hooks or [], reason, ctx)
-    if _acted_without_submitting(reason, experiment.submission_count, experiment.tool_calls_total):
-        logger.log(
-            LogComponent.ORCHESTRATOR,
-            "WARNING",
-            "acted_without_submitting",
-            tool_calls_total=experiment.tool_calls_total,
-            env_moves=experiment.env_moves,
-        )
+    await _run_teardown_hooks(protocol.hooks, reason, ctx)
+    protocol.after_teardown(reason, logger)
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_end", phase="teardown", reason=reason)
     _save_state(ctx)
     return reason
@@ -267,7 +242,7 @@ def _save_state(ctx: _LoopContext) -> None:
         ctx.experiment.agent_session_id = ctx.agent.session_id()
     info = ctx.agent.resolved_model_info()
     resolved = info.get("context_window") if info else None
-    if resolved is not None:  # alancode's resolved window, when reported, wins over the baseline
+    if info is not None and resolved is not None:  # reported window wins over the baseline
         ctx.experiment.context_window = resolved
         ctx.experiment.context_window_source = info.get("context_window_source") or "alancode"
     ctx.experiment.save(ctx.state_path)
@@ -324,22 +299,19 @@ def _spawn_walltime_watchdog(
 
 def _decide_stop(
     *,
-    exit_requested: bool,
     interrupted: bool,
     turns: int,
     elapsed_s: float,
     limits: LimitsConfig,
     tool_calls_total: int = 0,
-    solved: bool = False,
+    protocol_reason: str | None = None,
 ) -> str | None:
     """Pure stop decision, checked before each turn. ``None`` means keep going."""
     if interrupted:
         return "interrupted"
-    if solved:  # a perfect submission - stop successfully, no need to burn the rest of the budget
-        return "solved"
-    if exit_requested:
-        return "agent_exit"
-    if turns >= limits.max_turns:
+    if protocol_reason is not None:
+        return protocol_reason
+    if limits.max_turns_per_task is not None and turns >= limits.max_turns_per_task:
         return "loop_limit"
     if limits.max_tool_calls is not None and tool_calls_total >= limits.max_tool_calls:
         return "tool_call_limit"
@@ -348,38 +320,48 @@ def _decide_stop(
     return None
 
 
-def _solved(
-    experiment: ExperimentState, is_perfect: Callable[[dict[str, Any]], bool] | None
-) -> bool:
-    """Whether the latest submission scored perfect, so the run has nothing left to do."""
-    last = experiment.last_submission_results
-    if not is_perfect or not last or last.get("error"):
-        return False
-    aggregate = last.get("aggregate", {})
-    if not aggregate.get("evaluation_complete") or aggregate.get("n_errors", 0):
-        return False
-    if any(e.get("error") for e in last.get("episodes", [])):
-        return False
-    return bool(is_perfect(aggregate))
-
-
-def _acted_without_submitting(
-    reason: str | None, submission_count: int, tool_calls_total: int
-) -> bool:
-    """Shape-3 tell: the agent ran tools but never submitted and exited on walltime - an unbound
-    control channel (native protocol on a subprocess agent -> submit/exit 503s) or a doom loop,
-    scoring only via the teardown re-score. turn/tool_calls ratio look healthy, so submission_count
-    with env_moves is the only signal - the failure the spinning detector cannot see."""
-    return reason == "walltime_limit" and submission_count == 0 and tool_calls_total > 0
-
-
 async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
     """Send one message, consume the event stream, dispatch each event."""
     outcome = _TurnOutcome()
-    ctx.transcript.write(UserMessage(message))  # record what was sent before the reply
+    if ctx.pending_warnings:
+        message = "\n\n".join([*ctx.pending_warnings, message])
+        ctx.pending_warnings.clear()
+    ctx.transcript.write(UserMessage(message))  # record the actual next-turn input
     _save_state(ctx)
+    consumer = asyncio.current_task()
+
+    async def watch_interrupt() -> None:
+        assert ctx.stop is not None and consumer is not None
+        announced = False
+        while True:
+            await asyncio.sleep(0.05)
+            if not ctx.stop.is_set():
+                continue
+            if not announced:
+                ctx.logger.log(
+                    LogComponent.ORCHESTRATOR,
+                    "INFO",
+                    "stop_requested",
+                    message="Finishing active tools; interrupt again to force stop.",
+                )
+                announced = True
+            if outcome.pending_tools and not ctx.stop.force_requested():
+                continue
+            ctx.interrupted = True
+            try:
+                async with asyncio.timeout(5):
+                    await ctx.agent.abort()
+            except Exception:
+                pass
+            finally:
+                consumer.cancel()
+            return
+
+    interrupt_watch = asyncio.create_task(watch_interrupt()) if ctx.stop is not None else None
     try:
         async for event in ctx.agent.send(message):
+            if ctx.interrupted:
+                break
             ctx.transcript.write(event)
             await _dispatch_event(event, ctx, outcome)
             _save_state(ctx)  # live: duration + cheat counter update during a long turn
@@ -396,12 +378,16 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
                 and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
             )
             if (
-                ctx.experiment.exit_requested
-                or budget_reached
-                or _solved(ctx.experiment, ctx.is_perfect)
+                budget_reached
+                or ctx.protocol.stop_reason() is not None
+                or (ctx.stop is not None and ctx.stop.is_set())
             ):
+                ctx.interrupted = ctx.stop is not None and ctx.stop.is_set()
                 await ctx.agent.abort()
                 break
+    except asyncio.CancelledError:
+        if not ctx.interrupted:
+            raise
     except Exception as exc:  # an unexpected fault in a tool or the adapter
         ctx.logger.log(
             LogComponent.LOOP,
@@ -411,6 +397,11 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
             error=f"{type(exc).__name__}: {exc}",
         )
         outcome.crashed = True
+    finally:
+        if interrupt_watch is not None:
+            interrupt_watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await interrupt_watch
     return outcome
 
 
@@ -423,9 +414,12 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
         await _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution
-            result = await _execute_framework_tool(tool, event, ctx)
+            result, notices = await _execute_framework_tool(tool, event, ctx)
             ctx.transcript.write(result)
             await ctx.agent.inject(result.output)
+            for notice in notices:
+                ctx.transcript.write(UserMessage(notice))
+                await ctx.agent.inject(notice)
             outcome.pending_tools.discard(event.id)
     elif isinstance(event, ToolResult):
         outcome.pending_tools.discard(event.id)
@@ -439,16 +433,96 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             message=event.message,
         )
         outcome.error_category = event.category
+    # Include flags raised by trusted HTTP handlers during the tool, even if the
+    # shell caught the denial and returned success. Wait for parallel calls too.
+    if isinstance(event, (ToolCall, ToolResult)) and not outcome.pending_tools:
+        await _maybe_warn_flagged(ctx)
 
 
 async def _maybe_warn_flagged(ctx: _LoopContext) -> None:
-    """Inject the flagging warning on the agent's next turn, up to ``flagging_warning_cap`` times
-    (0 = never). Capped because the message itself says repeat attempts waste budget - re-warning on
-    every flag would be self-defeating and burn the agent's context."""
+    """Deliver once at a completed-tool boundary, subject to the per-task message cap.
+
+    CLI adapters queue for the next send; Alan can inject before its next model request.
+    A terminal boundary has no subsequent request, so do not claim message delivery.
+    """
+    flags = ctx.experiment.flagged_tool_calls
+    new_flags = flags - ctx.flags_observed
+    commands = _flagged_command_context(ctx, unattributed=new_flags > ctx.attributed_flags)
+    ctx.warning_calls.clear()
+    ctx.flagged_call_ids.clear()
+    ctx.attributed_flags = 0
+    if new_flags <= 0:
+        return
+    ctx.flags_observed = flags
+    if (
+        ctx.protocol.stop_reason() is not None
+        or (ctx.stop is not None and ctx.stop.is_set())
+        or (
+            ctx.max_tool_calls is not None and ctx.experiment.tool_calls_total >= ctx.max_tool_calls
+        )
+    ):
+        return
     if ctx.flagging_warning_cap <= 0 or ctx.warnings_injected >= ctx.flagging_warning_cap:
         return
     ctx.warnings_injected += 1
-    await ctx.agent.inject(_FLAGGING_WARNING)
+    message = _FLAGGING_WARNING + "\n\n" + commands + "\n\n" + ctx.protocol.interaction_guidance()
+    immediate = ctx.agent.capabilities().supports_inject
+    ctx.logger.log(
+        LogComponent.AGENT,
+        "WARNING",
+        "flagging_warning",
+        delivery="after_tool" if immediate else "next_turn",
+        warning_number=ctx.warnings_injected,
+    )
+    if immediate:
+        await ctx.agent.inject(message)
+        ctx.transcript.write(UserMessage(message))
+    else:
+        # CLI adapters cannot accept messages inside their current send().
+        # Add to the next send here, so the transcript shows its actual delivery.
+        ctx.pending_warnings.append(message)
+
+
+def _command_excerpt(call: ToolCall) -> str:
+    """Keep the original command (or tool arguments), with bounded middle truncation."""
+    value = call.input.get("command", call.input.get("cmd"))
+    text = (
+        value
+        if isinstance(value, str)
+        else call.name + " " + json.dumps(call.input, ensure_ascii=False)
+    )
+    if len(text) > 800:
+        text = text[:390] + " ... [truncated] ... " + text[-390:]
+    return text
+
+
+def _flagged_command_context(ctx: _LoopContext, *, unattributed: bool) -> str:
+    """Quote exact known calls; do not invent attribution for an HTTP-side flag.
+
+    Trusted HTTP handlers share a flag counter, but cannot know which concurrent
+    shell request triggered them. One pending call is unambiguous; several calls
+    are listed as candidates instead of blaming the last completed clean call.
+    """
+    known = [value for key, value in ctx.warning_calls.items() if key in ctx.flagged_call_ids]
+    uncertain = []
+    if unattributed:
+        if len(ctx.warning_calls) == 1:
+            known = list(ctx.warning_calls.values())
+        else:
+            uncertain = list(ctx.warning_calls.values())
+    lines = [f"Command flagged : '{text}'" for text in known[:5]]
+    if len(known) > 5:
+        lines.append(f"{len(known) - 5} additional flagged commands omitted.")
+    if uncertain:
+        lines.append(
+            "A flag also occurred during concurrent commands; exact attribution is unavailable. Commands in that group:"
+        )
+        lines.extend(f"- '{text}'" for text in uncertain[:5])
+        if len(uncertain) > 5:
+            lines.append(f"{len(uncertain) - 5} additional commands omitted.")
+    if not lines:
+        lines.append("Command flagged : '<command unavailable in the tool event stream>'")
+    return "\n".join(lines)
 
 
 async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
@@ -458,10 +532,13 @@ async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
     :func:`_flag_blocked_result`, which catches egress the keyword list cannot enumerate.
     Never blocks — it records a forensic count + WARNING, and (capped) nudges the agent to stop.
     """
+    ctx.warning_calls[call.id] = _command_excerpt(call)
     flags = flag_tool_call(call.name, call.input, ctx.policy)
     if not flags:
         return
     ctx.experiment.flagged_tool_calls += len(flags)
+    ctx.attributed_flags += len(flags)
+    ctx.flagged_call_ids.add(call.id)
     ctx.logger.log(
         LogComponent.AGENT,
         "WARNING",
@@ -469,7 +546,6 @@ async def _flag_suspicious_call(call: ToolCall, ctx: _LoopContext) -> None:
         tool=call.name,
         flags=flags,
     )
-    await _maybe_warn_flagged(ctx)
 
 
 async def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
@@ -482,15 +558,20 @@ async def _flag_blocked_result(result: ToolResult, ctx: _LoopContext) -> None:
     if not result.is_error or not flag_os_denial(result.output):
         return
     ctx.experiment.flagged_tool_calls += 1
+    ctx.attributed_flags += 1
+    ctx.flagged_call_ids.add(result.id)
     ctx.logger.log(LogComponent.AGENT, "WARNING", "flagged_tool_call", reason="egress_denied")
-    await _maybe_warn_flagged(ctx)
 
 
-async def _execute_framework_tool(tool: Tool, call: ToolCall, ctx: _LoopContext) -> ToolResult:
+async def _execute_framework_tool(
+    tool: Tool, call: ToolCall, ctx: _LoopContext
+) -> tuple[ToolResult, list[str]]:
     """Run one framework tool and normalize its result (controlled failures stay results).
 
     Execution logging lives on the tool itself (``LoggingTool``), shared with the
     HTTP control channel and backend-executed dispatch paths.
     """
     output = await tool.call(call.input, ToolContext(cwd=ctx.cwd))
-    return ToolResult(id=call.id, output=str(output.data), is_error=output.is_error)
+    return ToolResult(
+        id=call.id, output=str(output.data), is_error=output.is_error
+    ), output.messages

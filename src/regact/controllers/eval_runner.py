@@ -22,7 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--solution", required=True)
     parser.add_argument("--lifecycle", required=True)
     parser.add_argument("--episodes", type=int, default=1)
-    parser.add_argument("--max-moves", type=int, default=400)
+    parser.add_argument(
+        "--max-moves",
+        type=lambda value: None if value.lower() in ("none", "null") else int(value),
+        default=400,
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--n-videos", type=int, default=0)  # record the first N episodes; 0 = none
     parser.add_argument("--seed", type=int, default=None)

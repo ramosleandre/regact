@@ -1,4 +1,4 @@
 # @package _global_
 # No optional features (the default). The controller is always-on core - configured under
-# `controller:` (conf/controller/*), not here. Select a real feature with e.g. `features=cwm`.
+# `controller:` (conf/controller/*), not here. CWM uses `protocol=cwm`, not this additive feature group.
 features: {}

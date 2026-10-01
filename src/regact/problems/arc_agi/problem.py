@@ -29,7 +29,7 @@ from regact.problems.arc_agi.tasks import (
     discover_tasks,
     discover_tasks_from_arcade,
 )
-from regact.problems.base import BaseProblem, register_problem
+from regact.problems.base import BaseProblem, observation_prompt, register_problem
 from regact.workspace.templates import TemplateFile
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def _validated_click_data(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or "x" not in data or "y" not in data:
         raise ValueError(
             "ACTION6 (click) requires data={'x': int, 'y': int} with 0<=x,y<=63; "
-            f"got data={data!r}. Use complex_action(x, y) from code_library/arc_agi_helper.py."
+            f"got data={data!r}. Use complex_action(x, y) from framework/arc_agi_helper.py."
         )
     try:
         x, y = int(data["x"]), int(data["y"])
@@ -110,6 +110,34 @@ class _ArcGymShim:
         obs = self._env.reset()
         self._last = obs
         return obs, self._info(obs)
+
+    def reset_explicit(self, kind: str, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
+        """Select a precise reset in the local engine's normal reset pipeline.
+
+        The public wrapper's RESET chooses full/level implicitly. Bind only this
+        game's handler for this call, preserving rendering and scorecard updates.
+        Never toggle process-wide ONLY_RESET_LEVELS (other tasks run concurrently).
+        """
+        game = getattr(self._env, "_game", None)
+        if game is None:
+            raise ValueError("Explicit ARC reset modes require the local/offline engine")
+        method = {"environment": "full_reset", "level": "level_reset"}.get(kind)
+        if method is None:
+            raise ValueError(f"Unsupported reset kind: {kind}")
+        had_override = "handle_reset" in game.__dict__
+        previous = game.__dict__.get("handle_reset")
+        try:
+            game.handle_reset = getattr(game, method)
+            obs = self._env.reset()
+            if obs is None:
+                raise RuntimeError("ARC returned no observation after reset")
+            self._last = obs
+            return obs, self._info(obs)
+        finally:
+            if had_override:
+                game.handle_reset = previous
+            else:
+                del game.handle_reset
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
         game_action, data = self._decode(action)
@@ -216,8 +244,8 @@ _KEYBOARD_ACTIONS = (
 )
 _CLICK_ACTIONS = (
     "The click action ACTION6 takes x,y coordinates (0-63), passed as "
-    '`{"action": 6, "data": {"x": 32, "y": 32}}` — or use `complex_action(x, y)` '
-    "from `code_library/arc_agi_helper.py`."
+    '`{"action": 6, "data": {"x": 32, "y": 32}}` — or use `complex_action(x, '
+    "y)` from `framework/arc_agi_helper.py`."
 )
 _ACTION5 = (
     "ACTION5 is a special action whose effect is game-specific (often an interact/"
@@ -257,16 +285,20 @@ def _actions_for_ids(available: Iterable[int]) -> str:
     return "\n\n".join(blocks)
 
 
-_HELPER = '''\
-"""ARC-AGI helpers (import-free): action ids + the click-action builder.
-
+_DIRECT_INTERACTION_EXAMPLE = """\
 Use these with the env client in your scripts and controller, e.g.::
 
     from framework.make_env import make_env
-    from code_library.arc_agi_helper import ACTION4, complex_action
+    from framework.arc_agi_helper import ACTION4, complex_action
     env = make_env()
     obs = env.step(ACTION4)              # a directional action
-    obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)
+    obs = env.step(complex_action(32, 32))  # a click at (x=32, y=32)"""
+
+
+_HELPER = '''\
+"""ARC-AGI helpers (import-free): action ids + the click-action builder.
+
+{interaction_example}
 
 Valid ids for the current game are in ``obs.available_actions``. ACTION6 is the click
 action, when it is available.
@@ -403,12 +435,33 @@ class ArcAgiProblem(BaseProblem):
     def get_task_names(self) -> list[str]:
         return list(self._tasks)
 
+    def reset_commands(self) -> dict[str, str]:
+        return {
+            "ResetLevel": "Reset the current ARC level, preserving completed levels.",
+            "ResetEnvironment": "Reset the whole environment from level 1.",
+        }
+
+    def validate_controller_action(self, action: Any) -> None:
+        action_id = action.get("action") if isinstance(action, dict) else action
+        if action_id == 0:
+            raise InvalidActionError(
+                "Use ResetLevel or ResetEnvironment between RunController calls; "
+                "RESET is not a controller action."
+            )
+
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
         if mode not in (ObsMode.RAW, ObsMode.RAW_LAST_FRAME_ONLY):
             raise RegactError(
                 ErrorCategory.ENV_RUNTIME, f"arc_agi: obs_mode {mode!r} not supported yet"
             )
         return ArcRenderer(last_frame_only=mode is ObsMode.RAW_LAST_FRAME_ONLY)
+
+    def milestone_kind(self, milestone: str) -> str:
+        if milestone == "game over":
+            return "failure"
+        if milestone == "game won" or milestone.startswith("level completed ("):
+            return "progress"
+        return "event"
 
     def milestone_detector(self, task_name: str) -> Any:
         return _milestone_detector
@@ -419,11 +472,21 @@ class ArcAgiProblem(BaseProblem):
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         helper: HelperConfig | None = None,
+        direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         # The ARC helper is the action-construction interface (not a rules spoiler), so it ships
         # under every info_mode. to_png appends an obs->PNG renderer for vision agents.
-        content = _HELPER + (_RENDER_HELPER if helper and helper.to_png else "")
-        return [TemplateFile("code_library/arc_agi_helper.py", content)]
+        example = (
+            _DIRECT_INTERACTION_EXAMPLE
+            if direct_interaction
+            else (
+                "Use these to construct actions returned by your exploration controller.\n"
+                "For example: ACTION4 for a directional action, complex_action(32, 32) for a click."
+            )
+        )
+        content = _HELPER.replace("{interaction_example}", example)
+        content += _RENDER_HELPER if helper and helper.to_png else ""
+        return [TemplateFile("framework/arc_agi_helper.py", content)]
 
     def secret_modules(self) -> tuple[str, ...]:
         return ("arcengine", "arc_agi")
@@ -459,6 +522,20 @@ class ArcAgiProblem(BaseProblem):
         body = f"{header}\n\n" + "\n".join(rows)
         actions = _actions_for_ids(obs.available_actions)
         return f"{body}\n\nActions available now:\n\n{actions}" if actions else body
+
+    def enumerate_actions(self, obs: Obs) -> Iterable[Any]:
+        for action in obs.available_actions:
+            if type(action) is not int:
+                raise ValueError("ARC available actions must be integer IDs")
+            if action == 6:
+                for y in range(64):
+                    for x in range(64):
+                        yield {"action": 6, "data": {"x": x, "y": y}}
+            else:
+                yield action
+
+    def exploration_score(self, aggregate: dict[str, Any]) -> float:
+        return float(aggregate.get("mean_levels_completed", 0) or 0)
 
     def compute_episode_metrics(self, final_obs: Obs, *, steps: int) -> dict[str, Any]:
         info = final_obs.info or {}
@@ -524,28 +601,61 @@ class ArcAgiProblem(BaseProblem):
         return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
 
     def build_prompt(
-        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode,
+        obs_mode: ObsMode = ObsMode.RAW,
+        direct_interaction: bool = True,
     ) -> str:
         task = self._task(task_name)
         if info_mode is InfoMode.MINIMAL:
-            return (
+            return observation_prompt(
                 f"# Game: ARC-AGI-3 ({task.title})\n\n"
                 "Discover the rules by interaction. Inspect `obs.frame` and "
-                "`obs.available_actions` from your own scripts with `make_env()`; "
-                "the framework tells you nothing more about this task."
+                "`obs.available_actions` "
+                + (
+                    "from your own scripts with `make_env()`; "
+                    if direct_interaction
+                    else "in recorded experience from `framework.data_api`; "
+                )
+                + "the framework tells you nothing more about this task.",
+                direct_interaction=direct_interaction,
             )
         last_frame_only = obs_mode is ObsMode.RAW_LAST_FRAME_ONLY
+        # Show the level target when known; internal game IDs and efficiency baselines stay hidden.
+        levels_to_win = f"Levels to win: {task.win_levels}" if task.win_levels is not None else ""
         body = (
             _PROMPT.read_text(encoding="utf-8")
             .replace("{task}", task.title)
+            .replace("{levels_to_win}", levels_to_win)
+            .replace(
+                "{interaction_note}",
+                (
+                    "`make_env()` gives you an isolated client with a gym-like interface "
+                    "(importable with `from framework.make_env import make_env`). Each `obs` "
+                    "is:"
+                )
+                if direct_interaction
+                else (
+                    "Recorded experience is accessible through `framework.data_api`. Each "
+                    "observation is:"
+                ),
+            )
             .replace("{frame_desc}", _FRAME_DESC_SINGLE if last_frame_only else _FRAME_DESC_STACK)
+            .replace(
+                "{goal_note}",
+                "You must figure out the goal of the game by yourself. Levels share similar goals. Complete as many levels as possible. As soon as you make progress in terms of levels, submit a solution (`python framework/control.py SubmitSolution`), then keep working on solving the next levels."
+                if direct_interaction
+                else (
+                    "Discover the goal of the game from recorded experience and your experiments. "
+                    "Levels share related goals. Complete all levels to win; real progress is "
+                    "recorded automatically when your exploration controller plays the game."
+                ),
+            )
             .rstrip()
         )
-        # Only "Levels to win" is shown - the game id is internal, and the human baseline was an
-        # irrelevant efficiency anchor. (baseline_actions is still used for RHAE scoring, just not
-        # surfaced here.) The actions are described live in the first observation (render_obs_text).
-        meta = [f"Levels to win: {task.win_levels}"] if task.win_levels is not None else []
-        return body + ("\n" + "\n".join(meta) if meta else "")
+        return observation_prompt(body, direct_interaction=direct_interaction)
 
     def config_kwargs(self) -> dict[str, Any]:
         return {"environments_dir": self._dir, "operation_mode": self._operation_mode}

@@ -8,6 +8,7 @@ config) keeps it simple and avoids ``StrEnum`` round-trip surprises.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from typing import Any
@@ -23,8 +24,11 @@ from regact.config.schema import (
     LimitsConfig,
     ObsMode,
     ProblemConfig,
+    ProtocolConfig,
     RunConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
@@ -41,25 +45,42 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
-    for name in ("max_turns", "max_consecutive_no_tool_turns"):
-        if fields.get(name) is not None:
-            fields[name] = int(fields[name])
-    for name in ("max_seconds_per_task", "max_actions_per_env"):
+    # Old launchers still pass limits.max_turns; when set it wins over the YAML default.
+    legacy_turns = fields.pop("max_turns", None)
+    if legacy_turns is not None:
+        logger.warning("limits.max_turns is deprecated, use limits.max_turns_per_task")
+        fields["max_turns_per_task"] = legacy_turns
+    if fields.pop("max_actions_per_env", None) is not None:
+        raise ValueError(
+            "limits.max_actions_per_env was removed: use limits.max_actions_per_episode, "
+            "which renews on every reset (the old cap renewed only on a new make_env)"
+        )
+    for name in (
+        "max_turns_per_task",
+        "max_consecutive_no_tool_turns",
+        "max_tool_calls",
+        "max_seconds_per_task",
+        "max_actions_per_episode",
+        "max_actions_per_task",
+    ):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
 
 
-def _helper_from(raw: Any, agent_name: AgentName) -> HelperConfig:
+def _helper_from(
+    raw: Any, agent_name: AgentName, *, protocol: str = "policy_search"
+) -> HelperConfig:
     """Build ``HelperConfig`` from the ``problem.helper`` block.
 
     ``to_png`` unset (absent or null) defaults to the agent's vision capability, so an ad-hoc
     ``agent=claude problem=arc_agi`` run gets the obs->PNG helper without a bench-script override,
-    while a text-only Alan run does not. An explicit true/false always wins.
+    while a text-only Alan run does not. CWM defaults it off because its data API
+    exports stored observations. An explicit true/false always wins.
     """
     d = dict(raw or {})
     to_png = d.get("to_png")
-    resolved = is_vision_agent(agent_name) if to_png is None else bool(to_png)
+    resolved = is_vision_agent(agent_name) and protocol != "cwm" if to_png is None else bool(to_png)
     return HelperConfig(to_png=resolved)
 
 
@@ -95,6 +116,21 @@ def _controller_from(raw: Any) -> ControllerConfig:
         if fields.get(name) is not None:
             fields[name] = int(fields[name])
     return ControllerConfig(**fields)
+
+
+def _protocol_from(raw: Any) -> ProtocolConfig:
+    """Select the old workflow when absent; accept a name or a protocol mapping."""
+    if raw is None:
+        return ProtocolConfig()
+    if isinstance(raw, str):
+        return ProtocolConfig(name=raw)
+    if not isinstance(raw, Mapping):
+        raise ValueError("protocol must be a name or a mapping containing name")
+    fields = dict(raw)
+    name = fields.pop("name", None)
+    if not isinstance(name, str) or not name:
+        raise ValueError("protocol.name must be a non-empty string")
+    return ProtocolConfig(name=name, options=fields)
 
 
 # Launch facts the LAUNCHER cannot pass: sbatch only returns a job id after submission, so the
@@ -134,9 +170,14 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             obs_mode=ObsMode(problem.get("obs_mode", ObsMode.RAW)),
             info_mode=InfoMode(problem.get("info_mode", InfoMode.INFORMATIVE)),
             seed=problem.get("seed"),
-            helper=_helper_from(problem.get("helper"), AgentName(agent["name"])),
+            helper=_helper_from(
+                problem.get("helper"),
+                AgentName(agent["name"]),
+                protocol=_protocol_from(data.get("protocol")).name,
+            ),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
+        protocol=_protocol_from(data.get("protocol")),
         controller=_controller_from(data.get("controller")),
         features=_features_from(data.get("features")),
         parallel_workers=int(data.get("parallel_workers", 1)),

@@ -13,18 +13,17 @@
 
 ---
 
-**regact** is a research framework for agents that **reason** about an unknown
-**game** and **act** in it. It drives a *code-writing agent* (Claude Code, codex,
-or Alan) that plays an environment (ARC-AGI-3, MiniGrid), writes an
-`act(obs) -> action` controller, and submits it for evaluation. The controller is
-always-on; optional **features** such as Code World Model add capabilities. Controllers
-can retain state between actions; evaluation creates a new controller for each episode.
+**regact** is a research framework for agents that **reason** about an unknown **game** and **act** in it. A code-writing agent (Claude Code, Codex or Alan) develops Python controllers for environments such as ARC-AGI-3 and MiniGrid. Select an experiment **protocol** to choose how the agent learns and interacts:
 
-The **agent**, the **environment** (a "problem"), and the optional **features** have
-separate extension interfaces within this controller-evaluation workflow. The agent reaches the
-environment through a localhost **HTTP boundary**. With sandboxing enabled, the game
-source is hidden from the agent, preventing it from bypassing exploration by reading
-the implementation.
+| Protocol | Workflow |
+|---|---|
+| **`vanilla`** | Read recorded experience, write a controller, and run it in the real environment. |
+| **`cwm`** | Build and validate a **Code World Model**, then run State-based controllers with per-action prediction checks. Current design: **v5**. |
+| **`policy_search`** (default) | Explore directly, write `solution.py`, and evaluate the policy on fresh episodes. |
+
+Vanilla and CWM share dataset access, execution, resets and logging. Both support continuing one live environment across controller calls (`single_instance`) or starting fresh per call (`multi_instance`). Each call constructs a fresh controller; it may retain private memory within that call.
+
+The **agent**, **problem** and **protocol** have separate extension interfaces. Framework operations cross a localhost HTTP boundary. With sandboxing enabled, the game source is hidden from the agent. Submitted vanilla/CWM code is also isolated from the live environment and experience database. See [Protocols](docs/protocols.md) for the design and [CWM v5](docs/cwm.md) for its requirements and limitations.
 
 ## Demo
 
@@ -32,7 +31,7 @@ the implementation.
 
 ![regact — a ~60-second tour](assets/videos/regact_pres.gif)
 
-<em>A code-writing agent probes an unknown game, writes an <code>act(self, obs)</code> controller, and gets scored — browsed in the visualizer (sped up 2x). <a href="assets/videos/regact_pres.mp4">Full-quality clip</a>.</em>
+<em>The policy-search workflow: a code-writing agent probes an unknown game, writes an <code>act(self, obs)</code> controller, and gets scored — browsed in the visualizer (sped up 2x). <a href="assets/videos/regact_pres.mp4">Full-quality clip</a>.</em>
 
 </div>
 
@@ -76,30 +75,33 @@ on the CLI. The defaults live in [`src/regact/conf/config.yaml`](src/regact/conf
 ```yaml
 agent:   scripted        # who writes the code   - scripted | claude | codex | alan
 problem: arc_agi         # the environment       - arc_agi | minigrid
-controller: default      # always-on: the agent writes + submits a policy (knobs: controller.*)
-features: none           # OPTIONAL extra capabilities - none | cwm
+protocol: policy_search  # workflow: policy_search | vanilla | cwm
+controller: default      # policy_search evaluation settings (controller.*)
+features: none           # optional additive capabilities inside policy_search
 sandbox: true            # confine the agent + block egress (false = off)
 limits:
-  max_turns: 350             # agent turns per task
+  max_turns_per_task: 350             # outer send cycles per task; null = unlimited
   max_seconds_per_task: null # wall-clock per task
-  max_actions_per_env: null  # env.step cap per env instance
+  max_actions_per_episode: null  # env.step cap per episode; reset renews it
 ```
 
-The always-on controller's eval knobs live under `controller.*` (e.g. `controller.n_episodes`);
-each optional feature owns its knobs under `features.<name>.*`. A few examples:
+Policy-search evaluation settings live under `controller.*`. Vanilla/CWM settings live under `protocol.*`; their features setting must be `none`. Problem configs default to `multi_instance`, so select `single_instance` explicitly for persistent interaction.
 
 ```bash
 # smoke test: scripted agent, no LLM; runs ARC ls20 (requires make install-arc and game data):
 make run ARGS="experiment=dev"
 
-# MiniGrid with Claude:
-make run ARGS="agent=claude problem=minigrid"
+# MiniGrid with Claude, continuing a live environment:
+make run ARGS="agent=claude problem=minigrid protocol=vanilla features=none problem.lifecycle=single_instance limits.max_tool_calls=100 limits.max_seconds_per_task=3600"
 
-# ARC-AGI-3 with Alan, add the Code World Model feature, 3 eval episodes:
-make run ARGS="agent=alan problem=arc_agi features=cwm controller.n_episodes=3"
+# ARC-AGI-3 with Codex and CWM v5:
+make run ARGS="agent=codex problem=arc_agi 'problem.tasks=[ls20]' protocol=cwm features=none problem.lifecycle=single_instance limits.max_tool_calls=100 limits.max_seconds_per_task=3600"
+
+# Policy search with independent controller evaluations:
+make run ARGS="agent=claude problem=minigrid protocol=policy_search controller.n_episodes=3"
 ```
 
-See a config composed without running it: `make run ARGS="... --cfg job"`.
+Inspect configuration without running it by adding `--cfg job --resolve`. Use `dry_run=true` to generate the actual workspace and prompt for inspection in the viewer, without starting the agent or collecting random experience. See [Experiments](docs/experiments.md) and the [parameter tables](docs/managed_protocols.md#shared-protocol-parameters).
 
 ## Visualization
 
@@ -112,6 +114,8 @@ make viz EXP=experiments/<experiment_name>/latest
 ```
 
 Open **[localhost:8030](http://localhost:8030)**. Set `PORT=8031` to use another port. You can then navigate to an experiment and browse its tasks. In each of them you have access to panels Overview, Conversation, Artifacts (files and videos) and Graphs (metrics).
+
+For vanilla/CWM, **Load controller playback** in Conversation reconstructs each call's real trajectory from recorded observations. CWM also has a **CWM** panel for phase history, validation, counterexamples, episodes and optional plans. These trajectories are loaded on demand rather than stored as videos. **Jump to** navigates framework commands at tool-call granularity, including multiple calls inside one Codex turn.
 
 | Conversation | Overview |
 |---|---|
@@ -129,16 +133,19 @@ If you performed your experiments in `experiments/<benchmark_name>/`, you can al
 
 | Guide | What it covers |
 |---|---|
-| **[Overview](docs/overview.md)** | The three seams and how a run flows through them |
+| **[Overview](docs/overview.md)** | Architecture, extension points and code map |
+| **[Protocols](docs/protocols.md)** | Choose a workflow · lifecycle versus protocol · add a protocol |
+| **[Managed execution](docs/managed_protocols.md)** | Vanilla and shared CWM behavior · controllers, resets, dataset API and parameters |
+| **[CWM v5](docs/cwm.md)** | Modeling, validation, exploration, simulation, optional planning and limitations |
 | **[Agents](docs/agents.md)** | Use an agent backend · add a new one |
 | **[Environments](docs/environments.md)** | Use a problem · add a new one |
-| **[Features](docs/features.md)** | Use a feature · add a new one |
+| **[Features](docs/features.md)** | Policy-search evaluation settings and optional extensions |
 | **[Experiments](docs/experiments.md)** | Launching runs, outputs, and the visualizer |
 | **[Sandboxing](docs/sandboxing.md)** | How isolation works and how it is verified |
 
 ## Development
 
 ```bash
-make check         # the CI gate: ruff + mypy + unit tests
+make check         # local checks: ruff + mypy + unit tests
 make test-all      # every test, including the live ones (needs alancode / a game)
 ```

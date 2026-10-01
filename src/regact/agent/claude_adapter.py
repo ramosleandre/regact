@@ -27,6 +27,7 @@ from regact.agent.events import (
     ThinkingDelta,
     ToolCall,
     ToolResult,
+    tool_result_images,
 )
 from regact.obs.errors import ErrorCategory
 from regact.security.policy import SecurityPolicy, default_policy
@@ -241,6 +242,7 @@ class ClaudeAgent(_CliAgent):
                     id=str(block.get("tool_use_id", "")),
                     output=_text_of(block.get("content")),
                     is_error=bool(block.get("is_error", False)),
+                    images=tool_result_images(block.get("content")),
                 )
                 for block in _content(obj)
                 if block.get("type") == "tool_result"

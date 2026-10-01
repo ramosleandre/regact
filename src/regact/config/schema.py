@@ -74,21 +74,21 @@ class ProblemConfig:
     obs_mode: ObsMode = ObsMode.RAW
     info_mode: InfoMode = InfoMode.INFORMATIVE
     seed: int | None = None  # ignored by deterministic envs (ARC)
-    helper: HelperConfig = field(default_factory=HelperConfig)  # code_library helper capabilities
+    helper: HelperConfig = field(default_factory=HelperConfig)  # workspace helper capabilities
     kwargs: dict[str, Any] = field(default_factory=dict)  # problem-specific ctor args
 
 
 @dataclass
 class LimitsConfig:
-    """Per-task run limits; each name states its scope."""
+    """Run limits; each name states its scope. None disables each configured cap."""
 
-    max_turns: int = 150  # agent turns per task before the loop gives up
+    max_turns_per_task: int | None = 150  # agent turns per task before the loop gives up
     # Total tool calls across the whole run (all turns), agent-agnostic + walltime-independent -
     # the primary budget. None = off. Enforced by the loop between sends; on the alan path the
     # agent's own inner cap is set from it so a single query returns near the budget (see task.py).
     max_tool_calls: int | None = None
     max_seconds_per_task: int | None = None  # wall-clock per task, from session start
-    max_actions_per_env: int | None = None  # env.step cap per env instance (from its make)
+    max_actions_per_episode: int | None = None  # env.step cap per episode (reset renews it)
     # Doom-loop breaker: end the loop after N consecutive REGACT TURNS with no tool call (a
     # degenerate model spinning garbage); 0 disables. Any tool call (framework/bash/native)
     # resets the count, and the text of a turn is never consulted - a turn full of unparseable
@@ -97,12 +97,13 @@ class LimitsConfig:
     # A regact turn is ONE send(), not one model call: a subprocess agent runs several internal
     # iterations inside each one (alan averages ~5, and a Kimi run measured 4). So this caps
     # roughly 5N wasted model calls, not N - set it in turns and read the cost in calls.
-    max_consecutive_no_tool_turns: int = 0
+    max_consecutive_no_tool_turns: int | None = 0
+    max_actions_per_task: int | None = None  # vanilla/CWM only: real steps, resets excluded
 
 
 @dataclass
 class ControllerConfig:
-    """Eval knobs for the always-on controller (the agent writes a policy and submits it).
+    """Evaluation settings for policy_search (the agent writes and submits a policy).
 
     The controller is core, not a feature, so its settings live here rather than under
     ``features.<name>``. They configure the controller's *evaluation*: how many episodes
@@ -111,11 +112,23 @@ class ControllerConfig:
     """
 
     n_episodes: int = 1  # eval episodes per submission (multi-instance: more = better stats)
-    max_moves: int = 2500  # max env.step per controller rollout (eval)
+    max_moves: int | None = 2500  # max env.step per controller rollout (eval)
     # Record a video of the FIRST min(n_videos, n_episodes) eval episodes; 0 = no video.
     n_videos: int = 2
     shadow_replay: bool = False  # re-score by replaying actions on a trusted env (anti-cheat)
     exit_task_enabled: bool = True  # False = agent cannot ExitTask; run ends on framework terms
+
+
+@dataclass
+class ProtocolConfig:
+    """Workflow selection. Protocol-specific settings are validated by its factory.
+
+    YAML/CLI fields live directly under protocol.*; the loader separates the name
+    from the options. Existing controller.* settings keep their names and defaults.
+    """
+
+    name: str = "policy_search"
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -124,8 +137,8 @@ class RunConfig:
 
     agent: AgentConfig
     problem: ProblemConfig
-    # The controller is always-on core (its eval knobs live on ``controller``). ``features``
-    # holds only OPTIONAL extra capabilities (e.g. cwm), each owning its knobs (``features.<name>``)
+    # Existing policy_search settings retain their public names and defaults.
+    # Other protocols own their settings under ``protocol`` and do not use these fields.
     controller: ControllerConfig = field(default_factory=ControllerConfig)
     features: dict[str, dict[str, Any]] = field(default_factory=dict)
     parallel_workers: int = 1  # 1 = sequential
@@ -134,7 +147,7 @@ class RunConfig:
     n_attempts_per_task: int = 1
     first_obs_in_prompt: bool = False  # render the first observation into the first message
     # When a tool call is flagged (sandbox/security rule), inject a one-off warning to the agent
-    # on its next turn, up to this many times per task. 0 = never inject (flag silently as before).
+    # after tools (CLI: next outer turn), up to this many times per task. 0 disables messages.
     flagging_warning_cap: int = 3
     # Prompt-only: build the workdir + the exact system prompt + first message, write them to the
     # run's transcript, and exit WITHOUT running the agent (no LLM cost). For previewing the prompt
@@ -149,6 +162,7 @@ class RunConfig:
     # (attempt_index, serve mode, quant, slurm job id) - facts the harness cannot know about itself.
     # Untyped on purpose, so the launcher can add a field without a schema change here.
     launch: dict[str, Any] = field(default_factory=dict)
+    protocol: ProtocolConfig = field(default_factory=ProtocolConfig)
 
 
 def redacted_config_dict(config: RunConfig) -> dict[str, Any]:
@@ -168,4 +182,6 @@ def redacted_config_dict(config: RunConfig) -> dict[str, Any]:
             return [_mask(v) for v in value]
         return value
 
-    return {k: _mask(v, k) for k, v in dataclasses.asdict(config).items()}
+    serialized = dataclasses.asdict(config)
+    serialized["protocol"] = {"name": config.protocol.name, **config.protocol.options}
+    return {k: _mask(v, k) for k, v in serialized.items()}

@@ -36,7 +36,8 @@ class WrappedEnv:
         self._action_adapter = action_adapter
         self._record_frames = record_frames
         self._step_budget = step_budget  # hard cap on env steps (anti-runaway; None = no cap)
-        self.action_count: int = 0
+        self.action_count: int = 0  # lifetime count, used for task totals
+        self.episode_action_count: int = 0
         self.last_obs: Obs | None = None
         self.prev_obs: Obs | None = None
         self.last_reward: float | None = None
@@ -59,21 +60,34 @@ class WrappedEnv:
             return
         native_obs, info = result
         self.last_info = info
-        self.last_obs = self.prev_obs = self._render(native_obs, info, reward=None, done=False)
+        self.last_obs = self.prev_obs = self._render(native_obs, info, reward=0.0, done=False)
 
     def reset(self, *, seed: int | None = None) -> Obs:
         result = self._native.reset(seed=seed) if seed is not None else self._native.reset()
+        return self._apply_reset_result(result)
+
+    def reset_explicit(self, kind: str, *, seed: int | None = None) -> Obs:
+        """A named reset; the ordinary policy-search reset path stays unchanged."""
+        reset = getattr(self._native, "reset_explicit", None)
+        if callable(reset):
+            return self._apply_reset_result(reset(kind, seed=seed))
+        if kind != "environment":
+            raise ValueError(f"Environment does not support {kind} resets")
+        return self.reset(seed=seed)
+
+    def _apply_reset_result(self, result: Any) -> Obs:
         if isinstance(result, tuple) and len(result) == 2:
             native_obs, info = result
         else:
             native_obs, info = result, None
-        self.last_reward = None
+        self.episode_action_count = 0
+        self.last_reward = 0.0
         self.last_terminated = False
         self.last_truncated = False
         self.last_info = info
         self._pending_milestones = []
         self.frame_trace = []
-        obs = self._render(native_obs, info, reward=None, done=False)
+        obs = self._render(native_obs, info, reward=0.0, done=False)
         self.prev_obs = obs
         self.last_obs = obs
         if self._record_frames:
@@ -81,7 +95,7 @@ class WrappedEnv:
         return obs
 
     def step(self, action: Action) -> Obs:
-        if self._step_budget is not None and self.action_count >= self._step_budget:
+        if self._step_budget is not None and self.episode_action_count >= self._step_budget:
             raise RegactError(
                 ErrorCategory.ENV_RUNTIME,
                 f"env step budget exhausted ({self._step_budget}); stop exploring and submit",
@@ -99,11 +113,11 @@ class WrappedEnv:
                 f"unexpected step() arity from {type(self._native).__name__}: {len(result)}",
             )
         self.prev_obs = self.last_obs
-        self.last_reward = reward
         self.last_terminated = bool(terminated)
         self.last_truncated = bool(truncated)
         self.last_info = info
         self.action_count += 1
+        self.episode_action_count += 1
         obs = self._render(native_obs, info, reward=reward, done=self.is_done)
         self.last_obs = obs
         if self._milestone_detector is not None:
@@ -136,8 +150,13 @@ class WrappedEnv:
         done: bool,
     ) -> Obs:
         obs = self._renderer.render(native_obs, info)
-        obs.reward = reward
+        # Use one numeric reward representation and the same metadata shape on
+        # initial observations, resets and steps. Milestones are per-step events;
+        # step() fills this fresh list after the detector runs.
+        obs.reward = 0.0 if reward is None else float(reward)
+        obs.info = {**obs.info, "milestones": []}
         obs.is_done = done
+        self.last_reward = obs.reward
         return obs
 
     def _capture_frame(self) -> None:

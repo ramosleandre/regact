@@ -8,6 +8,8 @@ proves the subprocess plumbing — connect over HTTP, run, write raw, score on t
 
 from pathlib import Path
 
+import pytest
+
 from regact.config.schema import Lifecycle
 from regact.controllers.executor import SandboxedExecutor
 from regact.env.lifecycle import MultiInstancePolicy
@@ -48,7 +50,8 @@ def _server() -> EnvServer:
     return server
 
 
-async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path) -> None:
+@pytest.mark.parametrize("max_moves", [10, None])
+async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path, max_moves: int | None) -> None:
     workdir = str(tmp_path / "wd")
     server = _server()
     async with serve_env(server, "g", in_process=False) as conn:
@@ -69,7 +72,7 @@ async def test_sandboxed_executor_scores_via_subprocess(tmp_path: Path) -> None:
             output_path=str(Path(workdir) / "submissions" / "0" / "results.json"),
             lifecycle=Lifecycle.MULTI_INSTANCE,
             n_episodes=1,
-            max_moves=10,
+            max_moves=max_moves,
         )
     # The eval ran out-of-process and was scored here.
     assert result.executor == "subprocess"

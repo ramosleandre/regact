@@ -1,16 +1,17 @@
 """Workdir bootstrap.
 
 Lays out the agent's working directory. The common base is **agnostic**: the
-directory tree (``code_library/``, ``framework/``) and the
-env/lifecycle-specific ``framework/make_env.py``. Everything controller-specific
-(the ``solution.py`` stub, the example controller, the contract prompt) belongs
-to the always-on ``Controller`` and layers on top, followed by each optional
-feature's templates.
+``framework/`` directory (plus ``code_library/`` for direct-interaction workflows) and the
+optional env/lifecycle-specific ``framework/make_env.py`` (controlled by the protocol).
+The selected experiment protocol
+supplies the remaining templates. The controller/features arguments are retained
+for callers of the older composition API; the runner uses ``templates``.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from regact.config.schema import Lifecycle
@@ -116,30 +117,36 @@ class Workspace:
         features: list[Feature],
         *,
         controller: Controller | None = None,
+        templates: Callable[[FeatureContext], Iterable[TemplateFile]] | None = None,
         problem_name: str,
         task_name: str,
         env_base_url: str,
         game_id: str,
         lifecycle: Lifecycle,
         helper_templates: list[TemplateFile] | None = None,
+        expose_environment: bool = True,
+        command_script: str = "framework/control.py",
     ) -> None:
-        """Create the agnostic base, then drop problem helpers, the always-on controller's
-        templates, and every optional feature's templates. ``controller`` is ``None`` only
-        when laying the bare base (e.g. tests); a real run always passes it."""
-        os.makedirs(self.root, exist_ok=True)
-        for sub in ("code_library", "framework"):
-            os.makedirs(os.path.join(self.root, sub), exist_ok=True)
+        """Write the base and problem helpers, then call the protocol template provider.
 
-        self._write("framework/__init__.py", "")
-        self._write("code_library/__init__.py", "")
+        Older callers can still supply controller/features instead. Providers run
+        after the base exists, so generated files see the same context as before.
+        """
+        os.makedirs(self.root, exist_ok=True)
+        for sub in (("framework", "code_library") if expose_environment else ("framework",)):
+            os.makedirs(os.path.join(self.root, sub), exist_ok=True)
+            self._write(f"{sub}/__init__.py", "")
         template = _MAKE_ENV_SINGLE if lifecycle is Lifecycle.SINGLE_INSTANCE else _MAKE_ENV_MULTI
+        if expose_environment:
+            self._write(
+                "framework/make_env.py",
+                template.format(base_url=env_base_url, game_id=game_id),
+            )
         self._write(
-            "framework/make_env.py",
-            template.format(base_url=env_base_url, game_id=game_id),
-        )
-        self._write(
-            "framework/control.py",
-            _CONTROL_CLI.replace("__BASE_URL__", env_base_url).replace("__GAME_ID__", game_id),
+            command_script,
+            _CONTROL_CLI.replace("__BASE_URL__", env_base_url)
+            .replace("__GAME_ID__", game_id)
+            .replace("framework/control.py", command_script),
         )
 
         # Problem-specific helpers (e.g. ARC action constants) — import-free.
@@ -150,7 +157,11 @@ class Workspace:
             problem_name=problem_name,
             task_name=task_name,
             workdir=self.root,
+            env_base_url=env_base_url,
         )
+        if templates is not None:
+            for file in templates(ctx):
+                self._write(file.relpath, file.content)
         if controller is not None:
             for file in controller.templates(ctx):
                 self._write(file.relpath, file.content)

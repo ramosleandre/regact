@@ -107,7 +107,7 @@ def test_minigrid_obs_fragment_is_mode_specific() -> None:
 def test_minigrid_helper_shipped_only_outside_minimal() -> None:
     p = MiniGridProblem()
     shipped = [t.relpath for t in p.helper_templates("t", info_mode=InfoMode.INFORMATIVE)]
-    assert shipped == ["code_library/minigrid_helper.py"]
+    assert shipped == ["framework/minigrid_helper.py"]
     assert p.helper_templates("t", info_mode=InfoMode.MINIMAL) == []  # discover-it-yourself
 
 
@@ -119,7 +119,7 @@ def test_minigrid_helper_constants_match_the_installed_package() -> None:
 
     helper = {t.relpath: t.content for t in MiniGridProblem().helper_templates("t")}
     ns: dict[str, object] = {}
-    exec(helper["code_library/minigrid_helper.py"], ns)  # trusted framework template
+    exec(helper["framework/minigrid_helper.py"], ns)  # trusted framework template
     assert ns["OBJECT_TO_IDX"] == OBJECT_TO_IDX
     assert ns["COLOR_TO_IDX"] == COLOR_TO_IDX
     assert ns["STATE_TO_IDX"] == STATE_TO_IDX

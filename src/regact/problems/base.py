@@ -11,7 +11,7 @@ backend is imported lazily so this module needs no game library installed.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from regact.config.schema import HelperConfig, InfoMode, ObsMode
@@ -26,6 +26,13 @@ class BaseProblem(ABC):
     """Base class for all problems (games)."""
 
     name: str
+
+    def reset_commands(self) -> dict[str, str]:
+        """Explicit reset capabilities for externally managed controller protocols."""
+        return {"ResetEnvironment": "Reset the whole environment from its initial state."}
+
+    def validate_controller_action(self, action: Any) -> None:
+        """Reject protocol-control actions that require an explicit command instead."""
 
     @abstractmethod
     def make_env(self, task_name: str) -> Any:
@@ -46,12 +53,17 @@ class BaseProblem(ABC):
         """Optional per-step milestone detector for the wrapper."""
         return None
 
+    def milestone_kind(self, milestone: str) -> str:
+        """Classify an event for CWM notices; unknown events are not assumed successes."""
+        return "event"
+
     def helper_templates(
         self,
         task_name: str,
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         helper: HelperConfig | None = None,
+        direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         """Game-specific helper files dropped into the agent's workdir.
 
@@ -118,6 +130,22 @@ class BaseProblem(ABC):
         """Roll per-episode metrics into a run aggregate."""
         ...
 
+    def enumerate_actions(self, obs: Obs) -> Iterable[Any]:
+        """Public finite action space for CWM planning; no engine introspection.
+
+        Problems with parameterized actions must override this method explicitly.
+        """
+        for action in obs.available_actions:
+            if type(action) is not int:
+                raise ValueError(
+                    "planner action enumeration requires a problem-specific implementation"
+                )
+            yield action
+
+    def exploration_score(self, aggregate: dict[str, Any]) -> float:
+        """Rank observed CWM progress for the best-exploration summary only."""
+        return float(aggregate.get("success_rate", 0) or 0)
+
     def failure_metrics(self, *, steps: int) -> dict[str, Any]:
         """Zero credit for a controller-caused failure; steps remain diagnostic.
 
@@ -147,7 +175,12 @@ class BaseProblem(ABC):
 
     @abstractmethod
     def build_prompt(
-        self, task_name: str, *, info_mode: InfoMode, obs_mode: ObsMode = ObsMode.RAW
+        self,
+        task_name: str,
+        *,
+        info_mode: InfoMode,
+        obs_mode: ObsMode = ObsMode.RAW,
+        direct_interaction: bool = True,
     ) -> str:
         """The game prompt for the first message, built per task, info level and obs mode."""
         ...
@@ -180,3 +213,12 @@ def build_problem(name: str, kwargs: dict[str, Any]) -> BaseProblem:
 def _load_builtins() -> None:
     """Import built-in problem modules so they self-register (no game lib needed to import)."""
     from regact.problems import arc_agi, minigrid  # noqa: F401
+
+
+def observation_prompt(text: str, *, direct_interaction: bool) -> str:
+    """Use object fields for EnvClient, dictionary fields for recorded experience."""
+    if direct_interaction:
+        return text
+    for name in ("frame", "available_actions", "is_done", "reward", "info"):
+        text = text.replace(f"obs.{name}", f'obs["{name}"]')
+    return text

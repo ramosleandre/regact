@@ -25,9 +25,9 @@ from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory
 from regact.orchestration.env_transport import serve_env
-from regact.orchestration.loop import _solved
 from regact.problems.arc_agi.problem import ArcAgiProblem, _ArcGymShim
 from regact.problems.minigrid.problem import MiniGridProblem, _ActionInfoShim
+from regact.protocols.policy_search import _solved
 from regact.testing.fakes import FakeNativeEnv
 
 

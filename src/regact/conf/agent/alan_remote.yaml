@@ -1,0 +1,12 @@
+# Alan Code driven over its HTTP remote API, without model API calls.
+# Select with agent=alan_remote. Send structured tool_calls in /api/respond;
+# framework commands run through Alan's Bash tool.
+defaults:
+  - alan
+  - _self_
+
+model: remote
+args:
+  backend: scripted
+  tool_protocol: client_cli
+  tool_call_format: null  # structured tool calls; no tool-call extraction from text

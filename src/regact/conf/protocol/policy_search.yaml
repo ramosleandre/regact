@@ -1,0 +1,2 @@
+# Existing scripts select this workflow automatically. Evaluation knobs stay under controller.*.
+name: policy_search

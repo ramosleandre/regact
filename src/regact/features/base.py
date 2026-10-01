@@ -53,6 +53,7 @@ class FeatureContext:
     # agent-writable ``workdir``. Empty for the static prompt/template contexts,
     # which never write there.
     output_dir: str = ""
+    env_base_url: str = ""
 
 
 @dataclass
@@ -179,7 +180,7 @@ def register_feature(name: str, factory: Callable[..., Feature]) -> None:
 def build_features(features: Mapping[str, Mapping[str, Any] | None]) -> list[Feature]:
     """Resolve ``{name: params}`` to instances via the registry.
 
-    Each feature owns its own knobs (``features.cwm.max_tested_transitions_per_verify=500``
+    Each feature owns its own knobs (``features.myfeature.my_knob=500``
     on the CLI), so run-level config never carries feature-specific fields. The controller
     is core, not here - it is built from ``config.controller`` by the orchestrator.
     """
@@ -194,4 +195,5 @@ def build_features(features: Mapping[str, Mapping[str, Any] | None]) -> list[Fea
 
 def _load_builtins() -> None:
     """Import the built-in feature modules so they self-register on first use."""
-    from regact.features import cwm  # noqa: F401
+    # No additive built-ins currently. CWM is a separate experiment protocol.
+    pass

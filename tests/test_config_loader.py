@@ -284,3 +284,42 @@ def test_launch_facts_from_env_records_only_what_is_set() -> None:
     ) == {"slurm_job_id": "5416609", "slurm_nodelist": "nid[001-002]"}
     # An empty string is unset, not a value - Slurm exports blanks in some contexts.
     assert launch_facts_from_env({"SLURM_JOB_ID": ""}) == {}
+
+
+def test_legacy_max_turns_override_composes_and_wins() -> None:
+    """The ClusterControl launchers still pass ``limits.max_turns=350`` on the CLI: it must
+    compose under Hydra and override the YAML default of the renamed field."""
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    import regact
+
+    conf_dir = str(Path(regact.__file__).parent / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(
+            config_name="config",
+            overrides=["limits.max_turns=123", "limits.max_tool_calls=300"],
+        )
+    config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
+    assert config.limits.max_turns_per_task == 123
+    assert config.limits.max_tool_calls == 300
+
+
+def test_removed_max_actions_per_env_fails_loudly() -> None:
+    with pytest.raises(ValueError, match="max_actions_per_episode"):
+        run_config_from_mapping(
+            {
+                "agent": {"name": "scripted"},
+                "problem": {"name": "minigrid"},
+                "limits": {"max_actions_per_env": 500},
+            }
+        )
+    # An old config.json carries the key as null: that still loads.
+    old = run_config_from_mapping(
+        {
+            "agent": {"name": "scripted"},
+            "problem": {"name": "minigrid"},
+            "limits": {"max_actions_per_env": None, "max_turns": 9},
+        }
+    )
+    assert old.limits.max_turns_per_task == 9

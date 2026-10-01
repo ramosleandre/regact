@@ -25,10 +25,23 @@ const aggLine = (agg) =>
     .map(([k, v]) => `${k} ${fmtMetric(v)}`)
     .join(" · ") || "—";
 
-async function api(path, opts) {
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+let navigation = new AbortController();
+let pageCleanups = [];
+function checkNavigation(token) {
+  if (token !== navigation || token.signal.aborted) throw new DOMException("Navigation changed", "AbortError");
+}
+async function api(path, opts = {}) {
+  const token = navigation;
+  const r = await fetch(path, {cache: "no-store", signal: token.signal, ...opts});
+  if (!r.ok) {
+    const text = await r.text();
+    const hint = r.status === 404 && path.startsWith('/api/game/cwm')
+      ? " The viewer server may predate CWM support; restart make viz." : "";
+    throw new Error(`HTTP ${r.status}: ${text}${hint}`);
+  }
+  const data = await r.json();
+  checkNavigation(token);
+  return data;
 }
 
 const _cache = {};               // game name -> detail payload (shared across tabs)
@@ -81,9 +94,11 @@ function gameCard(g) {
 }
 
 async function renderDashboard(under = "") {
+  const token = navigation;
   crumb.textContent = "";
   const data = await gamesData(under);
   await loadIcons();   // the per-experiment header shows its agent + model contestant icons
+  checkNavigation(token);
   crumb.textContent = `${under || data.experiment} · ${data.games.length} game(s)`;
   // Always list the tasks (even a single one), so pointing at an experiment shows the experiment
   // interface rather than diving straight into the lone game's overview.
@@ -94,7 +109,12 @@ async function renderDashboard(under = "") {
   }
   clear(app); app.append(panelNav("", under));
   for (const [exp, games] of byExp) {
-    const head = h("h2", "expsection exphead", agentVsModel(exp),
+    // An experiment may contain several agent/model configurations: show each recorded pair.
+    const agents = new Map(games.map((g) => {
+      const a = agentIdentity(g.agent);
+      return [JSON.stringify(a), a];
+    }));
+    const head = h("h2", "expsection exphead", ...[...agents.values()].map(agentVsModel),
       h("span", "exptitle", expLeaf(exp)), h("span", "muted", ` · ${games.length} run(s)`));
     app.append(head);
     const grid = h("div", "grid");
@@ -123,11 +143,13 @@ const _BROWSE_LISTS = [
 ];
 
 async function renderBrowse() {
+  const token = navigation;
   crumb.textContent = "";
   const { root, tree } = await api("/api/tree");
+  checkNavigation(token);
   crumb.textContent = root;
   if (!tree.length) { clear(app); app.append(h("div", "muted", "no runs under this folder")); return; }
-  if (_rootIsSingleScope(tree)) { renderDashboard(""); return; }
+  if (_rootIsSingleScope(tree)) return await renderDashboard("");
   clear(app);
   for (const list of _BROWSE_LISTS) {
     const items = tree.filter(list.of);
@@ -202,11 +224,11 @@ let _defaultsLoaded = false;
 let _saveTimer = null;
 async function loadModelDefaults() {
   if (_defaultsLoaded) return;
-  try { _modelDefaults = await api("static/model_defaults.json", { cache: "no-store" }); } catch (e) { /* keep empty */ }
+  try { _modelDefaults = await api("static/model_defaults.json", { cache: "no-store" }); } catch (e) { if (e.name === "AbortError") throw e; /* keep empty */ }
   _defaultsLoaded = true;
 }
 async function loadSettings(scope) {
-  try { return await api("/api/settings?scope=" + encodeURIComponent(scope)); } catch (e) { return {}; }
+  try { return await api("/api/settings?scope=" + encodeURIComponent(scope)); } catch (e) { if (e.name === "AbortError") throw e; return {}; }
 }
 function saveSettings() {   // debounced PUT of the whole panel state for the current interface
   const body = {
@@ -340,7 +362,7 @@ function groupByExpTask(games) {
 function makeExpColor(experiments) {
   const idx = new Map(experiments.map((e, i) => [e, i]));  // natural index -> palette fallback
   // saved user override > checked-in per-model default (model_defaults.json) > built-in palette.
-  return (e) => _graph.colors[e] || _modelDefaults.colors[modelName(e)] || _EXP_PALETTE[(idx.get(e) || 0) % _EXP_PALETTE.length];
+  return (e) => _graph.colors[e] || _modelDefaults.colors[modelName(e)] || (_modelDefaults.family_colors || {})[familyOf(modelName(e))] || _EXP_PALETTE[(idx.get(e) || 0) % _EXP_PALETTE.length];
 }
 
 // Padding computed from the longest x-label so end-anchored, -35deg labels never clip either edge.
@@ -629,13 +651,17 @@ async function graphsView(games, onlyExp, scope) {
 async function renderGraphs(under = "") {
   crumb.textContent = "graphs";
   const data = await gamesData(under);
+  const token = navigation;
+  const body = await graphsView(data.games, null, under);
+  checkNavigation(token);
   clear(app);
-  app.append(panelNav("graphs", under), await graphsView(data.games, null, under));
+  app.append(panelNav("graphs", under), body);
 }
 
 // The per-game "Graphs" tab: the same charts but for THIS run's experiment only (scoped to the
 // experiment subtree - the game path minus its /timestamp/task - so it never parses the whole root).
 async function renderGameGraphs(name) {
+  const token = navigation;
   const data = await gamesData(name.split("/").slice(0, -2).join("/"));
   const me = data.games.find((g) => g.name === name);
   const exp = me ? me.experiment : null;
@@ -643,11 +669,12 @@ async function renderGameGraphs(name) {
   body.append(h("div", "gnote muted",
     exp ? `Aggregated over every run in this experiment (${expLeaf(exp)}).` : "unknown experiment"));
   body.append(await graphsView(data.games, exp, name.split("/").slice(0, -2).join("/")));
+  checkNavigation(token);
   shell(name, "graphs", body);
 }
 
 // ---------------------------------------------------------------- per-game shell
-const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
+const TABS = [["", "Overview"], ["cwm", "CWM"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
 
 function shell(name, active, body) {
   crumb.textContent = name;
@@ -659,6 +686,7 @@ function shell(name, active, body) {
   back.href = parent ? "#run/" + encodeURIComponent(parent) : "#";
   nav.append(back);
   for (const [slug, label] of TABS) {
+    if (slug === "cwm" && _cache[name]?.config?.protocol?.name !== "cwm") continue;
     const href = "#game/" + encodeURIComponent(name) + (slug ? "/" + slug : "");
     const a = h("a", "tab" + (slug === active ? " on" : ""), label);
     a.href = href;
@@ -692,13 +720,24 @@ let _iconsLoaded = false;
 async function loadIcons() {
   if (_iconsLoaded) return;
   // no-store: the registry is edited live (icons/params added by hand); never serve a stale cached copy.
-  try { _icons = await api("static/viz_icons.json", { cache: "no-store" }); } catch (e) { /* keep empty (badge fallback) */ }
+  try { _icons = await api("static/viz_icons.json", { cache: "no-store" }); } catch (e) { if (e.name === "AbortError") throw e; /* keep empty (badge fallback) */ }
   _iconsLoaded = true;
 }
-const agentOf = (exp) => expLeaf(exp).split("-")[0];   // experiment-leaf's first token: claude/codex/alan
+// Identity comes from saved configuration, never from the user-chosen experiment label.
+function agentIdentity(agent) {
+  return { name: agent?.name || "unknown", model: agent?.model || "unknown" };
+}
+function modelLabel(model) {
+  // Provider prefixes and quantization remain available in the full identifier tooltip.
+  return String(model).split("/").pop()
+    .replace(/-(bf16|fp8|int\d+|Q\d+(_[A-Za-z0-9]+)?|IQ\d+(_[A-Za-z0-9]+)?)$/i, "");
+}
+function modelRegistration(model) {
+  return _icons.models[model] || _icons.models[modelLabel(model)] || {};
+}
 const familyOf = (model) => (String(model).match(/^[A-Za-z]+/) || [""])[0];   // Qwen3-235B -> Qwen
 function modelParamsInfo(model) {   // {b, estimate}: registry params_b (may be flagged estimate), else parsed
-  const reg = _icons.models[model];
+  const reg = modelRegistration(model);
   if (reg && typeof reg.params_b === "number") return { b: reg.params_b, estimate: !!reg.estimate };
   const m = String(model).match(/(\d+(?:\.\d+)?)B\b/);  // first "NNN B" in the name = total params (exact)
   return { b: m ? parseFloat(m[1]) : null, estimate: false };
@@ -711,14 +750,22 @@ function modelSizePx(paramsB) {                          // sigmoidal icon size 
   return Math.round(lo + (hi - lo) * s);
 }
 const _badgeText = (name) => String(name || "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase();
-function iconBadge(name, size) {   // clean text fallback when there is no icon file for this name
-  const b = h("span", "ibadge", _badgeText(name));
+function iconBadge(name, size, text = _badgeText(name)) {   // registry may supply a badge label
+  const b = h("span", "ibadge", text);
   b.style.width = b.style.height = size + "px";
   b.style.lineHeight = size + "px"; b.style.fontSize = Math.round(size * 0.42) + "px";
   return b;
 }
 function iconImg(src, size, alt) {
   const img = h("img", "vicon"); img.src = src; img.width = img.height = size; img.alt = alt || "";
+  // Appearance belongs to the asset registry, independently of agent/model identity.
+  const style = _icons.icon_styles?.[src] || {};
+  if (style.background) img.style.backgroundColor = style.background;
+  if (style.padding_px != null) {
+    img.style.padding = style.padding_px + "px";
+    img.style.boxSizing = "border-box";  // preserve the requested outer icon size
+  }
+  if (style.object_fit) img.style.objectFit = style.object_fit;
   img.addEventListener("error", () => img.replaceWith(iconBadge(alt, size)));   // missing file -> badge
   return img;
 }
@@ -731,12 +778,14 @@ function agentBlock(agent) {   // icon + name below, mirroring modelBlock (the "
   box.append(agentIcon(agent, 40), h("div", "aname", agent));
   return box;
 }
-function modelBlock(model) {
-  const { b: pB, estimate } = modelParamsInfo(model);
+function modelBlock(identifier) {
+  const model = modelLabel(identifier), reg = modelRegistration(identifier);
+  const { b: pB, estimate } = modelParamsInfo(identifier);
   const size = modelSizePx(pB);
-  const src = (_icons.models[model] && _icons.models[model].icon) || _icons.families[familyOf(model)];
+  const src = reg.icon || _icons.families[familyOf(model)];
   const box = h("div", "modelblock");
-  box.append(src ? iconImg(src, size, model) : iconBadge(model, size), h("div", "mname", model));
+  box.title = identifier;
+  box.append(src ? iconImg(src, size, model) : iconBadge(model, size, reg.badge), h("div", "mname", model));
   // params below the name; "~" marks a sibling-inferred estimate (see viz_icons.json), no tilde = exact.
   if (pB) box.append(h("div", "mparams", (estimate ? "~" : "") + (pB >= 1000 ? pB / 1000 + "T" : pB + "B")));
   return box;
@@ -760,22 +809,24 @@ function problemThumbs(tasks, size) {
 }
 // The contestant: agent (who writes the policy) + its model (sized by params). No task -> used on the
 // experiment/benchmark headers, which span many tasks; matchup() adds the arrow + task for one game.
-function agentVsModel(exp) {
-  return h("div", "avm", agentBlock(agentOf(exp)), h("span", "mplus", "+"), modelBlock(modelName(exp)));
+function agentVsModel(configuredAgent) {
+  const agent = agentIdentity(configuredAgent);
+  return h("div", "avm", agentBlock(agent.name), h("span", "mplus", "+"), modelBlock(agent.model));
 }
 // agent + model (sized by params) -> right (a single task thumb, or a green problem frame).
-function matchup(exp, right) {
-  return h("div", "matchup", agentVsModel(exp), longArrow(), right);
+function matchup(agent, right) {
+  return h("div", "matchup", agentVsModel(agent), longArrow(), right);
 }
 
 async function renderOverview(name) {
+  const token = navigation;
   const d = await gameDetail(name);
   await loadIcons();
+  checkNavigation(token);
   const m = d.metrics;
   const wrap = h("div");
-  const exp = d.config.experiment_name || name;   // agent+model come from the experiment leaf
   const task = d.state.task_name || name.split("/").pop();
-  wrap.append(matchup(exp, taskThumb(task, 56)));
+  wrap.append(matchup(d.config.agent, taskThumb(task, 56)));
   const ptasks = (d.config.problem && d.config.problem.tasks) || null;
   if (Array.isArray(ptasks) && ptasks.length > 1)   // the whole problem (its tasks) in a green frame
     wrap.append(h("div", "gnote muted", "Problem:"), problemThumbs(ptasks, 40));
@@ -786,6 +837,7 @@ async function renderOverview(name) {
   const specs = metricSpecs([{ metrics: m }]).filter((s) => s.get && !s.count && !s.categorical);
   const fmtOf = (s) => { const v = s.get(m); return v != null && s.fmt ? s.fmt(v) : fmtMetric(v); };
   const isMain = (s) => s.def || s.key.startsWith("agg:");
+  if (m.protocol === "cwm") wrap.append(h("p", "muted", "CWM protocol · score below = latest real exploration. Open CWM for best progress, phases and replay."));
   const main = [["Status", statusOf(m)], ...specs.filter(isMain).map((s) => [s.label, fmtOf(s)])];
   const other = [
     ...specs.filter((s) => !isMain(s)).map((s) => [s.label, fmtOf(s)]),
@@ -803,7 +855,7 @@ async function renderOverview(name) {
 
 // Exhaustive + grouped: one table per top-level config section (problem, agent, controller,
 // features, ...) plus a "parameters" table for the scalar base fields - same look as the metric
-// tables. Nested objects flatten to dotted keys (so `features.cwm.*` shows, never "[object Object]").
+// tables. Nested objects flatten to dotted keys (so `features.myfeature.*` shows, never "[object Object]").
 function _confVal(v) {
   // Any object/array (incl. empty {} / []) -> JSON, never "[object Object]"; scalars -> String.
   return v !== null && typeof v === "object" ? JSON.stringify(v) : String(v);
@@ -878,12 +930,20 @@ function rowEl(cell, vals) {
 
 // ---------------------------------------------------------------- conversation tab
 const _TAG_LABEL = { submit: "submit", submit_win: "submit ✓ level", cheat: "flagged" };
+const _CWM_TOOL_STYLE = {
+  UpdateCodeWorldModel: "cwm-model",
+  PlanInCWM: "cwm-plan",
+  SubmitExplorationController: "cwm-explore",
+  RunController: "cwm-explore",
+  ResetLevel: "cwm-explore",
+  ResetEnvironment: "cwm-explore",
+};
 
 async function renderConversation(name) {
   const d = await gameDetail(name);
   const conv = h("div", "conv");
   const navItems = [];     // {id, tag, label} — submissions + cheats, to jump to
-  let nSubmit = 0, nCheat = 0;
+  let nSubmit = 0, nCheat = 0, nCwm = 0;
   if (!d.turns.length) conv.append(h("div", "muted", "no transcript"));
   d.turns.forEach((t, i) => {
     const turn = h("div", "turn");
@@ -905,14 +965,18 @@ async function renderConversation(name) {
       } else if (it.kind === "text") {
         body.append(h("pre", "text", it.text));
       } else if (it.kind === "tool" && it.tool) {
-        const block = toolBlock(it.tool);
+        const block = toolBlock(it.tool, name);
         const tag = it.tool.tag;
-        if (tag === "submit" || tag === "submit_win") {
+        if (it.tool.framework_tool) {
+          block.id = "nav-cwm-" + nCwm++;
+          navItems.push({id: block.id, tag: _CWM_TOOL_STYLE[it.tool.framework_tool] || "cwm", label: it.tool.framework_tool, succeeded: it.tool.succeeded});
+        } else if (tag === "submit" || tag === "submit_win") {
           block.id = "nav-submit-" + nSubmit;
           navItems.push({ id: block.id, tag, label: `submission ${nSubmit}${tag === "submit_win" ? " ✓ level" : ""}` });
           nSubmit++;
-        } else if (tag === "cheat") {
-          block.id = "nav-cheat-" + nCheat;
+        }
+        if (it.tool.flags?.length || tag === "cheat") {
+          if (!block.id) block.id = "nav-cheat-" + nCheat;
           navItems.push({ id: block.id, tag, label: `flagged ${nCheat + 1}` });
           nCheat++;
         }
@@ -928,7 +992,12 @@ async function renderConversation(name) {
   nav.append(h("div", "h", "Jump to"));
   if (navItems.length) {
     for (const it of navItems) {
-      const a = h("a", "navitem nav-" + it.tag, it.label);
+      const a = h("a", "navitem nav-" + it.tag, h("span", "nav-label", it.label));
+      if (it.succeeded) {
+        const check = h("span", "tool-success", "✓");
+        check.title = "Command completed successfully; this does not mean the full game is solved.";
+        a.append(check);
+      }
       a.onclick = (e) => {
         e.preventDefault();
         document.getElementById(it.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -936,14 +1005,14 @@ async function renderConversation(name) {
       nav.append(a);
     }
   } else {
-    nav.append(h("div", "muted", "no submission yet"));
+    nav.append(h("div", "muted", "no notable tool calls yet"));
   }
   const layout = h("div", "convlayout");
   layout.append(nav, conv);
   shell(name, "conversation", layout);
 }
 
-const _TOOL_TEXT_MAX = 4000;  // char cap for both call args and result body (then the box scrolls)
+const _TOOL_TEXT_MAX = 4000;  // initial result preview; full results can be expanded
 const _INLINE_ARG_MAX = 240;  // short args stay inline; longer ones get the scrollable block
 
 const _FILE_TEXT_MAX = 20000;  // per extracted heredoc file (its own budget, larger than the args cap)
@@ -953,12 +1022,11 @@ const _FILE_TEXT_MAX = 20000;  // per extracted heredoc file (its own budget, la
 // DELIM - it NEVER scans `<<` inside the body, so python bit-shifts (`1 << n`) can't fool it. An
 // unclosed heredoc is left untouched (never eats the rest). Returns the command with each heredoc
 // replaced by `[file: NAME]` plus the extracted {name, body} files (NAME = the redirect target,
-// else file / file2 / ...).
+// else standard input).
 function parseHeredocs(command) {
   const lines = command.split("\n");
   const out = [];
   const files = [];
-  let unnamed = 0;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -977,9 +1045,9 @@ function parseHeredocs(command) {
         j++;
       }
       if (closed) {
-        const name = (fm && (fm[1] || fm[2])) || "file" + (unnamed++ ? unnamed : "");
+        const name = fm && (fm[1] || fm[2]);
         files.push({ name, body: body.join("\n") });
-        out.push(prefix.replace(/\s+$/, "") + " [file: " + name + "]");
+        out.push(prefix.replace(/\s+$/, "") + (name ? " [file: " + name + "]" : " [stdin]"));
         i = j + 1;  // skip the closing delimiter line too
         continue;
       }
@@ -990,12 +1058,23 @@ function parseHeredocs(command) {
   return { text: out.join("\n"), files };
 }
 
-function toolBlock(tool) {
+function toolBlock(tool, gameName) {
   // The reader tags calls authoritatively: blue submit, green submit-that-won a level, red cheat.
   const cls = { cheat: " cheat", submit: " submit", submit_win: " submit-win" }[tool.tag] || "";
-  const box = h("div", "tool" + cls);
+  const cwmStyle = _CWM_TOOL_STYLE[tool.framework_tool];
+  const box = h("div", "tool" + cls + (cwmStyle ? " " + cwmStyle : ""));
   const t = h("div", "t");
-  if (tool.tag) t.append(h("span", "tag tag-" + tool.tag, _TAG_LABEL[tool.tag]), " ");
+  if (tool.framework_tool) {
+    t.append(h("span", "tag tag-" + (cwmStyle || "cwm"), tool.framework_tool), " ");
+    if (tool.succeeded) {
+      const check = h("span", "tool-success", "✓");
+      check.title = "Command completed successfully; this does not mean the full game is solved.";
+      t.append(check);
+    }
+  } else if (tool.tag) t.append(h("span", "tag tag-" + tool.tag, _TAG_LABEL[tool.tag]), " ");
+  if (tool.flags?.length && tool.tag !== "cheat") {
+    t.append(h("span", "tag tag-cheat", "flagged"), " ");
+  }
   t.append(h("b", null, tool.name), " ");
   // A shell command: show the command (heredocs pulled out) + each written file as a collapsed
   // block, so a `cat > file <<EOF ... EOF` payload is readable instead of a JSON-escaped wall.
@@ -1007,9 +1086,10 @@ function toolBlock(tool) {
     for (const f of parsed.files) {
       const drop = h("details", "filedrop");
       const body = f.body.length > _FILE_TEXT_MAX ? f.body.slice(0, _FILE_TEXT_MAX) + "\n... (truncated)" : f.body;
-      drop.append(h("summary", null, "file: " + f.name), h("pre", "filebody", body));
+      drop.append(h("summary", null, f.name ? "file: " + f.name : "standard input"), h("pre", "filebody", body));
       box.append(drop);
     }
+    box.append(h("details", "filedrop", h("summary", null, "Original command"), h("pre", "filebody", cmd)));
   } else {
     // No heredoc files -> unchanged original behavior (the args JSON, inline if short).
     const inp = JSON.stringify(tool.input);
@@ -1019,9 +1099,97 @@ function toolBlock(tool) {
   }
   if (tool.result != null) {
     const res = h("div", "res" + (tool.is_error ? " err" : ""));
-    res.append(h("pre", null, String(tool.result).slice(0, _TOOL_TEXT_MAX)));
+    const fullResult = String(tool.result);
+    const resultText = h("pre", null, fullResult.slice(0, _TOOL_TEXT_MAX));
+    res.append(resultText);
+    if (fullResult.length > _TOOL_TEXT_MAX) {
+      const expand = h("button", null, `Show full result (${fmt(fullResult.length)} characters)`);
+      expand.onclick = () => { resultText.textContent = fullResult; expand.remove(); };
+      res.append(expand);
+    }
+    for (const attachment of tool.images || []) {
+      if (!attachment.filename) { res.append(h('p', 'err', attachment.error || 'Image unavailable')); continue; }
+      const img = h('img'); img.alt = 'Image returned to the agent by this tool';
+      img.src = `/api/game/tool-image?name=${encodeURIComponent(gameName)}&filename=${encodeURIComponent(attachment.filename)}`;
+      img.style.cssText = 'max-width:100%;max-height:600px;object-fit:contain;image-rendering:pixelated';
+      res.append(img);
+    }
     box.append(res);
+    const replayIds = new Set(controllerResultIds(fullResult));
+    if (Number.isInteger(tool.controller_playback_id)) replayIds.add(tool.controller_playback_id);
+    for (const id of replayIds) {
+      box.append(controllerReplay(gameName, id));
+    }
   }
+  if (tool.flags?.length) box.append(h('p', 'err', 'Flagged: ' + tool.flags.join('; ')));
+  return box;
+}
+
+function controllerResultIds(text) {
+  // Parse complete JSON objects, never infer a replay link from shell input text.
+  const ids = new Set();
+  let start = -1, depth = 0, quoted = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (start < 0) { if (c === '{') { start = i; depth = 1; } continue; }
+    if (quoted) { if (escaped) escaped = false; else if (c === '\\') escaped = true; else if (c === '"') quoted = false; continue; }
+    if (c === '"') quoted = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) {
+      // The current-observation field identifies managed-call feedback. Older
+      // submissions did not record per-call sequences and cannot use this replay.
+      try { const value = JSON.parse(text.slice(start, i + 1)); if (value.status && Number.isInteger(value.exploration_id) && Number.isInteger(value.current_observation_id)) ids.add(value.exploration_id); } catch (_) {}
+      start = -1;
+    }
+  }
+  return [...ids];
+}
+
+function controllerReplay(game, id) {
+  const box = h('div', 'controller-replay');
+  const button = h('button', null, `Load controller #${id} playback`);
+  box.append(button);
+  button.onclick = async () => {
+    button.disabled = true;
+    const query = `name=${encodeURIComponent(game)}&kind=controller&identifier=${id}`;
+    try {
+      const meta = await api('/api/game/cwm/load?' + query, {method: 'POST'});
+      const img = h('img'); img.alt = 'Recorded real environment (viewer playback)';
+      img.style.cssText = 'max-width:100%;max-height:400px;image-rendering:pixelated;object-fit:contain';
+      const label = h('div', 'muted');
+      const slider = h('input'); slider.type = 'range'; slider.min = 0; slider.max = meta.frames - 1; slider.value = 0;
+      slider.style.width = `min(100%, ${Math.max(0, (meta.frames - 1) * 12)}px)`;
+      slider.disabled = meta.frames < 2;
+      const data = h('details', null, h('summary', null, 'Frame data'));
+      const raw = h('pre'); data.append(raw);
+      let sequence = 0, playing = false;
+      const show = async () => {
+        const generation = ++sequence, index = Number(slider.value);
+        img.src = '/api/game/cwm/frame?' + query + `&index=${index}&image=true`;
+        label.textContent = `Frame ${index + 1}/${meta.frames} · real recorded experience`;
+        const result = await api('/api/game/cwm/frame?' + query + `&index=${index}`);
+        if (generation === sequence) raw.textContent = JSON.stringify(result, null, 2);
+      };
+      slider.oninput = () => { playing = false; show().catch(err => label.textContent = String(err)); };
+      const play = h('button', null, 'Play'); play.disabled = meta.frames < 2;
+      play.onclick = async () => {
+        playing = !playing;
+        if (Number(slider.value) >= meta.frames - 1) slider.value = 0;
+        while (playing && box.isConnected) {
+          await show();
+          if (Number(slider.value) >= meta.frames - 1) break;
+          await new Promise(resolve => setTimeout(resolve, 250));
+          if (!playing) break;
+          slider.value = Number(slider.value) + 1;
+        }
+        playing = false;
+      };
+      const unload = h('button', null, 'Unload');
+      unload.onclick = () => { playing = false; sequence++; clear(box); box.append(button); button.disabled = false; };
+      clear(box); box.append(label, img, h('div', null, slider), play, unload, data);
+      await show();
+    } catch (err) { button.disabled = false; box.append(h('p', 'err', String(err))); }
+  };
   return box;
 }
 
@@ -1039,7 +1207,7 @@ async function renderArtifacts(name) {
       item.classList.add("on");
       clear(view);
       view.append(h("h3", null, f.relpath),
-        f.too_large ? h("div", "muted", "(too large to show)") : h("pre", "code", f.content));
+        f.too_large ? h("div", "muted", `Preview omitted: ${fmt(f.size_bytes)} bytes exceeds the 200,000-byte automatic preview limit. The complete file is retained in the run's workdir.`) : h("pre", "code", f.content));
     };
     list.append(item);
   }
@@ -1060,7 +1228,11 @@ async function renderArtifacts(name) {
     }
     subs.append(c);
   }
-  shell(name, "artifacts", h("div", null, wrap, subs));
+  if (_cache[name]?.config?.protocol?.name === "cwm") {
+    const link = h("a", null, "Open CWM: frozen versions, counterexamples and reconstructed trajectories");
+    link.href = "#game/" + encodeURIComponent(name) + "/cwm";
+    shell(name, "artifacts", h("div", null, wrap, link));
+  } else shell(name, "artifacts", h("div", null, wrap, subs));
 }
 
 // ---------------------------------------------------------------- logs tab
@@ -1089,23 +1261,238 @@ async function renderLogs(name) {
   shell(name, "logs", wrap);
 }
 
+
+// ---------------------------------------------------------------- CWM protocol
+async function renderCWM(name) {
+  const prefix = '/api/game/cwm?name=' + encodeURIComponent(name);
+  const d = await api(prefix);
+  const wrap = h('div');
+  const refresh = h('button', null, 'Refresh');
+  refresh.onclick = route;
+  wrap.append(h('h2', null, 'Code world model'), refresh,
+    metricTable('Current state', [
+      ['Phase', d.status.phase], ['Exit reason', d.status.exit_reason || 'running'],
+      ['Unique observations', d.status.n_unique_observations], ['Unique transitions', d.status.n_unique_transitions],
+      ['Real actions', d.status.n_total_transitions], ['CWM version', d.status.accepted_cwm?.cwm_version ?? '—'],
+      ['Latest real exploration', aggLine(d.status.latest_exploration?.aggregate)],
+      ['Best observed exploration', aggLine(d.status.best_exploration?.aggregate)]
+    ]));
+  if (d.status.initial_collection) wrap.append(h('details', null, h('summary', null, 'Initial random collection'), h('pre', 'code', JSON.stringify(d.status.initial_collection, null, 2))));
+  const events = h('details', null, h('summary', null, 'Phase history'));
+  for (const event of d.phase_events) events.append(h('pre', 'code', `${new Date(event.timestamp * 1000).toISOString()} · ${event.kind}\n${JSON.stringify(event.payload, null, 2)}`));
+  wrap.append(events, h('p', 'muted', 'Real playback reads recorded observation IDs. Plan playback reruns saved actions in the frozen model; it does not rerun search or touch the real environment. No videos are stored.'));
+
+  function player(kind, id) {
+    const box = h('div', 'card');
+    const button = h('button', null, `Load ${kind === 'episode' ? 'real episode' : kind === 'simulation' ? 'exploration simulation' : 'predicted plan'} ${id}`);
+    const query = `name=${encodeURIComponent(name)}&kind=${kind}&identifier=${id}`;
+    const token = navigation;
+    let disposed = false, timer = null, request = null, imageURL = null, serial = 0;
+    const stop = () => { clearTimeout(timer); timer = null; playing = false; if (play) play.textContent = 'Play'; };
+    let playing = false, play = null;
+    pageCleanups.push(() => {
+      disposed = true; stop(); request?.abort(); if (imageURL) URL.revokeObjectURL(imageURL);
+    });
+    box.append(button);
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const loaded = await api('/api/game/cwm/load?' + query, {method:'POST'});
+        checkNavigation(token);
+        const image = h('img'); image.style.cssText = 'max-width:100%;max-height:450px;image-rendering:pixelated;display:block';
+        image.alt = 'Reconstructed observation';
+        const slider = h('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(loaded.frames - 1); slider.step = '1'; slider.value = '0';
+        slider.setAttribute('aria-label', 'Episode frame');
+        slider.style.width = `min(100%, ${Math.max(30, (loaded.frames - 1) * 28 + 16)}px)`;
+        slider.hidden = loaded.frames <= 1;
+        const ticks = h('datalist'); ticks.id = `frames-${kind}-${id}-${Math.random().toString(36).slice(2)}`;
+        slider.setAttribute('list', ticks.id);
+        for (let i = 0; i < loaded.frames; i += Math.max(1, Math.ceil(loaded.frames / 40))) {
+          const tick = h('option'); tick.value = String(i); ticks.append(tick);
+        }
+        const label = h('div'), errorBox = h('div', 'err');
+        const details = h('details', null, h('summary', null, 'Frame data and evidence IDs'));
+        const raw = h('pre', 'code'); details.append(raw);
+        const prev = h('button', null, 'Previous'), next = h('button', null, 'Next');
+        play = h('button', null, 'Play');
+        const updateButtons = () => {
+          prev.disabled = Number(slider.value) === 0;
+          next.disabled = Number(slider.value) >= loaded.frames - 1;
+          play.disabled = loaded.frames <= 1;
+        };
+        const show = async () => {
+          request?.abort(); request = new AbortController();
+          const signal = request.signal, ticket = ++serial, index = slider.value;
+          updateButtons();
+          try {
+            const url = '/api/game/cwm/frame?' + query + '&index=' + index;
+            const [frame, response] = await Promise.all([
+              api(url, {signal}), fetch(url + '&image=true', {signal, cache:'no-store'})
+            ]);
+            if (!response.ok) throw new Error(`Frame image HTTP ${response.status}: ${await response.text()}`);
+            const blob = await response.blob();
+            if (disposed || ticket !== serial || token !== navigation) return false;
+            const nextURL = URL.createObjectURL(blob);
+            if (imageURL) URL.revokeObjectURL(imageURL);
+            imageURL = nextURL; image.src = nextURL;
+            label.textContent = `${loaded.kind} · frame ${Number(index)+1}/${loaded.frames} · ${loaded.source}`;
+            raw.textContent = JSON.stringify(frame, null, 2); errorBox.textContent = '';
+            return true;
+          } catch (error) {
+            if (!disposed && ticket === serial && error.name !== 'AbortError') { errorBox.textContent = error.message; stop(); }
+            return false;
+          }
+        };
+        const advance = async () => {
+          if (!playing || disposed) return;
+          if (Number(slider.value) >= loaded.frames - 1) { stop(); return; }
+          slider.value = String(Number(slider.value) + 1);
+          if (await show() && playing) timer = setTimeout(advance, 250);
+        };
+        play.onclick = async () => {
+          if (playing) { stop(); return; }
+          playing = true; play.textContent = 'Pause';
+          if (Number(slider.value) >= loaded.frames - 1) { slider.value = '0'; if (!await show()) return; }
+          if (playing) timer = setTimeout(advance, 250);
+        };
+        slider.oninput = () => { stop(); void show(); };
+        prev.onclick = () => { stop(); slider.value = String(Math.max(0, Number(slider.value)-1)); void show(); };
+        next.onclick = () => { stop(); slider.value = String(Math.min(loaded.frames-1, Number(slider.value)+1)); void show(); };
+        const reload = h('button', null, 'Reload frames');
+        reload.onclick = async () => {
+          stop(); request?.abort(); ++serial; reload.disabled = true;
+          try { await button.onclick(); } finally { reload.disabled = false; }
+        };
+        box.replaceChildren(label, image, slider, ticks, h('div', null, prev, play, next, reload), errorBox, details);
+        if (loaded.frames === 1) label.textContent = 'Single frame';
+        await show();
+      } catch (error) {
+        if (!disposed && error.name !== 'AbortError') { box.append(h('pre', 'err', error.message)); button.disabled = false; }
+      }
+    };
+    return box;
+  }
+  const episodes = h('details', null, h('summary', null, `Real episodes (${d.episodes.length}, includes initial collection)`));
+  for (const episode of d.episodes) episodes.append(h('p', null, `Episode ${episode.id} · ${episode.purpose.replaceAll("_", " ")} · ${episode.status}${episode.stop_reason ? " (" + episode.stop_reason.replaceAll("_", " ") + ")" : ""}`), player('episode', episode.id));
+  wrap.append(episodes, h('h2', null, 'Validations, plans and explorations'));
+  const records = h('div'); wrap.append(records);
+  function addRecords(rows) {
+    for (const record of rows) {
+      const p = record.payload;
+      const card = h('div', 'card', h('h3', null, `#${record.id} ${record.kind} · ${record.status}`));
+      if (p.goal) card.append(h('p', null, p.goal));
+      card.append(h('p', 'muted', [p.stop_reason, p.search_stop_reason, p.cwm_version != null ? `CWM version ${p.cwm_version}` : '', p.dataset_version != null ? `dataset ${p.dataset_version}` : ''].filter(Boolean).join(' · ')));
+      const detail = h('details', null, h('summary', null, 'Result and provenance'), h('pre', 'code', JSON.stringify(p, null, 2))); card.append(detail);
+      if (p.simulation_action_sequence) card.append(player('simulation', record.id));
+      if (record.kind === 'plan' && p.candidate_found) card.append(player('plan', record.id));
+      if (p.episode_id) card.append(player('episode', p.episode_id));
+      const examples = p.validation?.counterexamples || (p.diagnostic_id ? [{diagnostic_id:p.diagnostic_id}] : []);
+      for (const example of examples) {
+        if (!example.diagnostic_id) {
+          if (example.observation_ids?.length) {
+            const compare = h('button', null, `Compare observations ${example.observation_ids.join(' / ')}`);
+            compare.onclick = () => {
+              compare.disabled = true;
+              const figures = h('div'); figures.style.cssText = 'display:flex;flex-wrap:wrap;gap:16px';
+              for (const id of example.observation_ids) {
+                const img = h('img'); img.alt = `Observation ${id}`;
+                img.style.cssText = 'max-width:100%;width:320px;image-rendering:pixelated';
+                img.src = `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=observation&identifier=${id}`;
+                img.onerror = () => img.replaceWith(h('p','err','Image unavailable; use the data API to inspect this observation.'));
+                figures.append(h('figure',null,h('figcaption',null,`Observation ${id}`),img));
+              }
+              card.append(figures);
+            };
+            card.append(compare);
+          }
+          continue;
+        }
+        const load = h('button', null, `Load counterexample ${example.diagnostic_id}`);
+        load.onclick = async () => {
+          try {
+            load.disabled = true;
+            const evidence = await api(`/api/game/cwm/evidence?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${example.diagnostic_id}`);
+            const comparison = h('div', 'card');
+            const figures = h('div'); figures.style.cssText = 'display:flex;flex-wrap:wrap;gap:16px';
+            for (const [side, label] of [['predicted','Predicted'],['observed','Observed'],['first_output','First output'],['second_output','Second output']]) {
+              if (!evidence[side]?.frame) continue;
+              const img = h('img'); img.alt = label + ' observation';
+              img.style.cssText = 'max-width:100%;width:320px;image-rendering:pixelated';
+              img.src = `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${example.diagnostic_id}&side=${side}`;
+              img.onerror = () => { img.replaceWith(h('p','err','Image unavailable; inspect raw evidence below.')); };
+              figures.append(h('figure', null, h('figcaption', null, label), img));
+            }
+            comparison.append(figures);
+            const diffs = evidence.differences || p.differences;
+            if (diffs?.length) comparison.append(h('pre','code',JSON.stringify(diffs,null,2)));
+            comparison.append(h('p','muted','Images show frame differences. Reward, completion, actions and info may differ too.'),
+              h('details',null,h('summary',null,'Raw evidence and IDs'),h('pre','code',JSON.stringify(evidence,null,2))));
+            card.append(comparison);
+          } catch (error) { load.disabled = false; card.append(h('pre', 'err', error.message)); }
+        }; card.append(load);
+      }
+      if (p.bundle) {
+        const showCode = h('button', null, 'Inspect frozen code');
+        showCode.onclick = async () => {
+          try {
+            const url = `/api/game/cwm/source?name=${encodeURIComponent(name)}&bundle=${p.bundle}`;
+            const listing = await api(url);
+            const select = h('select');
+            for (const filename of listing.files) { const option=h('option',null,filename); option.value=filename; select.append(option); }
+            const code = h('pre','code'); let selection = 0;
+            select.onchange = async () => {
+              const ticket = ++selection;
+              try { const source = (await api(url+'&filename='+encodeURIComponent(select.value))).source; if (ticket === selection) code.textContent=source; }
+              catch(error) { if (ticket === selection && error.name !== 'AbortError') code.textContent=error.message; }
+            };
+            card.append(select,code); showCode.disabled=true; await select.onchange();
+          } catch(error) { card.append(h('pre','err',error.message)); }
+        }; card.append(showCode);
+      }
+      records.append(card);
+    }
+  }
+  addRecords(d.records);
+  let before = d.next_before;
+  const more = h('button', null, 'Load older records'); more.hidden = !before;
+  more.onclick = async () => {
+    more.disabled = true;
+    try { const page = await api(prefix + '&before=' + before); addRecords(page.records); before = page.next_before; more.hidden = !before; }
+    catch (error) { if (error.name !== 'AbortError') records.append(h('pre', 'err', error.message)); }
+    finally { more.disabled = false; }
+  };
+  wrap.append(more);
+  shell(name, 'cwm', wrap);
+}
+
 // ---------------------------------------------------------------- routing
 async function route() {
+  navigation.abort();
+  for (const cleanup of pageCleanups) cleanup();
+  pageCleanups = [];
+  navigation = new AbortController();
+  const token = navigation;
+  for (const key of Object.keys(_cache)) delete _cache[key];
+  for (const key of Object.keys(_gamesCache)) delete _gamesCache[key];
   try {
     const parts = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean);
-    if (!parts.length) return renderBrowse();
-    if (parts[0] === "graphs") return renderGraphs(parts[1] ? decodeURIComponent(parts[1]) : "");
-    if (parts[0] === "run") return renderDashboard(parts[1] ? decodeURIComponent(parts[1]) : "");
-    if (parts[0] !== "game" || !parts[1]) return renderBrowse();
+    if (!parts.length) return await renderBrowse();
+    if (parts[0] === "graphs") return await renderGraphs(parts[1] ? decodeURIComponent(parts[1]) : "");
+    if (parts[0] === "run") return await renderDashboard(parts[1] ? decodeURIComponent(parts[1]) : "");
+    if (parts[0] !== "game" || !parts[1]) return await renderBrowse();
     const name = decodeURIComponent(parts[1]);
+    await gameDetail(name);
     const tab = parts[2] || "";
     if (tab === "conversation") await renderConversation(name);
+    else if (tab === "cwm") await renderCWM(name);
     else if (tab === "artifacts") await renderArtifacts(name);
     else if (tab === "logs") await renderLogs(name);
     else if (tab === "graphs") await renderGameGraphs(name);
     else await renderOverview(name);
   } catch (e) {
+    if (token !== navigation || e.name === "AbortError") return;
     clear(app); app.append(h("pre", "err", "error: " + e.message));
+    const retry = h("button", null, "Retry"); retry.onclick = route; app.append(retry);
   }
 }
 window.addEventListener("hashchange", route);

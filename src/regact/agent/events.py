@@ -7,7 +7,7 @@ classes — that is what keeps the loop provider-independent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from regact.obs.errors import ErrorCategory
@@ -43,6 +43,24 @@ class ToolResult:
     id: str
     output: str
     is_error: bool = False
+    images: list[dict[str, str]] = field(default_factory=list)
+
+
+def tool_result_images(content: Any) -> list[dict[str, str]]:
+    """Preserve actual inline image blocks, never infer vision from a filename."""
+    images = []
+    if not isinstance(content, list):
+        return images
+    for block in content:
+        kind = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+        source = block.get("source") if isinstance(block, dict) else getattr(block, "source", None)
+        if kind == "image" and isinstance(source, dict) and source.get("type") == "base64":
+            mime, data = source.get("media_type"), source.get("data")
+            if mime in ("image/png", "image/jpeg", "image/webp", "image/gif") and isinstance(
+                data, str
+            ):
+                images.append({"mime_type": mime, "data": data})
+    return images
 
 
 @dataclass

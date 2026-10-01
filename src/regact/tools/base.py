@@ -35,6 +35,7 @@ class ToolOutput:
 
     data: Any
     is_error: bool = False
+    messages: list[str] = field(default_factory=list)  # post-result protocol notices
 
 
 class Tool(ABC):

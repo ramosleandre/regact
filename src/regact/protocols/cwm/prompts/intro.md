@@ -1,0 +1,1 @@
+To solve the game, build a Code World Model (CWM): Python code that represents the game's state, reconstructs observations and predicts the effects of actions. Improve it as you explore and make progress.

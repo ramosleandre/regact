@@ -90,7 +90,7 @@ def _config() -> RunConfig:
         agent=AgentConfig(name=AgentName.SCRIPTED),
         problem=ProblemConfig(name="fake", kwargs={"env_id": "fake-v0"}),
         controller=ControllerConfig(n_episodes=2, max_moves=10),
-        limits=LimitsConfig(max_turns=10),
+        limits=LimitsConfig(max_turns_per_task=10),
     )
 
 
@@ -184,7 +184,7 @@ async def test_run_task_refuses_single_instance_with_on_env_eval(tmp_path: Path)
 async def test_run_task_builds_agent_from_config_when_none(tmp_path: Path) -> None:
     """With no injected agent, build_agent(scripted) runs (default turns -> exits on limit)."""
     config = _config()
-    config.limits = LimitsConfig(max_turns=1)
+    config.limits = LimitsConfig(max_turns_per_task=1)
     reason = await run_task(config, _FakeProblem(), "corridor", output_dir=str(tmp_path))
     assert reason == "loop_limit"  # the default scripted agent never submits/exits
 

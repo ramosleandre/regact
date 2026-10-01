@@ -2,7 +2,7 @@
 
 Ties every layer together for a single game: build the env session + server,
 front it over the right transport, bootstrap the agent's workdir, wire the
-feature tools/hooks with a :class:`RunDeps`, build the prompt, drive the
+selected protocol's tools/hooks, build its prompt, drive the
 keep-alive loop, and write the canonical artifacts under ``output_dir``.
 
 The function stays short; each responsibility is a small helper. The entry
@@ -35,8 +35,7 @@ from regact.config.schema import (
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
 from regact.env.server import EnvServer
 from regact.env.session import EnvSession
-from regact.features.base import Feature, FeatureContext, RunDeps, build_features
-from regact.features.controller import Controller
+from regact.features.base import FeatureContext
 from regact.obs.errors import LogComponent
 from regact.obs.logger import RunLogger
 from regact.obs.transcript import TranscriptWriter
@@ -45,6 +44,8 @@ from regact.orchestration.loop import run_session
 from regact.orchestration.signals import StopSignal
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
+from regact.protocols.base import ExperimentProtocol, ProtocolContext
+from regact.protocols.registry import build_protocol
 from regact.security.egress_proxy import EgressProxy
 from regact.security.netbridge import LoopbackMirror
 from regact.security.runtime import SandboxRuntime, Wrapper, make_wrapper, resolve
@@ -173,33 +174,6 @@ def _network_isolation(config: RunConfig) -> bool:
     return config.sandbox and bool(config.sandbox_opts.get("network_isolation", True))
 
 
-def _collect_feature_metrics(
-    features: list[Feature], deps: RunDeps, logger: RunLogger
-) -> dict[str, Any]:
-    """Every loaded feature's own submission numbers, keyed by feature name.
-
-    Empty contributions are dropped so a submission only carries features that
-    actually scored something. A faulty contributor is logged and skipped — extra
-    metrics must never break the submission that carries them.
-    """
-    collected: dict[str, Any] = {}
-    for feature in features:
-        try:
-            metrics = feature.submission_metrics(deps)
-        except Exception as exc:
-            logger.log(
-                LogComponent.EVAL,
-                "WARNING",
-                "feature_metrics_failed",
-                feature=feature.name,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            continue
-        if metrics:
-            collected[feature.name] = metrics
-    return collected
-
-
 def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
     if lifecycle is Lifecycle.SINGLE_INSTANCE:
         return SingleInstancePolicy()
@@ -211,27 +185,28 @@ def _build_server(
     problem: BaseProblem,
     task_name: str,
     *,
-    features: list[Feature],
+    protocol: ExperimentProtocol,
     workdir: str,
     output_dir: str,
 ) -> EnvServer:
     """Register the task's :class:`EnvSession` (renderer + lifecycle + milestones +
-    the loaded features' env wrappers, in ``features:`` list order)."""
+    the selected protocol's trusted env wrappers)."""
     ctx = FeatureContext(
         problem_name=problem.name, task_name=task_name, workdir=workdir, output_dir=output_dir
     )
-    wrappers = [wrap for feature in features if (wrap := feature.env_wrapper(ctx)) is not None]
+    wrappers = protocol.env_wrappers(ctx)
     session = EnvSession(
         make_native=lambda: problem.make_env(task_name),
         key=task_name,
         renderer=problem.obs_renderer(task_name, mode=config.problem.obs_mode),
         lifecycle=_lifecycle_policy(config.problem.lifecycle),
         milestone_detector=problem.milestone_detector(task_name),
-        step_budget=config.limits.max_actions_per_env,
+        step_budget=config.limits.max_actions_per_episode,
         wrappers=wrappers,
     )
     server = EnvServer()
     server.register(task_name, session)
+    protocol.configure_environment(server, session, ctx, problem)
     return server
 
 
@@ -242,19 +217,23 @@ def _bootstrap_workdir(
     *,
     workdir: str,
     conn: EnvConnection,
-    controller: Controller,
-    features: list[Feature],
+    protocol: ExperimentProtocol,
 ) -> None:
     Workspace(workdir).bootstrap(
-        features,
-        controller=controller,
+        [],
+        templates=protocol.templates,
+        expose_environment=protocol.exposes_environment,
+        command_script=protocol.command_script,
         problem_name=problem.name,
         task_name=task_name,
         env_base_url=conn.base_url,
         game_id=task_name,
         lifecycle=config.problem.lifecycle,
         helper_templates=problem.helper_templates(
-            task_name, info_mode=config.problem.info_mode, helper=config.problem.helper
+            task_name,
+            info_mode=config.problem.info_mode,
+            helper=config.problem.helper,
+            **({"direct_interaction": False} if not protocol.exposes_environment else {}),
         ),
     )
 
@@ -287,16 +266,8 @@ async def run_task(
         target=_warmup_problem, args=(problem,), daemon=True, name="env-warmup"
     ).start()
 
-    controller = Controller.from_config(config.controller)
-    features = build_features(config.features)
-    if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and (
-        controller.evaluates_on_env or any(feature.evaluates_on_env for feature in features)
-    ):
-        raise RuntimeError(
-            "single-instance problem with an on-env evaluation (the always-on controller scores "
-            "by rolling episodes; an evaluating feature may too): exploration and evaluation share "
-            "the same env, so scores would reflect the session, not an isolated policy"
-        )
+    protocol = build_protocol(config)
+    protocol.validate()
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
@@ -306,11 +277,11 @@ async def run_task(
         json.dump(redacted_config_dict(config), handle, indent=2, default=str)
 
     server = _build_server(
-        config, problem, task_name, features=features, workdir=workdir, output_dir=output_dir
+        config, problem, task_name, protocol=protocol, workdir=workdir, output_dir=output_dir
     )
     in_process = config.agent.name is AgentName.SCRIPTED
 
-    async with serve_env(server, task_name, in_process=in_process) as conn:
+    async with protocol, serve_env(server, task_name, in_process=in_process) as conn:
         with (
             TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
             RunLogger(logs_dir, task=task_name, console=True) as logger,
@@ -321,8 +292,7 @@ async def run_task(
                 task_name,
                 workdir=workdir,
                 conn=conn,
-                controller=controller,
-                features=features,
+                protocol=protocol,
             )
 
             experiment = ExperimentState(
@@ -382,12 +352,14 @@ async def run_task(
                     eval_ports,
                 )
             )
-            deps = RunDeps(
+            context = ProtocolContext(
                 experiment=experiment,
                 env_client=conn.client,
                 lifecycle=config.problem.lifecycle,
-                solution_path=os.path.join(workdir, "solution.py"),
-                submissions_dir=os.path.join(workdir, "submissions"),
+                workdir=workdir,
+                output_dir=output_dir,
+                logger=logger,
+                is_perfect=problem.is_perfect,
                 failure_metrics=problem.failure_metrics,
                 compute_episode_metrics=problem.compute_episode_metrics,
                 aggregate_episode_metrics=problem.aggregate_episode_metrics,
@@ -395,11 +367,8 @@ async def run_task(
                 render_frame=problem.render_frame,
                 seed=config.problem.seed,
             )
-            deps.feature_metrics = lambda: _collect_feature_metrics(features, deps, logger)
-            # Core controller first, then each optional feature: one flat tool/hook surface.
-            tool_specs = [*controller.tools(deps), *(t for f in features for t in f.tools(deps))]
-            tools: list[Tool] = [LoggingTool(tool, logger) for tool in tool_specs]
-            hooks = [*controller.hooks(deps), *(h for f in features for h in f.hooks(deps))]
+            session = protocol.bind(context)
+            tools: list[Tool] = [LoggingTool(tool, logger) for tool in session.tools]
 
             agent = agent or build_agent(config.agent)
             caps = agent.capabilities()
@@ -475,14 +444,9 @@ async def run_task(
             )
 
             builder = PromptBuilder()
-            system_prompt = builder.build_system_prompt(
+            system_prompt = protocol.build_system_prompt(
                 problem,
                 task_name,
-                features,
-                controller=controller,
-                lifecycle=config.problem.lifecycle,
-                info_mode=config.problem.info_mode,
-                obs_mode=config.problem.obs_mode,
                 tool_protocol=caps.tool_protocol,
                 tool_names=[tool.name for tool in tools],
                 # Opt-in tier-2 verbalization variant (empty_response sweep S2/S3); the bench
@@ -521,6 +485,7 @@ async def run_task(
                         await mirror.close()
                 transcript.write(UserMessage(builder.build_first_message(rendered)))
                 experiment.exit_reason = "dry_run"
+                await session.close()
                 experiment.save(os.path.join(logs_dir, "experiment_state.json"))
                 logger.log(
                     LogComponent.ORCHESTRATOR,
@@ -531,6 +496,22 @@ async def run_task(
                 )
                 return "dry_run"
             try:
+                await session.prepare(stop)
+                initial_reason = (
+                    "interrupted" if stop is not None and stop.is_set() else session.stop_reason()
+                )
+                if initial_reason is not None:
+                    experiment.exit_reason = initial_reason
+                    experiment.env_moves = server.total_action_count(task_name)
+                    experiment.save(os.path.join(logs_dir, "experiment_state.json"))
+                    logger.log(
+                        LogComponent.ORCHESTRATOR,
+                        "INFO",
+                        "session_end",
+                        phase="bootstrap",
+                        reason=initial_reason,
+                    )
+                    return initial_reason
                 await agent.start(
                     cwd=workdir,
                     model=config.agent.model,
@@ -546,16 +527,6 @@ async def run_task(
                     rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
                 first_message = builder.build_first_message(rendered_first_obs)
 
-                if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
-                    logger.log(
-                        LogComponent.ORCHESTRATOR,
-                        "WARNING",
-                        "single_instance_shared_env",
-                        message=(
-                            "single-instance: exploration and evaluation share the same env; "
-                            "scores reflect the session, not an isolated policy"
-                        ),
-                    )
                 reason = await run_session(
                     agent,
                     experiment=experiment,
@@ -567,15 +538,16 @@ async def run_task(
                     state_path=os.path.join(logs_dir, "experiment_state.json"),
                     cwd=workdir,
                     system_prompt=system_prompt,
-                    hooks=hooks,
+                    protocol=session,
                     move_count=lambda: server.total_action_count(task_name),
                     stop=stop,
                     flagging_warning_cap=config.flagging_warning_cap,
-                    exit_task_enabled=config.controller.exit_task_enabled,
-                    is_perfect=problem.is_perfect,
                 )
             finally:  # always release the agent subprocess + network plumbing, even on a crash
-                await agent.close()
+                try:
+                    await session.close()
+                finally:
+                    await agent.close()
                 if egress is not None:
                     await egress.close()
                 if mirror is not None:

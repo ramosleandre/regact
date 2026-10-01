@@ -1,16 +1,13 @@
 # Sandboxing
 
-How regact keeps a code-writing agent from cheating, and how that guarantee is
-**verified** rather than asserted.
+How Regact restricts access to hidden game information, isolates submitted code, and checks those restrictions on the host running an experiment.
 
 ## The threat
 
 The agent runs arbitrary code. Nothing stops it from writing
 `open("/path/to/ar25.py").read()` to read the game's source or its answer key, then
 hard-coding the result. If it can reach the game files, the score measures memorization,
-not understanding. The defense is a **filesystem allowlist**: everything outside the
-agent's workdir is simply *absent* from its view — we never try to enumerate the tricks
-it might use.
+not understanding. The defense is a **filesystem allowlist**: the agent sees its workspace and required runtime/backend paths, while game source/data are excluded. This controls access; it does not establish that every valid solution reflects general understanding.
 
 ## The contract (R1–R6)
 
@@ -38,6 +35,8 @@ than proceed unconfined. Resolution lives in
 | macOS | **seatbelt** | `sandbox-exec`: deny-by-default profile, allow the workdir |
 | Kaggle | **none** | intrinsic — the answer is absent and the kernel has no internet |
 
+This table describes the agent sandbox. Vanilla/CWM additionally require an available OS sandbox for submitted-code workers; they do not support an unconfined worker fallback, including when `sandbox=false` is used for the coding agent. The legacy Kaggle integration is not a validated managed-protocol deployment.
+
 There is no container/SIF backend: bwrap + user namespaces are available on both HPC
 clusters we target, so nothing needs building. Force a specific backend with
 `+sandbox_opts.backend=<seatbelt|bwrap>` if auto-detection is wrong.
@@ -54,8 +53,9 @@ only the sanctioned ports back in: a `LoopbackMirror` on the host forwards a uni
 to `127.0.0.1:<port>`, and a tiny relay inside the namespace re-exposes that socket on the
 same port. Unix sockets are mount-namespace objects, so a socket file bound into the
 sandbox still reaches a listener outside it. Ports are preserved on both sides, so URLs
-minted outside stay valid inside. Result: the env server and the configured `base_url`
-work; everything else is unreachable.
+minted outside stay valid inside. The framework services and configured local model endpoint remain reachable; cloud backends separately declare the LLM hosts they need. Disabling `sandbox_opts.network_isolation` changes this network policy.
+
+The HTTP bridge transports both environment operations and framework commands. The selected protocol controls which operations are permitted: policy search exposes an environment client; vanilla/CWM deny direct reset/step calls and expose command/data routes instead. A reachable port is not permission to bypass the protocol.
 
 ## Which paths the sandbox exposes
 
@@ -98,9 +98,17 @@ got, so an unconfined run is never silent.
 
 Alongside the sandbox, a lightweight **detection camera** flags suspicious tool calls (a
 call reaching for a forbidden path/module) and blocked-egress denials. It is
-**forensic-only** — it increments counters and writes warnings for the analyst, it never
-blocks a call or invalidates a score. It complements the sandbox: the sandbox prevents,
-the camera records.
+**detection-only** — it records flags and can send warnings to the agent; flagging itself does not block a call or invalidate a score. The sandbox and protocol handlers separately enforce permissions.
+
+`flagging_warning_cap` defaults to 3; 0 disables delivered warnings while retaining flags. Warnings quote the relevant command with middle truncation. Alan can receive them after completed tools; CLI agents receive queued warnings on the next outer Regact send cycle, if the task continues. Attribution can be uncertain for concurrent calls, in which case the warning identifies candidate commands rather than claiming certainty. See [Protocols](protocols.md#flagging).
+
+## Submitted vanilla/CWM code
+
+The coding agent can read experience while developing. Submitted CWM/controller/goal callbacks instead run from immutable Python snapshots, without the agent workspace, experience database, live environment, game modules or network. CWM and controller/goal execution use separate processes. Values cross that boundary through serialization; normal static local Python imports are included in the snapshot.
+
+Callback time, controller-call time and per-process memory limits are independent of the coding agent's shell timeout. Validation/planning also have their own whole-operation budgets. These workers stay isolated when the coding agent's sandbox is disabled. See [Managed execution](managed_protocols.md#code-isolation-and-practical-limits) for limits and [CWM](cwm.md) for the exact validation contract.
+
+Isolation prevents runtime database lookup, but cannot prevent an agent copying observed facts into submitted Python constants. Repeatability/mutation checks are useful tests, not a proof of mathematical purity or generalization. Local `simulate.py` runs with the coding agent's permissions and current workspace code; official framework operations use the frozen, restricted code.
 
 ## What the sandbox does NOT do
 
@@ -108,7 +116,7 @@ the camera records.
   — the threat model is a cheating agent, not a kernel exploit.
 - On **macOS**, seatbelt puts `allow_read` paths in the read-write set (looser than bwrap's
   read-only intent) — a known, documented gap.
-- The **evaluator** follows the run's sandbox configuration. For subprocess agents,
+- The **policy-search evaluator** follows the run's sandbox configuration. For subprocess agents,
   its network isolation is enabled when `sandbox=true` and
   `sandbox_opts.network_isolation` is enabled (the default). Setting `sandbox=false`
   disables OS confinement; setting `sandbox_opts.network_isolation=false` disables

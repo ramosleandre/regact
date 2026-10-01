@@ -23,24 +23,24 @@ The prose is your memory for the next iteration; the call is your action. Any ot
 
 From the last run I confirmed the action ids for moving and for interacting with the cell ahead, and that my controller reaches the target but never interacts with it. Next I will fix that step in the controller and re-run the test script.
 
-<tool_call>Bash<arg_key>command</arg_key><arg_value>sed -i 's/return A_MOVE/return A_INTERACT/' code_library/my_controller.py && python code_library/test_controller.py</arg_value></tool_call>
+<tool_call>Bash<arg_key>command</arg_key><arg_value>__EDIT_EXAMPLE__</arg_value></tool_call>
 
 ## Typical commands (the `command` value)
 
 Create or overwrite a file:
-cat > code_library/explore.py <<'EOF'
-from framework.make_env import make_env
+cat > __SCRIPT_PATH__ <<'EOF'
+__SCRIPT_IMPORT__
 # ... your code ...
 EOF
 
 Edit a file in place with sed:
-sed -i 's/old/new/g' code_library/explore.py                      # replace every occurrence
-sed -i '5s/.*/        return obs.available_actions[0]/' solution.py   # rewrite line 5
+sed -i 's/old/new/g' __SCRIPT_PATH__                      # replace every occurrence
+sed -i '5s/.*/        return __ACTION_EXAMPLE__/' __CONTROLLER_PATH__   # rewrite line 5
 
 Read a file, or a slice with line numbers:
-cat solution.py
-nl -ba solution.py | sed -n '1,40p'
+cat __CONTROLLER_PATH__
+nl -ba __CONTROLLER_PATH__ | sed -n '1,40p'
 
 Run a script, or list a directory:
-python code_library/explore.py
-ls code_library
+python __SCRIPT_PATH__
+ls __SCRIPT_DIR__

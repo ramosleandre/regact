@@ -8,63 +8,57 @@ from typing import Any
 from regact.agent.events import ToolCall
 from regact.config.schema import LimitsConfig
 from regact.orchestration.loop import (
-    _ESCALATE_AFTER_REMINDERS,
-    _acted_without_submitting,
     _decide_stop,
     _execute_framework_tool,
-    _keep_alive_message,
     _LoopContext,
 )
+from regact.protocols.policy_search import (
+    _ESCALATE_AFTER_REMINDERS,
+    PolicySearchSession,
+    _acted_without_submitting,
+    _keep_alive_message,
+)
 from regact.security.policy import default_policy
+from regact.session.state import ExperimentState
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
-_LIMITS = LimitsConfig(max_turns=3, max_seconds_per_task=None)
+_LIMITS = LimitsConfig(max_turns_per_task=3, max_seconds_per_task=None)
 
 
 def test_decide_stop_continues_by_default() -> None:
-    assert (
-        _decide_stop(
-            exit_requested=False, interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS
-        )
-        is None
-    )
+    assert _decide_stop(interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS) is None
 
 
 def test_decide_stop_interrupt_wins_over_everything() -> None:
     reason = _decide_stop(
-        exit_requested=True, interrupted=True, turns=99, elapsed_s=999.0, limits=_LIMITS
+        protocol_reason="agent_exit", interrupted=True, turns=99, elapsed_s=999.0, limits=_LIMITS
     )
     assert reason == "interrupted"
 
 
 def test_decide_stop_agent_exit() -> None:
     reason = _decide_stop(
-        exit_requested=True, interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS
+        protocol_reason="agent_exit", interrupted=False, turns=0, elapsed_s=0.0, limits=_LIMITS
     )
     assert reason == "agent_exit"
 
 
 def test_decide_stop_keep_alive_limit() -> None:
-    reason = _decide_stop(
-        exit_requested=False, interrupted=False, turns=3, elapsed_s=0.0, limits=_LIMITS
-    )
+    reason = _decide_stop(interrupted=False, turns=3, elapsed_s=0.0, limits=_LIMITS)
     assert reason == "loop_limit"
 
 
 def test_decide_stop_walltime_limit() -> None:
-    limits = LimitsConfig(max_turns=100, max_seconds_per_task=5)
-    reason = _decide_stop(
-        exit_requested=False, interrupted=False, turns=0, elapsed_s=6.0, limits=limits
-    )
+    limits = LimitsConfig(max_turns_per_task=100, max_seconds_per_task=5)
+    reason = _decide_stop(interrupted=False, turns=0, elapsed_s=6.0, limits=limits)
     assert reason == "walltime_limit"
 
 
 def test_decide_stop_tool_call_limit() -> None:
-    limits = LimitsConfig(max_turns=100, max_tool_calls=5)
+    limits = LimitsConfig(max_turns_per_task=100, max_tool_calls=5)
     # under the budget: keep going
     assert (
         _decide_stop(
-            exit_requested=False,
             interrupted=False,
             turns=0,
             elapsed_s=0.0,
@@ -75,7 +69,6 @@ def test_decide_stop_tool_call_limit() -> None:
     )
     # at the budget: stop
     reason = _decide_stop(
-        exit_requested=False,
         interrupted=False,
         turns=0,
         elapsed_s=0.0,
@@ -86,40 +79,37 @@ def test_decide_stop_tool_call_limit() -> None:
 
 
 def test_decide_stop_solved_beats_exit_and_limits() -> None:
-    limits = LimitsConfig(max_turns=100)
+    limits = LimitsConfig(max_turns_per_task=100)
     # A perfect submission stops successfully even with budget left and an exit pending.
     assert (
         _decide_stop(
-            exit_requested=True,
             interrupted=False,
             turns=0,
             elapsed_s=0.0,
             limits=limits,
-            solved=True,
+            protocol_reason="solved",
         )
         == "solved"
     )
     # ...but a hard interrupt still wins over it.
     assert (
         _decide_stop(
-            exit_requested=False,
             interrupted=True,
             turns=0,
             elapsed_s=0.0,
             limits=limits,
-            solved=True,
+            protocol_reason="solved",
         )
         == "interrupted"
     )
     # Not solved -> keep going.
     assert (
         _decide_stop(
-            exit_requested=False,
             interrupted=False,
             turns=0,
             elapsed_s=0.0,
             limits=limits,
-            solved=False,
+            protocol_reason=None,
         )
         is None
     )
@@ -171,12 +161,16 @@ def _ctx(logger: Any) -> _LoopContext:
         logger=logger,
         cwd="/tmp",
         policy=default_policy(),
+        protocol=PolicySearchSession(experiment=ExperimentState(problem_name="p", task_name="t")),
     )
 
 
 async def test_execute_framework_tool_normalizes_output() -> None:
     logger = _FakeLogger()
-    result = await _execute_framework_tool(_OkTool(), ToolCall("c1", "Ok", {}), _ctx(logger))
+    result, notices = await _execute_framework_tool(
+        _OkTool(), ToolCall("c1", "Ok", {}), _ctx(logger)
+    )
+    assert notices == []
     assert result.id == "c1"
     assert result.is_error is False
     assert "v" in result.output
@@ -201,10 +195,17 @@ async def test_flagging_warning_injected_up_to_cap() -> None:
     """A flagged call injects the sandbox warning on the agent's next turn, capped at
     flagging_warning_cap; 0 disables it; a clean call injects nothing (but every flag
     is counted)."""
-    from regact.orchestration.loop import _FLAGGING_WARNING, _flag_suspicious_call
+    from unittest.mock import Mock
+
+    from regact.agent.scripted_agent import ScriptedAgent
+    from regact.orchestration.loop import (
+        _FLAGGING_WARNING,
+        _flag_suspicious_call,
+        _maybe_warn_flagged,
+    )
     from regact.session.state import ExperimentState
 
-    class _RecordingAgent:
+    class _RecordingAgent(ScriptedAgent):
         def __init__(self) -> None:
             self.injected: list[str] = []
 
@@ -217,10 +218,13 @@ async def test_flagging_warning_injected_up_to_cap() -> None:
             agent=agent,  # type: ignore[arg-type]
             experiment=ExperimentState(problem_name="p", task_name="t"),
             tools_by_name={},
-            transcript=None,  # type: ignore[arg-type]
+            transcript=Mock(),
             logger=_FakeLogger(),
             cwd="/tmp",
             policy=default_policy(),
+            protocol=PolicySearchSession(
+                experiment=ExperimentState(problem_name="p", task_name="t")
+            ),
             flagging_warning_cap=cap,
         )
         return ctx, agent
@@ -230,12 +234,24 @@ async def test_flagging_warning_injected_up_to_cap() -> None:
 
     capped, agent = make(2)
     for _ in range(3):
+        before = len(agent.injected)
         await _flag_suspicious_call(bad, capped)
-    assert agent.injected == [_FLAGGING_WARNING, _FLAGGING_WARNING]  # capped at 2
+        assert len(agent.injected) == before
+        await _maybe_warn_flagged(capped)
+        await _maybe_warn_flagged(capped)  # no duplicate without a fresh flag
+    assert len(agent.injected) == 2
+    assert all(message.startswith(_FLAGGING_WARNING) for message in agent.injected)
+    assert all(
+        "Command flagged : '" + bad.input["command"] + "'" in message for message in agent.injected
+    )
+    assert all(
+        message.endswith(capped.protocol.interaction_guidance()) for message in agent.injected
+    )
     assert capped.experiment.flagged_tool_calls == 3  # but every flag is still COUNTED
 
     off, off_agent = make(0)
     await _flag_suspicious_call(bad, off)
+    await _maybe_warn_flagged(off)
     assert off_agent.injected == []  # 0 = never inject
 
     ok, ok_agent = make(3)

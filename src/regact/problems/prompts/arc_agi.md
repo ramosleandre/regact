@@ -4,27 +4,28 @@ ARC-AGI-3 is an interactive game benchmark. Each game is a multi-level puzzle on
 
 ## Observation
 
-`make_env()` gives you an isolated client with a gym-like interface (importable with `from framework.make_env import make_env`). Each `obs` is:
+{interaction_note}
 
 - {frame_desc}
 - `obs.available_actions`: the integer action ids currently valid.
 - `obs.is_done` / `obs.reward`: episode end / reward (1.0 on WIN).
 - `obs.info`: readable metadata: `obs.info["state"]` (`NOT_FINISHED`/`WIN`/`GAME_OVER`), `obs.info["levels_completed"]`, `obs.info["win_levels"]`.
 
-`code_library/arc_agi_helper.py` provides this game's action-id constants and a click builder.
+`framework/arc_agi_helper.py` provides this game's action-id constants and a click builder.
 
 ## Goal
 
-You must figure out the goal of the game by yourself. Levels share similar goals. Complete as many levels as possible. As soon as you make progress in terms of levels, submit a solution (`python framework/control.py SubmitSolution`), then keep working on solving the next levels.
+{goal_note}
 
-## How to read and solve an ARC game
+## General advices on how to solve an ARC game
 
-These games are designed to be solved by a human playing them: form a hypothesis about the rules, test it, refine. Do that programmatically, not by eyeballing raw integers:
+These games are remarkably well solved by humans in comparison to AI. This means that it often requires human-intuitive approaches that over-focused AI may miss. Some advices :
 
-- Render `obs.frame`'s grid to a PNG (e.g. with matplotlib) and LOOK at the image - objects, walls, a moving token, symmetry and repeated tiles are obvious to the eye but hidden in raw numbers.
-- Segment the grid programmatically: flood-fill contiguous same-colour regions. ARC "objects" are usually connected colour blocks; tell them apart from UI strips by size and position.
-- Diff consecutive frames (before vs after ONE action) to isolate exactly what that action changed and where the cursor/player is.
-- Look for a HUD: a border or top row often encodes a budget, score or level, separate from the play area.
-- Learn the action semantics by a systematic single-action sweep - what a click vs a move does, and which actions need a precondition.
-- Levels are compositional: they share one rule that ramps in difficulty. Crack level 1's rule, then look for how it generalises or mutates in later levels.
-- Ask, like a human: what state counts as WIN, what are the objects, what do the actions do, and what is the constraint (a move budget, a timer)?
+- Try to properly understand the action semantics.
+- You may sometime find interest in adopting the perspective of a human playing a small arcade game.
+- You should avoid getting overconfident on an hypothesis and stay open to changing your minds to avoid cognitive traps. You should verify your hypothesis with precise experiments and not assume things.
+- When image viewing is available, you may find interest in checking the grid visually, and try to identify objects and what they represent. You can compare two images where a different action was played, or the before/after comparison. You can also combine it with programmatic analysis to identify and check patterns precisely.
+- Choose experiments that distinguish competing explanations or make progress toward the game's objective.
+- Levels are compositional: they share one rule that ramps in difficulty. Crack level 1's rule, then look for how it generalises or mutates in later levels. New levels will have new mechanisms absent in previous one, but the rules are conserved across levels. Recheck your understanding when new observations or levels reveal behavior your current explanation does not account for.
+
+{levels_to_win}
