@@ -38,6 +38,7 @@ class ExperimentState:
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
     turn: int = 0  # 1-indexed turn in progress (0 before the first)
+    agent_usage: dict[str, Any] | None = None  # CLI agents: tokens per model, set at close
     schema_version: int = 3
 
     def save(self, path: str) -> None:

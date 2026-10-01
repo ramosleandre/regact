@@ -548,6 +548,9 @@ async def run_task(
                     await session.close()
                 finally:
                     await agent.close()
+                    if (usage := agent.usage()) is not None:
+                        experiment.agent_usage = usage
+                        experiment.save(os.path.join(logs_dir, "experiment_state.json"))
                 if egress is not None:
                     await egress.close()
                 if mirror is not None:

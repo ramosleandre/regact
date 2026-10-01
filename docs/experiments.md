@@ -62,7 +62,8 @@ With `n_attempts_per_task=1`, each task has this layout:
     config.json                       # the run config (api_key redacted)
     logs/
       transcript.jsonl                # the normalized agent event stream
-      experiment_state.json           # live state (saved atomically per event)
+      experiment_state.json           # live state (saved atomically per event); agent_usage =
+                                      # Claude/Codex token totals per model, set at close
       events.jsonl / output.log       # the operational log
     workdir/                          # the agent's working directory
 ```

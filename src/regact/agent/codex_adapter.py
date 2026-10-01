@@ -31,6 +31,7 @@ from regact.agent.events import (
     ToolCall,
     ToolResult,
 )
+from regact.agent.usage import codex_usage
 
 
 class CodexAgent(_CliAgent):
@@ -45,12 +46,16 @@ class CodexAgent(_CliAgent):
         raw_home = str(self._args.get("codex_home") or "~/.regact/codex-home")
         self._home_root = os.path.realpath(os.path.expanduser(raw_home))
         self._session_home: str | None = None  # this task's fresh home (created on demand)
+        self._usage: dict[str, Any] | None = None
         self._started_tools: set[str] = set()
         self._finished_tools: set[str] = set()
         self._plan_updates = 0
         subagents = self._args.get("subagents_enabled")
         if subagents is not None and not isinstance(subagents, bool):
             raise ValueError("agent.args.subagents_enabled must be true, false, or null")
+
+    def usage(self) -> dict[str, Any] | None:
+        return self._usage
 
     def prompt_for_transcript(self, prepared: str) -> str:
         return "[Codex system prompt — supplied by Codex, not captured]\n\n" + prepared
@@ -135,6 +140,7 @@ class CodexAgent(_CliAgent):
                 shutil.copyfile(refreshed, os.path.join(self._home_root, "auth.json"))
             except OSError:
                 pass  # best-effort; a lost refresh just re-seeds from ~/.codex next run
+        self._usage = codex_usage(self._session_home)  # before the home and its logs are deleted
         shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
 

@@ -99,6 +99,10 @@ class CodeAgent(ABC):
         """
         return None
 
+    def usage(self) -> dict[str, Any] | None:
+        """Token usage of the finished run, read after :meth:`close` (``None`` if not tracked)."""
+        return None
+
     def resolved_model_info(self) -> dict[str, Any] | None:
         """What the backend RESOLVED for the model, once known - e.g. ``{"context_window": int,
         "context_window_source": str}``. ``source == "fallback"`` means the served window was

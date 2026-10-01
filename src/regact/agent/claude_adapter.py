@@ -29,6 +29,7 @@ from regact.agent.events import (
     ToolResult,
     tool_result_images,
 )
+from regact.agent.usage import claude_usage
 from regact.obs.errors import ErrorCategory
 from regact.security.policy import SecurityPolicy, default_policy
 
@@ -55,6 +56,7 @@ class ClaudeAgent(_CliAgent):
         raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
         self._home_root = os.path.realpath(os.path.expanduser(raw_home))
         self._session_home: str | None = None  # this task's fresh config dir (created on demand)
+        self._usage: dict[str, Any] | None = None
 
     def _real_creds(self) -> str:
         return os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
@@ -137,8 +139,12 @@ class ClaudeAgent(_CliAgent):
                 shutil.copyfile(refreshed, os.path.join(self._home_root, ".credentials.json"))
             except OSError:
                 pass  # best-effort; a lost refresh just re-seeds from ~/.claude next run
+        self._usage = claude_usage(self._session_home)  # before the home and its logs are deleted
         shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
+
+    def usage(self) -> dict[str, Any] | None:
+        return self._usage
 
     def prompt_for_transcript(self, prepared: str) -> str:
         return "[Claude Code system prompt — supplied by Claude Code, not captured]\n\n" + prepared
