@@ -14,6 +14,7 @@ from regact.config.schema import (
     RunConfig,
 )
 from regact.problems.arc_agi.problem import ArcAgiProblem
+from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.prompting import workspace_docs
 from regact.protocols.cwm.protocol import CwmProtocol
@@ -24,11 +25,14 @@ from regact.workspace.bootstrap import Workspace
 
 @pytest.mark.parametrize("dialect", ["client_cli", "bash_block", "hermes_xml", "glm", "native"])
 @pytest.mark.parametrize("helpers", [True, False])
-def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers):
+@pytest.mark.parametrize("planner", [True, False])
+def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers, planner):
     cfg = RunConfig(
         AgentConfig(AgentName.SCRIPTED),
         ProblemConfig("arc_agi"),
-        protocol=ProtocolConfig("cwm", {"workspace_helpers_enabled": helpers}),
+        protocol=ProtocolConfig(
+            "cwm", {"workspace_helpers_enabled": helpers, "planner": {"enabled": planner}}
+        ),
     )
     problem = ArcAgiProblem(
         environments_dir=str(Path(__file__).resolve().parents[1] / "environnement")
@@ -39,6 +43,7 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         [],
         templates=protocol.templates,
         expose_environment=False,
+        command_script=protocol.command_script,
         problem_name=problem.name,
         task_name="ls20",
         env_base_url="http://unused",
@@ -50,7 +55,7 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         problem,
         "ls20",
         tool_protocol=dialect,
-        tool_names=["UpdateCodeWorldModel", "PlanInCWM", "SubmitExplorationController"],
+        tool_names=list(enabled_commands(protocol.options)),
         verbalize_variant="off",
     )
     all_docs = [p for p in tmp_path.rglob("*.md")]
@@ -64,13 +69,24 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         "obs.frame",
         "__SIZE_RATIO__",
         "__SCRIPT_PATH__",
+        "exploration.py",
+        "framework/control.py",
     ):
         assert absent not in text
     assert 'obs["frame"]' in prompt
     assert (tmp_path / "framework/arc_agi_helper.py").is_file()
+    assert (tmp_path / "framework/commands.py").is_file()
+    assert (tmp_path / "controller.py").is_file()
+    assert not (tmp_path / "framework/control.py").exists()
+    assert not (tmp_path / "exploration.py").exists()
     assert not (tmp_path / "code_library").exists()
     assert "model_env.py" not in text
-    assert ("simulation.py" in text) == helpers
+    assert ("cwm_env.py" in text) == helpers
+    assert ("simulate.py" in text) == helpers
+    assert "framework/simulation.py" not in text
+    assert "simulates it again" not in text
+    assert "No preliminary simulation or predicted novelty is required" in text
+    assert "source files or imported dependencies have changed" in text
     assert "CWM_INTERFACE.md" not in text
     assert not (tmp_path / "CWM_INTERFACE.md").exists()
     assert sorted(p.name for p in (tmp_path / "world_model").iterdir()) == [
@@ -81,7 +97,17 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         "model_transition.py",
     ]
     assert ("Working in the terminal" in prompt) == (dialect in ("bash_block", "hermes_xml", "glm"))
-    assert ("python framework/control.py PlanInCWM" in prompt) == (dialect != "native")
+    assert ("python framework/commands.py PlanInCWM" in prompt) == (planner and dialect != "native")
+    assert (tmp_path / "goal.py").exists() == planner
+    assert (tmp_path / "docs/plan_in_CWM.md").exists() == planner
+    for p in tmp_path.rglob("*.py"):
+        compile(p.read_text(), str(p), "exec")
+    if not planner:
+        all_text = text + "\n".join(p.read_text() for p in tmp_path.rglob("*.py"))
+        for absent in ("PlanInCWM", "goal.py", "plans/", "plan_in_CWM.md"):
+            assert absent not in all_text
+    assert 'obs["info"]["milestones"]' in text
+    assert "The list is not cumulative" in text
     # Every generated file is discoverable in the inventory; optional files cannot leak.
     for p in tmp_path.rglob("*"):
         if p.is_file():
@@ -128,7 +154,7 @@ def test_moved_action_helper_works_in_isolated_submission(rig):  # noqa: F811
     (c.workdir / helper.relpath).write_text(helper.content)
     accept(c)
     (
-        c.workdir / "exploration.py"
+        c.workdir / "controller.py"
     ).write_text('''"""Test new states with the provided action constant."""
 from framework.arc_agi_helper import ACTION1
 from framework.action_list_controller import ExplorationControllerFromListActions
@@ -136,7 +162,7 @@ from framework.action_list_controller import ExplorationControllerFromListAction
 def get_controller():
     return ExplorationControllerFromListActions([ACTION1] * 4)
 ''')
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     assert not result.get("error"), result
     assert result["real_actions"] == 4
 

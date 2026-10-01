@@ -1,6 +1,7 @@
 """Agent workflow contracts: inspectable IDs/images and local CWM simulation."""
 
 import json
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -54,14 +55,15 @@ def test_new_settings_and_optional_workspace_helpers():
             CwmConfig.from_mapping(options)
     context = FeatureContext("fake", "counter", "/tmp/cwm-test")
     files = {x.relpath: x.content for x in templates(context, cfg)}
-    for name in ("framework/simulation.py",):
+    for name in ("framework/cwm_env.py", "simulate.py"):
         compile(files[name], name, "exec")
-    assert "def make_cwm_env" in files["framework/simulation.py"]
+    assert "def make_cwm_env" in files["framework/cwm_env.py"]
     disabled = {
         x.relpath: x.content
         for x in templates(context, CwmConfig.from_mapping({"workspace_helpers_enabled": False}))
     }
-    assert "world_model/model_env.py" not in disabled and "framework/simulation.py" not in disabled
+    assert "world_model/model_env.py" not in disabled and "framework/cwm_env.py" not in disabled
+    assert "simulate.py" not in disabled
     assert "Local simulation helpers" not in disabled["docs/CWM_modeling_phase.md"]
 
 
@@ -90,7 +92,7 @@ def test_preview_cleanup_cannot_follow_agent_symlinks(tmp_path):
 
 
 async def submit(c):
-    value = await CwmTool("SubmitExplorationController", c).call(
+    value = await CwmTool("RunController", c).call(
         {}, ToolContext(cwd=str(c.workdir))
     )
     return json.loads(value.data[value.data.index("{") :]), value.data
@@ -118,8 +120,11 @@ async def test_real_exploration_ids_preview_cap_and_next_submission_clears(rig, 
     assert len(c.data({"op": "observations", "ids": result["observation_ids"]})) == 6
     assert len(c.data({"op": "transitions", "ids": result["transition_ids"]})) == 5
     assert "simulation" not in text.lower() or "Code World Model" in text
+    # A rejected submission also clears the previous temporary previews.
+    source = c.workdir / "world_model/model_transition.py"
+    source.write_text(source.read_text() + "\n# changed\n")
     again, _ = await submit(c)
-    assert again["status"] == "Refused" and "new observations" in again["message"]
+    assert again["status"] == "Refused" and "UpdateCodeWorldModel" in again["message"]
     assert not list(images.iterdir()) and "observation_images" not in again
 
 
@@ -148,10 +153,11 @@ def test_local_env_reset_modes_and_controller_runner(rig):
     script = """
 import json
 from framework import data_api
-from framework.simulation import make_cwm_env, run_controller
-from framework.simulation import EnvCWM
+from framework.cwm_env import make_cwm_env
+from simulate import run_controller
+from framework.cwm_env import EnvCWM
 calls=[]
-data_api.summary=lambda: {"initial_observation_id": 1}
+data_api.summary=lambda: {"controller_start_observation_id": 1}
 data_api.load_observations=lambda ids: calls.append(ids) or [INITIAL]
 env=make_cwm_env()
 assert calls == [[1]] and env.state.n == 0
@@ -169,9 +175,19 @@ assert len(calls) == before
 try: EnvCWM()
 except ValueError as e: assert "initial_state" in str(e)
 else: raise AssertionError("implicit data access")
-from exploration import get_controller
+from controller import get_controller
 result=run_controller(get_controller(),env,max_actions=3)
 assert result == {"actions":3,"stop_reason":"max_actions"}
+# The starter terminates on a full game, controller completion, or an action cap.
+result=run_controller(get_controller(),env,max_actions=None)
+assert result == {"actions":4,"stop_reason":"controller_done"}
+from framework.action_list_controller import ExplorationControllerFromListActions
+result=run_controller(ExplorationControllerFromListActions([1]*10),env,max_actions=None)
+assert result == {"actions":6,"stop_reason":"environment_done"}
+# The executable entry point runs the same editable loop.
+import runpy, sys
+sys.argv=["simulate.py", "--max-actions", "2"]
+runpy.run_path("simulate.py", run_name="__main__")
 print("HELPERS_OK")
 """.replace("INITIAL", repr(c.initial))
     done = subprocess.run(
@@ -187,19 +203,47 @@ def test_pure_model_env_is_usable_inside_isolated_controller(rig):
     accept(c)
     c.options.n_tmp_images_saved_per_exploration = 0
     (
-        c.workdir / "exploration.py"
+        c.workdir / "controller.py"
     ).write_text('''"""Inspect one simulated successor before acting."""
-from framework.simulation import EnvCWM
+from framework.cwm_env import EnvCWM
+from world_model.model_state import State
 class ExplorationController:
  def is_done(self,s): return s.n >= 4
  def act(self,s):
+  assert isinstance(s, State), "local and submitted imports must share the same State"
   simulation=EnvCWM(initial_state=s)
   assert simulation.step(1).n == s.n+1
   return 1
 def get_controller(): return ExplorationController()
 ''')
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     assert result["real_actions"] == 4 and not result.get("error"), result
+
+
+@pytest.mark.integration
+def test_workspace_package_imports_from_a_subdirectory_and_relative_imports(rig):
+    c, _ = rig
+    accept(c)
+    parser = c.workdir / "world_model/model_parser.py"
+    parser.write_text(parser.read_text().replace("from world_model.model_state", "from .model_state"))
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    probe = c.workdir / "scratch/probe.py"
+    probe.parent.mkdir()
+    probe.write_text('''from world_model.model_parser import parse
+from world_model.model_state import State
+from framework.cwm_env import EnvCWM
+s = parse({"frame": [0]})
+assert isinstance(s, State)
+assert isinstance(EnvCWM(initial_state=s).step(1), State)
+print("PACKAGE_IMPORTS_OK")
+''')
+    done = subprocess.run(
+        [sys.executable, str(probe)], cwd=probe.parent,
+        env={**os.environ, "PYTHONPATH": str(c.workdir)},
+        text=True, capture_output=True, timeout=15,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "PACKAGE_IMPORTS_OK" in done.stdout
 
 
 @pytest.mark.integration

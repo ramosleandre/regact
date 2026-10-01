@@ -98,9 +98,9 @@ def verify_bundle(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], manifest)
 
 
-def snapshot(
-    workdir: Path, destination: Path, entries: list[str], *, model: Path | None = None
-) -> tuple[Path, dict[str, Any]]:
+def _collect_sources(
+    workdir: Path, entries: list[str], *, model: Path | None = None
+) -> dict[str, bytes]:
     root = workdir.resolve()
     sources: dict[str, bytes] = {}
     if model is not None:
@@ -146,18 +146,52 @@ def snapshot(
                 if not module:
                     continue
                 parts = module.split(".")
-                for base in (Path(), Path("world_model")):
-                    candidates = [
-                        base / Path(*parts).with_suffix(".py"),
-                        base / Path(*parts) / "__init__.py",
-                    ]
-                    candidates += [
-                        base / Path(*parts[:i]) / "__init__.py" for i in range(1, len(parts))
-                    ]
-                    for candidate in candidates:
-                        key = candidate.as_posix()
-                        if (root / candidate).is_file() and key not in sources:
-                            pending.append(key)
+                candidates = [
+                    Path(*parts).with_suffix(".py"),
+                    Path(*parts) / "__init__.py",
+                ]
+                candidates += [
+                    Path(*parts[:i]) / "__init__.py" for i in range(1, len(parts))
+                ]
+                for candidate in candidates:
+                    key = candidate.as_posix()
+                    if (root / candidate).is_file() and key not in sources:
+                        pending.append(key)
+    return sources
+
+
+class CwmSourceChanged(ValueError):
+    kind = "cwm_source_changed"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Your CWM files or their imported dependencies changed since their last "
+            "successful validation. Run UpdateCodeWorldModel before submitting this "
+            "exploration. No real action was taken."
+        )
+
+
+def require_unchanged_model(workdir: Path, model: Path, entries: list[str]) -> None:
+    """Compare the current static import graph to the accepted one without saving code.
+
+    Unrelated workspace edits are irrelevant. Re-resolving imports also detects a
+    newly added local module that would shadow an import during local simulation.
+    Accepted code remains frozen if the workspace changes after this check.
+    """
+    expected = json.loads((model / "manifest.json").read_text())["files"]
+    try:
+        sources = _collect_sources(workdir, entries)
+    except (OSError, ValueError, SyntaxError) as exc:
+        raise CwmSourceChanged() from exc
+    actual = {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()}
+    if actual != expected:
+        raise CwmSourceChanged()
+
+
+def snapshot(
+    workdir: Path, destination: Path, entries: list[str], *, model: Path | None = None
+) -> tuple[Path, dict[str, Any]]:
+    sources = _collect_sources(workdir, entries, model=model)
     hashes = {name: hashlib.sha256(data).hexdigest() for name, data in sorted(sources.items())}
     identifier = hashlib.sha256(canonical(hashes).encode()).hexdigest()
     target = destination / identifier

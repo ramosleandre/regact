@@ -1,27 +1,14 @@
-"""Optional local simulation template; no trusted framework execution happens here."""
+"""Optional local CWM environment and editable simulation script templates."""
 
-SIMULATION = r'''"""Try the current workspace CWM/controller locally; no real actions are performed.
+CWM_ENV = r'''"""Local environment backed by your current workspace CWM; no real actions.
 
-python framework/simulation.py --max-actions 20
-
-EnvCWM(initial_state=state): pure state/observation simulator with no data access.
-make_cwm_env(): convenience factory loading the recorded starting observation once.
-run_controller(controller, env): print a local controller's simulated actions.
-Read each function/class docstring for arguments and examples.
-
-This development helper does not validate or accept a CWM. PlanInCWM and
-SubmitExplorationController still use the last accepted CWM. Local execution
-has the agent shell tool's timeout; isolated framework callback limits do not
-apply here. Stop a hanging script through that tool and repair the callback.
+EnvCWM(initial_state=state) never queries the dataset.
+make_cwm_env() reads the next controller's starting observation once and parses it.
+For an editable controller loop with printed states/actions, see simulate.py.
+Local simulation does not validate or accept code. Submit changed CWM code with
+UpdateCodeWorldModel before using RunController.
 """
 from copy import deepcopy
-from pathlib import Path
-import sys
-
-_workdir = Path(__file__).resolve().parents[1]
-for _directory in (_workdir, _workdir / "world_model"):
-    if str(_directory) not in sys.path:
-        sys.path.insert(0, str(_directory))
 
 
 class EnvCWM:
@@ -41,7 +28,7 @@ class EnvCWM:
         if initial_state is None:
             raise ValueError(
                 "EnvCWM needs initial_state. In workspace scripts, use "
-                "framework.simulation.make_cwm_env() to load the recorded start."
+                "framework.cwm_env.make_cwm_env() to load the recorded start."
             )
         self.obs_mode = obs_mode
         self._initial_state = deepcopy(initial_state)
@@ -53,7 +40,7 @@ class EnvCWM:
 
     def observation(self):
         """Render the full observation; does not advance the simulation."""
-        import model_render
+        from world_model import model_render
         return deepcopy(model_render.render(self.state))
 
     def reset(self, initial_state=None):
@@ -65,24 +52,38 @@ class EnvCWM:
         """Apply one problem-format action in the CWM only."""
         if self.observation()["is_done"]:
             raise RuntimeError("The simulated environment has ended; call reset() before step().")
-        import model_transition
+        from world_model import model_transition
         self._state = deepcopy(model_transition.step(self.state, deepcopy(action)))
         return self.observation() if self.obs_mode else self.state
 
 
 def make_cwm_env(obs_mode=False, initial_state=None):
-    """Create EnvCWM. With no State, read/parse the fixed start once via data_api.
+    """Create EnvCWM. Without State, read/parse the next controller's start once.
+
+    This is the live observation in single_instance and the original starting
+    observation in multi_instance. See data_api.summary() for both IDs.
 
     This factory is for workspace scripts, not submitted callbacks. Passing a
     State skips data access entirely. Further resets never query the dataset.
     """
     if initial_state is None:
         from framework.data_api import summary, load_observations
-        import model_parser
-        oid = summary()["initial_observation_id"]
+        from world_model import model_parser
+        oid = summary()["controller_start_observation_id"]
         initial_state = model_parser.parse(load_observations([oid])[0])
     return EnvCWM(obs_mode=obs_mode, initial_state=initial_state)
 
+'''
+
+SIMULATE = r'''"""Edit this script to inspect your controller in the current workspace CWM.
+
+Run: python simulate.py --max-actions 20 (or --max-actions null for no action cap).
+Customize prints, the controller or its starting state. This script takes no
+real actions, records no experience and does not validate/accept the CWM.
+The shell tool's timeout applies, not the submitted-callback/controller-call budgets.
+Restart the script after editing CWM files; imports are not reloaded in place.
+"""
+from framework.cwm_env import make_cwm_env
 
 def run_controller(controller, env, max_actions=20):
     """Reset an env-like instance, print every value/action, return a short summary.
@@ -122,6 +123,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-actions", type=lambda value: None if value.lower() == "null" else int(value), default=20)
     args = parser.parse_args()
-    import exploration
-    run_controller(exploration.get_controller(), make_cwm_env(), args.max_actions)
+    import controller
+    run_controller(controller.get_controller(), make_cwm_env(), args.max_actions)
 '''

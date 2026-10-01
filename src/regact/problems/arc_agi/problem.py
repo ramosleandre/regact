@@ -111,6 +111,34 @@ class _ArcGymShim:
         self._last = obs
         return obs, self._info(obs)
 
+    def reset_explicit(self, kind: str, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
+        """Select a precise reset in the local engine's normal reset pipeline.
+
+        The public wrapper's RESET chooses full/level implicitly. Bind only this
+        game's handler for this call, preserving rendering and scorecard updates.
+        Never toggle process-wide ONLY_RESET_LEVELS (other tasks run concurrently).
+        """
+        game = getattr(self._env, "_game", None)
+        if game is None:
+            raise ValueError("Explicit ARC reset modes require the local/offline engine")
+        method = {"environment": "full_reset", "level": "level_reset"}.get(kind)
+        if method is None:
+            raise ValueError(f"Unsupported reset kind: {kind}")
+        had_override = "handle_reset" in game.__dict__
+        previous = game.__dict__.get("handle_reset")
+        try:
+            game.handle_reset = getattr(game, method)
+            obs = self._env.reset()
+            if obs is None:
+                raise RuntimeError("ARC returned no observation after reset")
+            self._last = obs
+            return obs, self._info(obs)
+        finally:
+            if had_override:
+                game.handle_reset = previous
+            else:
+                del game.handle_reset
+
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
         game_action, data = self._decode(action)
         obs = self._env.step(game_action, data=data)
@@ -406,6 +434,20 @@ class ArcAgiProblem(BaseProblem):
 
     def get_task_names(self) -> list[str]:
         return list(self._tasks)
+
+    def reset_commands(self) -> dict[str, str]:
+        return {
+            "ResetLevel": "Reset the current ARC level, preserving completed levels.",
+            "ResetEnvironment": "Reset the whole environment from level 1.",
+        }
+
+    def validate_controller_action(self, action: Any) -> None:
+        action_id = action.get("action") if isinstance(action, dict) else action
+        if action_id == 0:
+            raise InvalidActionError(
+                "Use ResetLevel or ResetEnvironment between RunController calls; "
+                "RESET is not a controller action."
+            )
 
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
         if mode not in (ObsMode.RAW, ObsMode.RAW_LAST_FRAME_ONLY):

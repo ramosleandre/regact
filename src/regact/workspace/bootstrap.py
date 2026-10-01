@@ -125,6 +125,7 @@ class Workspace:
         lifecycle: Lifecycle,
         helper_templates: list[TemplateFile] | None = None,
         expose_environment: bool = True,
+        command_script: str = "framework/control.py",
     ) -> None:
         """Write the base and problem helpers, then call the protocol template provider.
 
@@ -142,8 +143,10 @@ class Workspace:
                 template.format(base_url=env_base_url, game_id=game_id),
             )
         self._write(
-            "framework/control.py",
-            _CONTROL_CLI.replace("__BASE_URL__", env_base_url).replace("__GAME_ID__", game_id),
+            command_script,
+            _CONTROL_CLI.replace("__BASE_URL__", env_base_url)
+            .replace("__GAME_ID__", game_id)
+            .replace("framework/control.py", command_script),
         )
 
         # Problem-specific helpers (e.g. ARC action constants) — import-free.

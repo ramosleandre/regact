@@ -1,4 +1,4 @@
-"""CWM v4 settings. Unknown keys fail rather than silently changing an experiment."""
+"""CWM settings. Unknown keys fail rather than silently changing an experiment."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Any
 
 @dataclass
 class PlannerConfig:
+    enabled: bool = False
     algorithm: str = "bfs"
     max_seconds_per_planner_call: float | None = 30
     max_cwm_calls_per_planner_call: int | None = 10000
@@ -21,7 +22,7 @@ class PlannerConfig:
 class ExecutionConfig:
     max_seconds_per_call: float | None = 5
     max_seconds_per_UpdateCodeWorldModel: float | None = 120
-    max_seconds_per_episode: float | None = 120
+    max_seconds_per_controller_call: float | None = 120
     max_memory_mb: int | None = 512  # MiB
 
 
@@ -75,7 +76,7 @@ class CwmConfig:
                     validate(value, prefix + key + ".")
                 elif key.startswith("max_") and value is None:
                     continue
-                elif key == "workspace_helpers_enabled":
+                elif key in ("workspace_helpers_enabled", "enabled"):
                     if type(value) is not bool:
                         raise ValueError(f"{prefix}{key} must be a boolean")
                 elif key == "n_tmp_images_saved_per_exploration":
@@ -95,9 +96,13 @@ class CwmConfig:
         validate(dataclasses.asdict(config), "protocol.")
         if config.threshold_max_state_obs_size_ratio >= 1:
             raise ValueError("protocol.threshold_max_state_obs_size_ratio must be < 1")
-        if config.max_actions_per_exploration is not None and (
-            config.planner.max_depth_per_planner_call is not None
-            and config.planner.max_depth_per_planner_call > config.max_actions_per_exploration
+        if (
+            config.planner.enabled
+            and config.max_actions_per_exploration is not None
+            and (
+                config.planner.max_depth_per_planner_call is not None
+                and config.planner.max_depth_per_planner_call > config.max_actions_per_exploration
+            )
         ):
             raise ValueError("planner depth cannot exceed protocol.max_actions_per_exploration")
         return config

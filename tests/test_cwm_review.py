@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from regact.agent.events import ToolCall, ToolResult, tool_result_images
 from regact.obs.transcript import TranscriptWriter, event_to_json
-from regact.protocols.cwm.session import PHASE_DESCRIPTIONS, CwmSession, CwmTool
+from regact.protocols.cwm.session import CwmSession, CwmTool
 from regact.tools.base import ToolContext
 from regact.viz.reader import _group_turns
 from test_cwm_protocol import accept, collect, exploration, model
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.integration
 async def call(c, name, token=None):
     context = ToolContext(cwd=str(c.workdir), detail={"request_id": token} if token else {})
     output = await CwmTool(name, c).call({}, context)
-    json_text = output.data[output.data.index("{"):]
+    json_text = output.data[output.data.index("{") :]
     value = json.loads(json_text)
     assert json_text == json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)
     return value, output.messages
@@ -50,7 +50,7 @@ async def test_acceptance_notice_and_retry_are_separate_and_not_duplicated(rig):
     assert replay == result and notices == []
     assert c.store.db.execute("select count(*) from records").fetchone()[0] == before
     (c.workdir / "world_model/model_transition.py").write_text(
-        "from model_state import State\ndef step(s,a): return State(s.n+2)\n"
+        "from world_model.model_state import State\ndef step(s,a): return State(s.n+2)\n"
     )
     refused, notices = await call(c, "UpdateCodeWorldModel")
     assert refused["status"] == "Refused"
@@ -74,12 +74,12 @@ async def test_http_notice_and_retry_id_are_transport_metadata(rig):
         ).json()
     assert json.loads(first["output"])["status"] == "Accepted" and len(first["messages"]) == 1
     assert first["output"].startswith('{\n  "status": "Accepted",')
-    assert first["messages"][0].endswith(PHASE_DESCRIPTIONS[c.phase])
+    assert first["messages"][0].endswith(c.phase_description())
     session = CwmSession(coordinator=c, tools=[])
     for reminder_count in (0, 1, 10):
         assert session.reminder(reminder_count) == (
             "Continue your work until the game is fully solved.\n"
-            f"Current phase is {c.phase}: {PHASE_DESCRIPTIONS[c.phase]}"
+            f"Current phase is {c.phase}: {c.phase_description()}"
         )
     assert "messages" not in second and json.loads(second["output"]) == json.loads(first["output"])
     assert CwmTool("PlanInCWM", c).input_schema["properties"] == {}
@@ -146,15 +146,13 @@ async def test_milestone_survives_contradiction_and_is_not_announced_again(rig):
     c.env._milestone_detector = lambda env: ["checkpoint"] if env.last_obs.frame[0] >= 3 else []
     c.problem.milestone_kind = lambda _: "progress"
     exploration(c)
-    result, notices = await call(c, "SubmitExplorationController")
+    result, notices = await call(c, "RunController")
     assert result["stop_reason"] == "prediction_mismatch"
     assert result["new_milestones"][0]["name"] == "checkpoint"
     assert result["new_milestones"][0]["kind"] == "progress"
     assert "New real milestones" in result["message"] and len(notices) == 1
-    assert notices[0].endswith(PHASE_DESCRIPTIONS[c.phase])
-    assert CwmSession(coordinator=c, tools=[]).reminder(2).endswith(
-        PHASE_DESCRIPTIONS[c.phase]
-    )
+    assert notices[0].endswith(c.phase_description())
+    assert CwmSession(coordinator=c, tools=[]).reminder(2).endswith(c.phase_description())
     render = c.workdir / "world_model/model_render.py"
     render.write_text(
         render.read_text().replace(
@@ -163,7 +161,7 @@ async def test_milestone_survives_contradiction_and_is_not_announced_again(rig):
     )
     accepted, notices = await call(c, "UpdateCodeWorldModel")
     assert accepted["status"] == "Accepted" and len(notices) == 1
-    again, notices = await call(c, "SubmitExplorationController")
+    again, notices = await call(c, "RunController")
     assert again["real_actions"] == 4 and "new_milestones" not in again
     assert notices == []
 
@@ -236,7 +234,7 @@ async def test_limit_between_prediction_and_real_step_preserves_complete_history
         return original(action)
 
     monkeypatch.setattr(c, "_step", deadline_arrives)
-    result, _ = await call(c, "SubmitExplorationController")
+    result, _ = await call(c, "RunController")
     assert result["task_stop"]["reason"] == "walltime_limit"
     assert result["real_actions"] == 0
     assert "error" not in result and "history_complete" not in result

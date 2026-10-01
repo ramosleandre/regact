@@ -71,11 +71,17 @@ def test_policy_search_prompt_bytes_match_main(key: str, expected: str) -> None:
         tool_names=["SubmitSolution", *(["ExitTask"] if exit_enabled == "True" else [])],
         verbalize_variant=verbalize,
     )
-    # September 28: the shared environment now supplies numeric rewards. This
-    # approved one-line contract update is the only exception to the old brief.
+    # September 28: normalize only the approved reward and milestone wording
+    # changes; all other policy-search prompt bytes must still match main.
     reward_line = "- `obs.reward` - reward from the preceding action"
     assert reward_line + "\n" in prompt
     baseline_prompt = prompt.replace(reward_line + "\n", reward_line + " (may be `None`)\n")
+    milestone_line = (
+        '- `obs.info["milestones"]` - lists events produced by the action leading to this '
+        "observation; an empty list means no event. The list is not cumulative.\n"
+    )
+    assert baseline_prompt.count(milestone_line) == 1
+    baseline_prompt = baseline_prompt.replace(milestone_line, "")
     assert hashlib.sha256(baseline_prompt.encode()).hexdigest() == expected
 
 

@@ -38,12 +38,10 @@ REASONS = {
     "plan_exhausted": "The action list finished.",
     "controller_done": "The controller requested the end of this exploration.",
     "goal_achieved": "The controller's goal predicate is true in the real environment.",
-    "environment_done": "The real environment ended the episode.",
-    "no_predicted_novelty": (
-        "Simulating the exploration controller in the CWM found no new observations "
-        "outside the current dataset. Produce an exploration controller that explores "
-        "new and relevant states. No real episode was started."
-    ),
+    "controller_call_time_limit": "This controller call reached its active execution time limit.",
+    "environment_done": "The environment ended the episode. Use an available reset command before continuing.",
+    "reset_environment": "The environment restarted from its initial state.",
+    "reset_level": "The current level restarted; completed levels are preserved.",
     "prediction_mismatch": (
         "Reality contradicted a predicted observation. Inspect the counterexample."
     ),
@@ -59,14 +57,10 @@ REASONS = {
     ),
     "controller_error": (
         "The controller failed. Recorded experience is retained and this "
-        "exploration receives worst metrics; repair exploration.py."
+        "exploration receives worst metrics; repair controller.py."
     ),
     "model_error": (
         "The CWM failed while processing real experience. Inspect the error and validate a repair."
-    ),
-    "episode_time_limit": (
-        "The real episode ran out of time before all checks finished. Experience "
-        "is retained and must be validated. This does not by itself establish a CWM contradiction."
     ),
 }
 
@@ -81,7 +75,7 @@ def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | 
         "max_actions_per_exploration": (
             "protocol.max_actions_per_exploration",
             c.max_actions_per_exploration,
-            "actions per episode; simulation and real have separate allowances",
+            "real actions per RunController call",
         ),
         "max_actions_per_episode": (
             "limits.max_actions_per_episode",
@@ -91,17 +85,17 @@ def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | 
         "real_action_limit": (
             "limits.max_actions_per_task",
             limits.max_actions_per_task,
-            "real actions across the task, including dataset preparation",
+            "real actions across the task, including dataset preparation and explicit resets",
         ),
         "walltime_limit": (
             "limits.max_seconds_per_task",
             limits.max_seconds_per_task,
             "seconds per task",
         ),
-        "episode_time_limit": (
-            "protocol.execution.max_seconds_per_episode",
-            c.execution.max_seconds_per_episode,
-            "seconds per episode; simulation and real have separate allowances",
+        "controller_call_time_limit": (
+            "protocol.execution.max_seconds_per_controller_call",
+            c.execution.max_seconds_per_controller_call,
+            "active execution seconds per RunController call",
         ),
         "search_memory_limit": (
             "protocol.execution.max_memory_mb",
@@ -109,7 +103,7 @@ def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | 
             "MiB of serialized search records (one quarter of max_memory_mb)",
         ),
     }
-    if reason.startswith("max_") and hasattr(c.planner, reason):
+    if reason.startswith("max_") and hasattr(getattr(c, "planner", None), reason):
         value = getattr(c.planner, reason)
         unit = (
             "seconds"
@@ -138,6 +132,8 @@ def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | 
 
 def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) -> dict[str, Any]:
     """Project trusted results into the small public interface; never mutate stored records."""
+    if r.get("error_type") == "cwm_source_changed":
+        return {"status": "Refused", "message": r["error"]}
     out: dict[str, Any]
     error = r.get("error")
     if name == "UpdateCodeWorldModel":
@@ -189,7 +185,7 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 f"Planner found a plan as a {r['n_actions']}-length action list "
                 f"in the Code World Model. Saved at {r.get('path')}. "
                 "Submit an ExplorationControllerFromListActions instance using this plan "
-                "with SubmitExplorationController to apply it in the real environment."
+                "with RunController to apply it in the real environment."
             )
             if found
             else (
@@ -217,11 +213,7 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
     else:
         reason = r.get("stop_reason", "")
         out = {
-            "status": "Incomplete"
-            if error
-            else "Refused"
-            if reason == "no_predicted_novelty"
-            else "Completed",
+            "status": "Incomplete" if error else "Completed",
             "message": REASONS.get(
                 reason,
                 "Exploration finished." if not error else "Exploration failed; inspect the error.",
@@ -232,17 +224,15 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         for key in (
             "exploration_id",
             "cwm_version",
-            "simulation_actions",
             "real_actions",
-            "predicted_novel_observations",
             "actual_novel_observations",
             "episode_id",
+            "current_observation_id",
             "diagnostic_id",
             "counterexample",
             "differences",
             "differences_omitted",
             "new_milestones",
-            "stage",
         ):
             if key in r and (key != "new_milestones" or r[key]):
                 out[key] = r[key]
@@ -318,27 +308,5 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
 
 
 def render_feedback(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) -> str:
-    """One completed result, with simulation screening and real execution clearly separated."""
-    out = present(name, r, c, limits)
-    if name != "SubmitExplorationController" or r.get("stage") not in ("simulation", "real"):
-        return format_feedback(out)
-    out.pop("stage", None)
-    if r["stage"] == "simulation":
-        for key in (
-            "real_actions",
-            "actual_novel_observations",
-            "metrics",
-            "new_milestones",
-            "goal_achieved",
-        ):
-            out.pop(key, None)
-        return "Running in Code World Model... Failure. Stopping here.\n" + format_feedback(out)
-    for key in ("simulation_actions", "predicted_novel_observations"):
-        out.pop(key, None)
-    novelty = r.get("predicted_novel_observations", 0)
-    observation_word = "observation" if novelty == 1 else "observations"
-    ending = "Stopped." if r.get("error") else "Done."
-    return (
-        f"Running in Code World Model... Success. Found {novelty} new {observation_word}.\n\n"
-        f"Running in actual env... {ending}\n" + format_feedback(out)
-    )
+    """Render every framework result as indented JSON, without execution banners."""
+    return format_feedback(present(name, r, c, limits))

@@ -156,7 +156,7 @@ class ExperienceStore:
     ) -> None:
         with self.db:
             self.db.execute(
-                "UPDATE episodes SET status=?,stop_reason=?,result=? WHERE id=?",
+                "UPDATE episodes SET status=?,stop_reason=?,result=? WHERE id=? AND status='running'",
                 (status, reason, canonical(result), episode),
             )
 

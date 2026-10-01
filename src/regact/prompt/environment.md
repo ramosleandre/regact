@@ -6,6 +6,7 @@ You reach the environment only through `framework/make_env.py`. `make_env()` ret
 - `obs.is_done` - whether the episode has ended
 - `obs.available_actions` - action IDs accepted by this task (an accepted action may still have no effect when its preconditions are not met)
 - `obs.info` - extra metadata
+- `obs.info["milestones"]` - lists events produced by the action leading to this observation; an empty list means no event. The list is not cumulative.
 
 ```python
 env = make_env()

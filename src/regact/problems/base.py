@@ -27,6 +27,13 @@ class BaseProblem(ABC):
 
     name: str
 
+    def reset_commands(self) -> dict[str, str]:
+        """Explicit reset capabilities for externally managed controller protocols."""
+        return {"ResetEnvironment": "Reset the whole environment from its initial state."}
+
+    def validate_controller_action(self, action: Any) -> None:
+        """Reject protocol-control actions that require an explicit command instead."""
+
     @abstractmethod
     def make_env(self, task_name: str) -> Any:
         """Construct the native env for a task (gym.Env, ARC arcade env, ...)."""

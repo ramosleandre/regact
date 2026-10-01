@@ -39,8 +39,9 @@ class Worker:
         runtime: SandboxRuntime = SandboxRuntime.AUTO,
         deny_read: list[str] | None = None,
         task_deadline: Callable[[], float] | None = None,
-        budget_key: str = "protocol.execution.max_seconds_per_episode",
+        budget_key: str = "protocol.execution.max_seconds_per_controller_call",
         budget_seconds: float | None = None,
+        load_model: bool = True,
     ) -> None:
         # The subprocess changes cwd to private scratch; bundle paths must survive that.
         bundle = bundle.resolve()
@@ -68,7 +69,7 @@ class Worker:
             deny_read=deny_read or [],
         )
         argv = wrap(
-            [sys.executable, "-I", "-B", str(entry), str(bundle), str(config.max_memory_mb)]
+            [sys.executable, "-I", "-B", str(entry), str(bundle), str(config.max_memory_mb), str(int(load_model))]
         )
         if backend is SandboxRuntime.SEATBELT:
             # Generic agent profile allows host localhost; workers must not.

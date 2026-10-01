@@ -10,7 +10,7 @@ _REGISTRY: dict[str, Callable[[RunConfig], ExperimentProtocol]] = {}
 
 def register_protocol(name: str, factory: Callable[[RunConfig], ExperimentProtocol]) -> None:
     """Register a task-local protocol factory; accidental replacement is an error."""
-    if name in ("policy_search", "cwm") or name in _REGISTRY:
+    if name in ("policy_search", "cwm", "vanilla") or name in _REGISTRY:
         raise ValueError(f"protocol {name!r} is already registered")
     _REGISTRY[name] = factory
 
@@ -19,8 +19,9 @@ def build_protocol(config: RunConfig) -> ExperimentProtocol:
     """Resolve the selected workflow. Factory exceptions retain their original meaning."""
     from regact.protocols.cwm.protocol import CwmProtocol
     from regact.protocols.policy_search import PolicySearchProtocol
+    from regact.protocols.vanilla import VanillaProtocol
 
-    factories = {"policy_search": PolicySearchProtocol, "cwm": CwmProtocol, **_REGISTRY}
+    factories = {"policy_search": PolicySearchProtocol, "cwm": CwmProtocol, "vanilla": VanillaProtocol, **_REGISTRY}
     if config.protocol.name not in factories:
         raise ValueError(
             f"unknown experiment protocol {config.protocol.name!r}; available: {sorted(factories)}"

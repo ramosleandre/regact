@@ -1,4 +1,4 @@
-"""Agent-facing evidence stays honest across screening, truncation and helper calls."""
+"""Agent-facing evidence stays honest across real exploration, truncation and helper calls."""
 
 import base64
 import json
@@ -34,25 +34,25 @@ def test_structural_differences_count_omissions_without_losing_shape_changes():
 
 
 @pytest.mark.integration
-async def test_two_stages_only_report_real_metrics_after_real_execution(rig):
+async def test_feedback_reports_real_execution_even_without_novelty(rig):
     c, _ = rig
     accept(c)
     exploration(c, (1, 1))
-    tool = CwmTool("SubmitExplorationController", c)
+    tool = CwmTool("RunController", c)
     context = ToolContext(cwd=str(c.workdir))
-    rejected = await tool.call({}, context)
-    assert rejected.data.startswith("Running in Code World Model... Failure. Stopping here.\n{")
-    assert "Running in actual env" not in rejected.data
-    fields = json.loads(rejected.data.split("\n", 1)[1])
-    assert fields["status"] == "Refused" and "metrics" not in fields
-    assert "real_actions" not in fields
-    exploration(c, (1, 1, 1, 1))
     completed = await tool.call({}, context)
-    assert completed.data.startswith("Running in Code World Model... Success. Found 2 new observations.")
-    assert "\n\nRunning in actual env... Done.\n" in completed.data
-    fields = json.loads(completed.data[completed.data.index("{"):])
-    assert fields["real_actions"] == 4 and "metrics" in fields
+    fields = json.loads(completed.data)
+    assert fields["status"] == "Completed"
+    assert fields["real_actions"] == 2 and fields["actual_novel_observations"] == 0
+    assert "metrics" in fields
     assert "simulation_actions" not in fields and "predicted_novel_observations" not in fields
+    source = c.workdir / "world_model/model_transition.py"
+    source.write_text(source.read_text() + "\n# changed\n")
+    refused = await tool.call({}, context)
+    assert refused.is_error
+    fields = json.loads(refused.data)
+    assert set(fields) == {"status", "message"} and fields["status"] == "Refused"
+    assert "No real action was taken" in fields["message"]
 
 
 @pytest.mark.integration
@@ -124,10 +124,10 @@ def test_image_helper_prints_source_after_success_and_returns_none(rig, capsys):
     assert capsys.readouterr().out == ""
     assert "list_observation_ids" in module and "list_transition_ids" in module
     assert "list_observations" not in module and "list_transitions" not in module
-    starter = runpy.run_path(str(c.workdir / "exploration.py"))
+    starter = runpy.run_path(str(c.workdir / "controller.py"))
     assert starter["get_controller"]().is_done(object()) is False
-    help_result = subprocess.run([sys.executable, str(c.workdir / "framework/control.py"), "--help"], text=True, capture_output=True, check=True)
-    for name in ("UpdateCodeWorldModel", "PlanInCWM", "SubmitExplorationController"):
+    help_result = subprocess.run([sys.executable, str(c.workdir / "framework/commands.py"), "--help"], text=True, capture_output=True, check=True)
+    for name in ("UpdateCodeWorldModel", "PlanInCWM", "RunController"):
         assert f"{name}: " in help_result.stdout
     assert "request" not in help_result.stdout.lower()
 

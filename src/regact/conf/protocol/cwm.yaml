@@ -1,5 +1,5 @@
 # Every max_* option accepts null to disable that particular cap.
-# CWM v4. Settings apply only with protocol=cwm.
+# CWM v5. Settings apply only with protocol=cwm.
 name: cwm
 n_unique_observations_in_initial_collection: 20
 max_actions_per_initial_collection: 1000
@@ -11,6 +11,7 @@ max_actions_per_exploration: 2500
 n_tmp_images_saved_per_exploration: 8
 workspace_helpers_enabled: true
 planner:
+  enabled: false
   algorithm: bfs
   max_seconds_per_planner_call: 30
   max_cwm_calls_per_planner_call: 10000
@@ -19,7 +20,7 @@ planner:
 execution:
   max_seconds_per_call: 5
   max_seconds_per_UpdateCodeWorldModel: 120
-  max_seconds_per_episode: 120
+  max_seconds_per_controller_call: 120
   max_memory_mb: 512
 feedback:
   max_counterexamples: 5

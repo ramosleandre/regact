@@ -98,6 +98,7 @@ class ExperimentProtocol(ABC):
 
     name: str
     exposes_environment: bool = True
+    command_script: str = "framework/control.py"
 
     async def __aenter__(self) -> ExperimentProtocol:
         return self

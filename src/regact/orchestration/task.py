@@ -223,6 +223,7 @@ def _bootstrap_workdir(
         [],
         templates=protocol.templates,
         expose_environment=protocol.exposes_environment,
+        command_script=protocol.command_script,
         problem_name=problem.name,
         task_name=task_name,
         env_base_url=conn.base_url,

@@ -13,15 +13,15 @@ If framework tools are available directly, invoke them by name. Otherwise use th
 | `model_render.py` | `render(state) -> dict` | Reconstruct the complete observation dictionary. |
 | `model_transition.py` | `step(state, action) -> State` | Predict the state after one game-format action. |
 
-Import the shared class using `from model_state import State`, as in the stubs. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
+Use normal workspace imports, e.g. `from world_model.model_state import State` or `from world_model.model_parser import parse`; Regact makes the workspace root importable in scripts and submitted code. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
 
-The complete observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. Preserve all of them, including nested metadata, frame shape and list order. JSON dictionary key order is irrelevant. Read data dictionaries rather than inferring all fields from PNGs.
+The complete observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. Preserve all of them, including nested metadata, frame shape and list order. JSON dictionary key order is irrelevant. Read data dictionaries rather than inferring all fields from PNGs. `obs["info"]["milestones"]` lists events produced by the action leading to this observation; an empty list means no event. The list is not cumulative.
 
 States may use JSON-compatible values, tuples and instances of classes defined in submitted Python modules. Dictionary keys cannot begin with `@` (reserved encoding). Use compact fields and reusable rules/constants rather than keeping a full grid in every State. Serialized state size includes class/field names; it is not Python source size or process memory.
 
 ## 2. Submit for validation
 
-Run `python framework/control.py UpdateCodeWorldModel` with no arguments. It reads your current `world_model/` code and checks all recorded evidence:
+Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It reads your current `world_model/` code and checks all recorded evidence:
 
 1. **Reconstruction:** `render(parse(obs))` equals the complete `obs`.
 2. **Prediction:** for every recorded `(obs, action, next_obs)`, `render(step(parse(obs), action))` equals `next_obs`.
@@ -37,7 +37,7 @@ Run `python framework/control.py UpdateCodeWorldModel` with no arguments. It rea
 | `Refused` | Checks finished but some failed. | Inspect evidence, revise the CWM, submit again. |
 | `Incomplete` | Validation could not finish, e.g. a code error or timeout. | Fix the reported error or expensive computation, then retry. |
 
-`checked` counts processed observations/transitions, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores; version numbers may have gaps. A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing workspace files does not update the accepted CWM: submit the changes first.
+`checked` counts processed observations/transitions, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores; version numbers may have gaps. A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
 
 Counterexamples include evidence IDs and one of these failure types:
 
@@ -53,11 +53,11 @@ Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api`
 
 ## Code execution rules
 
-Develop and inspect data freely within your workspace. Submitted CWM, controller and goal callbacks run separately without access to the experience database, workspace, real environment or network. Pass information through their inputs and Python constants; do not call `data_api` inside submitted callbacks.
+Develop and inspect data freely within your workspace. Submitted __CALLBACK_KINDS__ callbacks run separately without access to the experience database, workspace, real environment or network. Pass information through their inputs and Python constants; do not call `data_api` inside submitted callbacks.
 
 The framework saves the submitted Python files and their static local imports. External data files and dynamic local imports are not included. Use ordinary Python imports for shared code (including the provided action helpers). A submission may contain at most 256 Python files and 10 MiB of Python source.
 
-One callback request has a __CALL_SECONDS__ second limit, including communication and serialization. This applies to imports/startup, CWM `parse`/`render`/`step`, controller creation, `act`/`is_done`, and a goal's `achieved` plus `utility` together. It is not a timeout on your Bash commands. Each submitted-code process has a __MEMORY_MB__ MiB memory limit. An `unlimited` value disables that particular cap; whole-task limits still apply.
+One callback request has a __CALL_SECONDS__ second limit, including communication and serialization. This applies to imports/startup, CWM `parse`/`render`/`step`, controller creation and `act`/`is_done`__GOAL_CALLBACK_LIMIT__. It is not a timeout on your Bash commands. Each submitted-code process has a __MEMORY_MB__ MiB memory limit. An `unlimited` value disables that particular cap; whole-task limits still apply.
 
 Budget errors name the effective limit and value. They usually stop one operation, not the whole task. A separate phase notice tells you when to change phase. `task_stop` means the task ended. `history_complete=false` indicates an environment or recording failure: stored counts may omit actions that actually happened.
 

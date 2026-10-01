@@ -10,13 +10,14 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, cast
 
 from regact.envclient.obs import Obs
 from regact.problems.base import BaseProblem, build_problem
 from regact.protocols.cwm.bundle import verify_bundle
-from regact.protocols.cwm.config import CwmConfig
+from regact.protocols.cwm.config import ExecutionConfig
 from regact.protocols.cwm.store import canonical, digest
 from regact.protocols.cwm.validation import check_observation
 from regact.protocols.cwm.worker import Worker
@@ -151,6 +152,11 @@ class Playback:
         self.plans: OrderedDict[tuple[str, str, int], list[dict[str, Any]]] = OrderedDict()
 
     def load(self, task: Path, kind: str, identifier: int) -> dict[str, Any]:
+        if kind == "controller":
+            with database(task) as db:
+                payload = self._controller_record(db, identifier)
+                return {"kind": "real", "frames": len(payload["observation_sequence"]),
+                        "source": "recorded observation IDs for this controller call"}
         if kind == "episode":
             with database(task) as db:
                 episode = db.execute("SELECT * FROM episodes WHERE id=?", (identifier,)).fetchone()
@@ -208,7 +214,12 @@ class Playback:
             raise ValueError("invalid bundle path")
         verify_bundle(bundle)
         status = json.loads((task / "cwm" / "status.json").read_text())
-        cfg = CwmConfig.from_mapping(status["config"])
+        # Replay uses only current execution settings; removed experiment options
+        # in historical logs must not prevent viewing saved trajectories.
+        saved_execution = status["config"].get("execution", {})
+        execution = ExecutionConfig(
+            **{f.name: saved_execution[f.name] for f in fields(ExecutionConfig) if f.name in saved_execution}
+        )
         if len(actions) != len(hashes):
             raise ValueError("incomplete saved prediction hashes")
         frames = [initial]
@@ -219,15 +230,11 @@ class Playback:
         denied = _secret_module_paths(problem_for(task).secret_modules())
         with Worker(
             bundle,
-            cfg.execution,
+            execution,
             deny_read=denied,
-            deadline=time.monotonic()
-            + min(
-                120,
-                cfg.execution.max_seconds_per_episode
-                if cfg.execution.max_seconds_per_episode is not None
-                else 120,
-            ),
+            deadline=time.monotonic() + 120,
+            budget_key="viewer reconstruction time limit",
+            budget_seconds=120,
         ) as worker:
             state = worker.call("parse", obs=initial)
             for action, expected in zip(actions, hashes, strict=True):
@@ -243,9 +250,32 @@ class Playback:
                 frames.append(obs)
         return frames
 
+    @staticmethod
+    def _controller_record(db, identifier):
+        row = db.execute("SELECT payload FROM records WHERE id=? AND kind='exploration'", (identifier,)).fetchone()
+        if row is None:
+            raise ValueError("Unknown controller call")
+        payload = json.loads(row[0])
+        if not payload.get("observation_sequence"):
+            raise ValueError("This historical call has no per-call replay sequence")
+        return payload
+
     def frame(self, task: Path, kind: str, identifier: int, index: int) -> dict[str, Any]:
         if index < 0:
             raise ValueError("negative frame index")
+        if kind == "controller":
+            with database(task) as db:
+                payload = self._controller_record(db, identifier)
+                ids = payload["observation_sequence"]
+                if index >= len(ids):
+                    raise ValueError("frame index out of range")
+                frame = {"obs": _obs(db, ids[index]), "observation_id": ids[index],
+                         "step": index, "predicted": False, "episode_id": payload["episode_id"]}
+                if index:
+                    tid = payload["transition_sequence"][index - 1]
+                    row = db.execute("SELECT a.payload FROM transitions t JOIN actions a ON a.id=t.action_id WHERE t.id=?", (tid,)).fetchone()
+                    frame.update(transition_id=tid, action=json.loads(row[0]))
+                return frame
         if kind in ("plan", "simulation"):
             with self.lock:
                 frames = self.plans.get((str(task.resolve()), kind, identifier))

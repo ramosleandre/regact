@@ -23,10 +23,9 @@ These games are remarkably well solved by humans in comparison to AI. This means
 
 - Try to properly understand the action semantics.
 - You may sometime find interest in adopting the perspective of a human playing a small arcade game.
-
-{levels_to_win}
-
 - You should avoid getting overconfident on an hypothesis and stay open to changing your minds to avoid cognitive traps. You should verify your hypothesis with precise experiments and not assume things.
 - When image viewing is available, you may find interest in checking the grid visually, and try to identify objects and what they represent. You can compare two images where a different action was played, or the before/after comparison. You can also combine it with programmatic analysis to identify and check patterns precisely.
 - Choose experiments that distinguish competing explanations or make progress toward the game's objective.
 - Levels are compositional: they share one rule that ramps in difficulty. Crack level 1's rule, then look for how it generalises or mutates in later levels. New levels will have new mechanisms absent in previous one, but the rules are conserved across levels. Recheck your understanding when new observations or levels reveal behavior your current explanation does not account for.
+
+{levels_to_win}

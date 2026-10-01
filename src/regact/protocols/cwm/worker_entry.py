@@ -71,7 +71,7 @@ def immutable_call(fn: Callable[..., Any], value: Any, *args: Any) -> Any:
 
 def state_result(state: Any) -> Any:
     if not isinstance(state, State):
-        raise TypeError("parse/step must return an instance of model_state.State")
+        raise TypeError("parse/step must return an instance of world_model.model_state.State")
     return encode(state)
 
 
@@ -103,7 +103,7 @@ def handle(request: dict[str, Any]) -> Any:
             raise ValueError("an achieved goal must have utility 1")
         return {"achieved": achieved, "utility": utility}
     if op == "controller_init":
-        controller = importlib.import_module("exploration").get_controller()
+        controller = importlib.import_module("controller").get_controller()
         if not callable(getattr(controller, "act", None)) or not callable(
             getattr(controller, "is_done", None)
         ):
@@ -142,14 +142,16 @@ if __name__ == "__main__":
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     if hasattr(resource, "RLIMIT_NPROC"):
         resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
-    sys.path[:0] = [str(BUNDLE / "world_model"), str(BUNDLE)]
+    # Mirror the agent workspace: one root, ordinary package imports, one State class.
+    sys.path.insert(0, str(BUNDLE))
     wire = sys.stdout
     try:
         with contextlib.redirect_stdout(sys.stderr):
-            State = importlib.import_module("model_state").State
-            parse = importlib.import_module("model_parser").parse
-            render = importlib.import_module("model_render").render
-            step = importlib.import_module("model_transition").step
+            if len(sys.argv) < 4 or sys.argv[3] == "1":
+                State = importlib.import_module("world_model.model_state").State
+                parse = importlib.import_module("world_model.model_parser").parse
+                render = importlib.import_module("world_model.model_render").render
+                step = importlib.import_module("world_model.model_transition").step
         wire.write(json.dumps({"ready": True}) + "\n")
         wire.flush()
     except BaseException as exc:

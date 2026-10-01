@@ -70,12 +70,10 @@ def model(root, bad=False):
     d = root / "world_model"
     d.mkdir(exist_ok=True, parents=True)
     (d / "model_state.py").write_text(
-        "from dataclasses import dataclass\n@dataclass(frozen=True)\nclass S"
-        "tate:\n n:int\n"
+        "from dataclasses import dataclass\n@dataclass(frozen=True)\nclass State:\n n:int\n"
     )
     (d / "model_parser.py").write_text(
-        'from model_state import State\ndef parse(o): return State(o["frame'
-        '"][0])\n'
+        'from world_model.model_state import State\ndef parse(o): return State(o["frame"][0])\n'
     )
     (d / "model_render.py").write_text(
         'def render(s): return {"frame":[s.n]*30, "reward":float(s.n>=6),'
@@ -83,7 +81,7 @@ def model(root, bad=False):
         'nfo":{"available_actions":[1],"milestones":[]}}\n'
     )
     (d / "model_transition.py").write_text(
-        "from model_state import State\ndef step(s,a): return State(s.n+"
+        "from world_model.model_state import State\ndef step(s,a): return State(s.n+"
         + (" (2 if s.n>=2 else 1)" if bad else "1")
         + ")\n"
     )
@@ -93,13 +91,19 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def rig(tmp_path):
+def rig(tmp_path, request):
     if detect() is SandboxRuntime.NONE:
         pytest.skip("CWM requires an OS sandbox")
     cfg = RunConfig(
         AgentConfig(AgentName.SCRIPTED),
         ProblemConfig("fake", seed=0),
-        protocol=ProtocolConfig("cwm", {"n_unique_observations_in_initial_collection": 3}),
+        protocol=ProtocolConfig(
+            "cwm",
+            {
+                "n_unique_observations_in_initial_collection": 3,
+                "planner": {"enabled": getattr(request, "param", True)},
+            },
+        ),
     )
     (tmp_path / "config.json").write_text(json.dumps(redacted_config_dict(cfg)))
     register_problem("fake", lambda _: Problem())
@@ -116,6 +120,7 @@ def rig(tmp_path):
         [],
         templates=protocol.templates,
         expose_environment=False,
+        command_script=protocol.command_script,
         problem_name="fake",
         task_name="counter",
         env_base_url="http://unused",
@@ -141,7 +146,7 @@ def accept(c, bad=False):
 
 
 def exploration(c, actions=(1, 1, 1, 1), extra=""):
-    (c.workdir / "exploration.py").write_text(
+    (c.workdir / "controller.py").write_text(
         (
             '"""Reach a new position."""\nfrom framework.action_list_controller import Exp'
             "lorationControllerFromListActions\n"
@@ -216,12 +221,17 @@ def test_plan_real_exploration_and_replay(rig):
     assert result["achieved"], result
     assert c.store.summary() == before
     assert c.tool("PlanInCWM", {"request_id": "plan"}) == {**result, "replayed": True}
+    # Historic execution settings do not prevent replay with the current viewer.
+    status_path = c.root / "status.json"
+    status = json.loads(status_path.read_text())
+    status["config"]["execution"]["max_seconds_per_episode"] = 0.001
+    status_path.write_text(json.dumps(status))
     playback = Playback()
     assert playback.load(c.output, "plan", result["plan_id"])["frames"] == 5
     assert playback.frame(c.output, "plan", result["plan_id"], 4)["obs"]["frame"][0] == 4
     exploration(c)
-    result = c.tool("SubmitExplorationController", {})
-    assert result["real_actions"] == result["simulation_actions"] == 4, result
+    result = c.tool("RunController", {})
+    assert result["real_actions"] == 4 and "simulation_actions" not in result, result
     assert result["actual_novel_observations"] == 2
     assert result["objective_reached"] is None
     assert result["stop_reason"] == "plan_exhausted"
@@ -234,7 +244,7 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     c, _ = rig
     accept(c, bad=True)
     exploration(c)
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     assert result["stop_reason"] == "prediction_mismatch", result
     assert result["real_actions"] == 3
     assert c.phase == "CWM Modeling"
@@ -247,21 +257,25 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     assert repaired["transitions_checked"] == 3
 
 
-def test_no_novelty_never_resets_or_steps_real_env(rig):
+def test_familiar_outcomes_still_run_real_experiments(rig):
     c, _ = rig
     accept(c)
     exploration(c, (1, 1))
     before = c.store.summary()
-    result = c.tool("SubmitExplorationController", {})
-    assert result["stop_reason"] == "no_predicted_novelty"
-    assert c.store.summary() == before
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] == "plan_exhausted"
+    assert result["real_actions"] == 2 and result["actual_novel_observations"] == 0
+    after = c.store.summary()
+    assert after["n_unique_observations"] == before["n_unique_observations"]
+    assert after["n_total_transitions"] == before["n_total_transitions"] + 2
+    assert after["n_started_episodes"] == before["n_started_episodes"] + 1
 
 
 def test_invalid_controller_action_gets_worst_metrics(rig):
     c, _ = rig
     accept(c)
     exploration(c, (1, 99, 1))
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     assert result["stop_reason"] == "controller_error", result
     assert result["real_actions"] == 1
     assert result["metrics"]["success"] is False
@@ -275,21 +289,28 @@ def test_controller_cannot_monkeypatch_model(rig):
     exploration(
         c,
         extra=(
-            "import model_transition\nmodel_transition.step=lambda s,a: (_ for "
+            "from world_model import model_transition\nmodel_transition.step=lambda s,a: (_ for "
             '_ in ()).throw(RuntimeError("tampered"))\n'
         ),
     )
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     assert result["real_actions"] == 4, result
 
 
-def test_accepted_snapshot_ignores_workdir_edits(rig):
+def test_changed_cwm_refused_before_reset_and_revalidation_unblocks(rig):
     c, _ = rig
     accept(c)
-    (c.workdir / "world_model/model_transition.py").write_text('raise RuntimeError("mutable")')
+    source = c.workdir / "world_model/model_transition.py"
+    source.write_text(source.read_text() + "\n# CWM source changed\n")
     exploration(c)
-    result = c.tool("SubmitExplorationController", {})
-    assert result["real_actions"] == 4, result
+    before = c.store.summary()
+    result = c.tool("RunController", {})
+    assert result["error_type"] == "cwm_source_changed", result
+    assert "UpdateCodeWorldModel" in result["error"]
+    assert c.store.summary() == before and c.terminal is None
+    assert c.phase == "Active Exploration"
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    assert c.tool("RunController", {})["real_actions"] == 4
 
 
 def test_callback_timeout_is_recorded_and_not_accepted(rig):
@@ -324,19 +345,19 @@ def test_bad_reconstruction_and_compression_are_rejected(rig):
     assert "compression_ratio" in c.tool("UpdateCodeWorldModel", {})["failures"]
 
 
-def test_independent_action_budgets_and_global_real_budget(rig):
+def test_exploration_action_budget_and_global_real_budget(rig):
     c, _ = rig
     accept(c)
     exploration(c)
     c.options.max_actions_per_exploration = 4
-    result = c.tool("SubmitExplorationController", {})
-    assert result["simulation_actions"] == result["real_actions"] == 4
-    # New proposal predicts position 5, but only two real actions remain.
+    result = c.tool("RunController", {})
+    assert result["real_actions"] == 4
+    # The next controller would take five actions, but only two real actions remain.
     exploration(c, (1, 1, 1, 1, 1))
     c.options.max_actions_per_exploration = 5
     c.config.limits.max_actions_per_task = 8
-    result = c.tool("SubmitExplorationController", {})
-    assert result["simulation_actions"] == 5 and result["real_actions"] == 2, result
+    result = c.tool("RunController", {})
+    assert result["real_actions"] == 2, result
     assert c.terminal == "real_action_limit"
 
 
@@ -386,7 +407,7 @@ def test_full_solve_closes_run_without_submission(rig):
     c, _ = rig
     accept(c)
     exploration(c, (1,) * 6)
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     assert result["exit_reason"] == "solved" and result["metrics"]["success"], result
     assert not (c.workdir / "submissions").exists()
 
@@ -468,18 +489,20 @@ def test_planner_time_budget_returns_best_partial_candidate(rig):
     assert result["search_stop_reason"] == "max_seconds_per_planner_call"
 
 
-def test_simulation_playback_and_frozen_source(rig):
+def test_real_playback_and_frozen_source_without_simulation(rig):
     from regact.protocols.cwm.viewer import source
 
     c, _ = rig
     accept(c)
     exploration(c)
-    result = c.tool("SubmitExplorationController", {})
+    result = c.tool("RunController", {})
     playback = Playback()
-    assert playback.load(c.output, "simulation", result["exploration_id"])["frames"] == 5
+    assert playback.load(c.output, "episode", result["episode_id"])["frames"] == 5
+    with pytest.raises(ValueError, match="no completed simulation trajectory"):
+        playback.load(c.output, "simulation", result["exploration_id"])
     listing = source(c.output, result["bundle"])
-    assert "exploration.py" in listing["files"]
-    assert "Reach a new position" in source(c.output, result["bundle"], "exploration.py")["source"]
+    assert "controller.py" in listing["files"]
+    assert "Reach a new position" in source(c.output, result["bundle"], "controller.py")["source"]
     with pytest.raises(ValueError):
         source(c.output, result["bundle"], "../config.json")
 
@@ -518,13 +541,13 @@ async def test_cwm_runner_dry_run_has_only_its_own_tools(tmp_path):
         == "dry_run"
     )
     transcript = (tmp_path / "logs/transcript.jsonl").read_text()
-    assert "SubmitExplorationController" in transcript and "SubmitSolution" not in transcript
+    assert "RunController" in transcript and "SubmitSolution" not in transcript
     assert "ExitTask" not in transcript
     assert json.loads((tmp_path / "cwm/status.json").read_text())["exit_reason"] == "dry_run"
 
 
 def test_prefill_time_cap(rig, monkeypatch):
-    from regact.protocols.cwm import session
+    from regact.protocols.managed import session
 
     c, _ = rig
     clock = iter([0, 0, 2, 2])
@@ -544,15 +567,14 @@ def test_prefill_empty_action_space(rig, monkeypatch):
     assert c.phase == "CWM Modeling"
 
 
-def test_prefill_episode_limit_reset(rig):
+def test_prefill_stops_at_episode_limit(rig):
     c, _ = rig
     c.config.limits.max_actions_per_episode = 1
     c.options.max_actions_per_initial_collection = 4
     collect(c)
-    assert c.initial_collection["stop_reason"] == "action_cap"
-    assert c.store.summary()["n_total_transitions"] == 4
-    assert c.store.summary()["n_unique_transitions"] == 1
-    assert c.store.summary()["n_started_episodes"] == 4
+    assert c.initial_collection["stop_reason"] == "max_actions_per_episode"
+    assert c.initial_collection["real_actions"] == 1
+    assert c.store.summary()["n_started_episodes"] == 1
 
 
 def test_prediction_replay_with_relative_output_root(rig, monkeypatch):

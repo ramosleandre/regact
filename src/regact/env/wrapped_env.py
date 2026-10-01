@@ -64,6 +64,18 @@ class WrappedEnv:
 
     def reset(self, *, seed: int | None = None) -> Obs:
         result = self._native.reset(seed=seed) if seed is not None else self._native.reset()
+        return self._apply_reset_result(result)
+
+    def reset_explicit(self, kind: str, *, seed: int | None = None) -> Obs:
+        """A named reset; the ordinary policy-search reset path stays unchanged."""
+        reset = getattr(self._native, "reset_explicit", None)
+        if callable(reset):
+            return self._apply_reset_result(reset(kind, seed=seed))
+        if kind != "environment":
+            raise ValueError(f"Environment does not support {kind} resets")
+        return self.reset(seed=seed)
+
+    def _apply_reset_result(self, result: Any) -> Obs:
         if isinstance(result, tuple) and len(result) == 2:
             native_obs, info = result
         else:
