@@ -464,6 +464,10 @@ def _classify_outcome(
 # vanilla and CWM never submit a policy for independent evaluation: their evidence is the run's
 # own experience store, so they get their own reader and outcome classes.
 _MANAGED_PROTOCOLS = frozenset({"vanilla", "cwm"})
+# A native step, store commit or worker teardown takes milliseconds when healthy; one that took
+# longer than this was the infrastructure stalling (a FULL-sync commit on a slow shared
+# filesystem blocked for minutes on Adastra), so the run's budget went to waiting, not playing.
+_INFRA_STALL_SECONDS = 10.0
 
 
 def _protocol(config: dict[str, Any]) -> str:
@@ -473,7 +477,7 @@ def _protocol(config: dict[str, Any]) -> str:
     return str(name or "policy_search")
 
 
-def _managed_metrics(task_dir: Path) -> dict[str, Any]:
+def _managed_metrics(task_dir: Path, call_budget: float | None = None) -> dict[str, Any]:
     """Best progress and call counts of a vanilla/CWM run, read from its experience store.
 
     The score is the best controller call, not a final re-score (there is none): progress the
@@ -486,6 +490,7 @@ def _managed_metrics(task_dir: Path) -> dict[str, Any]:
         "mismatches": None,
         "cwm_accepted": None,
         "cwm_rejected": None,
+        "slowest_infra_seconds": None,
     }
     store = task_dir / "cwm" / "experience.sqlite3"
     if not store.exists():
@@ -503,7 +508,18 @@ def _managed_metrics(task_dir: Path) -> dict[str, Any]:
         if (score := _primary_score(call.get("aggregate") or {})) is not None
     ]
     best = max(scored, key=lambda item: item[0]) if scored else (None, None)
+    spans = [
+        seconds
+        for call in calls
+        for name, seconds in (call.get("timings") or {}).items()
+        if name.endswith("max_seconds") or name.endswith("close_seconds")
+    ]
+    if call_budget:  # runs recorded before per-step timings still show a call outliving its cap
+        spans += [
+            call["elapsed_seconds"] - call_budget for call in calls if call.get("elapsed_seconds")
+        ]
     metrics.update(
+        slowest_infra_seconds=max(spans) if spans else None,
         success_rate=best[0],
         mean_levels_completed=best[1],
         controller_calls=len(calls),
@@ -527,10 +543,14 @@ def _classify_managed_outcome(
     controller_calls: int | None,
     reasoning_only_rate: float | None = None,
     unparsed_markup_rate: float | None = None,
+    slowest_infra_seconds: float | None = None,
 ) -> str:
     """:func:`_classify_outcome` for vanilla/CWM. These runs cannot end themselves, so every
     budget limit is the designed ending; what stays unreliable is a harness loss, and a run
-    whose controllers never ran (``no-calls``) - its empty score is not a policy failing."""
+    whose controllers never ran (``no-calls``) - its empty score is not a policy failing. An
+    ``infra-stall`` run lost budget to the infrastructure, so even a solve is not comparable."""
+    if slowest_infra_seconds is not None and slowest_infra_seconds > _INFRA_STALL_SECONDS:
+        return "infra-stall"
     if success_rate is not None and success_rate >= _SOLVE_THRESHOLD:
         return "solve"
     if exit_reason == "agent_api":
@@ -624,7 +644,8 @@ def _run_row(
         "error_retries": events["error_retries"],
     }
     if row["protocol"] in _MANAGED_PROTOCOLS:
-        managed = _managed_metrics(task_dir)
+        execution = (config.get("protocol") or {}).get("execution") or {}
+        managed = _managed_metrics(task_dir, execution.get("max_seconds_per_controller_call"))
         row.update(
             managed,
             controller=_classify_controller(_managed_controller_path(task_dir / "workdir")),
@@ -634,6 +655,7 @@ def _run_row(
                 managed["controller_calls"],
                 reasoning_only_rate=reasoning_only,
                 unparsed_markup_rate=unparsed_markup,
+                slowest_infra_seconds=managed["slowest_infra_seconds"],
             ),
             tail_mean=None,
             episodes_asked=None,
@@ -967,8 +989,10 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "These protocols never submit a policy for independent evaluation, so their score is "
             "the BEST controller call (never the initial random collection), and every budget "
-            "limit is their designed ending. `no-calls` = no controller ever ran. Compare them "
-            "with each other, not with policy_search cells.\n"
+            "limit is their designed ending. `no-calls` = no controller ever ran; `infra-stall` = "
+            f"a step, store commit or worker teardown took over {_INFRA_STALL_SECONDS:g} s, so "
+            "the run waited on the infrastructure - discount it. Compare them with each other, "
+            "not with policy_search cells.\n"
         )
         print(managed_markdown(managed))
     print(f"\n## Controller written (task x {column})\n")

@@ -659,3 +659,18 @@ def test_runs_before_the_protocol_boundary_read_as_policy_search(tmp_path: Path)
     _mk_run(tmp_path / "exp" / "2026-01-01_00-00-00" / "T", model="M", success=1.0)
     (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
     assert row["protocol"] == "policy_search" and row["outcome"] == "solve"
+
+
+def test_managed_run_that_waited_on_the_infrastructure_is_not_scored(tmp_path: Path) -> None:
+    """A FULL-sync commit stalled for minutes on shared storage: the run's budget went to
+    waiting, so even a solved cell must not be read as a model result."""
+    stalled = {
+        "aggregate": {"n_episodes": 1, "mean_levels_completion_rate": 1.0},
+        "timings": {"record_step_max_seconds": 600.0, "native_step_max_seconds": 0.001},
+    }
+    _mk_managed_run(
+        tmp_path / "v" / "2026-10-02_00-00-00" / "ls20", protocol="vanilla", calls=[stalled]
+    )
+    (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert row["slowest_infra_seconds"] == 600.0
+    assert row["outcome"] == "infra-stall"
