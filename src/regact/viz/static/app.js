@@ -934,6 +934,9 @@ const _CWM_TOOL_STYLE = {
   UpdateCodeWorldModel: "cwm-model",
   PlanInCWM: "cwm-plan",
   SubmitExplorationController: "cwm-explore",
+  RunController: "cwm-explore",
+  ResetLevel: "cwm-explore",
+  ResetEnvironment: "cwm-explore",
 };
 
 async function renderConversation(name) {
@@ -971,8 +974,9 @@ async function renderConversation(name) {
           block.id = "nav-submit-" + nSubmit;
           navItems.push({ id: block.id, tag, label: `submission ${nSubmit}${tag === "submit_win" ? " ✓ level" : ""}` });
           nSubmit++;
-        } else if (tag === "cheat") {
-          block.id = "nav-cheat-" + nCheat;
+        }
+        if (it.tool.flags?.length || tag === "cheat") {
+          if (!block.id) block.id = "nav-cheat-" + nCheat;
           navItems.push({ id: block.id, tag, label: `flagged ${nCheat + 1}` });
           nCheat++;
         }
@@ -1068,6 +1072,9 @@ function toolBlock(tool, gameName) {
       t.append(check);
     }
   } else if (tool.tag) t.append(h("span", "tag tag-" + tool.tag, _TAG_LABEL[tool.tag]), " ");
+  if (tool.flags?.length && tool.tag !== "cheat") {
+    t.append(h("span", "tag tag-cheat", "flagged"), " ");
+  }
   t.append(h("b", null, tool.name), " ");
   // A shell command: show the command (heredocs pulled out) + each written file as a collapsed
   // block, so a `cat > file <<EOF ... EOF` payload is readable instead of a JSON-escaped wall.
@@ -1108,7 +1115,81 @@ function toolBlock(tool, gameName) {
       res.append(img);
     }
     box.append(res);
+    const replayIds = new Set(controllerResultIds(fullResult));
+    if (Number.isInteger(tool.controller_playback_id)) replayIds.add(tool.controller_playback_id);
+    for (const id of replayIds) {
+      box.append(controllerReplay(gameName, id));
+    }
   }
+  if (tool.flags?.length) box.append(h('p', 'err', 'Flagged: ' + tool.flags.join('; ')));
+  return box;
+}
+
+function controllerResultIds(text) {
+  // Parse complete JSON objects, never infer a replay link from shell input text.
+  const ids = new Set();
+  let start = -1, depth = 0, quoted = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (start < 0) { if (c === '{') { start = i; depth = 1; } continue; }
+    if (quoted) { if (escaped) escaped = false; else if (c === '\\') escaped = true; else if (c === '"') quoted = false; continue; }
+    if (c === '"') quoted = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) {
+      // The current-observation field identifies managed-call feedback. Older
+      // submissions did not record per-call sequences and cannot use this replay.
+      try { const value = JSON.parse(text.slice(start, i + 1)); if (value.status && Number.isInteger(value.exploration_id) && Number.isInteger(value.current_observation_id)) ids.add(value.exploration_id); } catch (_) {}
+      start = -1;
+    }
+  }
+  return [...ids];
+}
+
+function controllerReplay(game, id) {
+  const box = h('div', 'controller-replay');
+  const button = h('button', null, `Load controller #${id} playback`);
+  box.append(button);
+  button.onclick = async () => {
+    button.disabled = true;
+    const query = `name=${encodeURIComponent(game)}&kind=controller&identifier=${id}`;
+    try {
+      const meta = await api('/api/game/cwm/load?' + query, {method: 'POST'});
+      const img = h('img'); img.alt = 'Recorded real environment (viewer playback)';
+      img.style.cssText = 'max-width:100%;max-height:400px;image-rendering:pixelated;object-fit:contain';
+      const label = h('div', 'muted');
+      const slider = h('input'); slider.type = 'range'; slider.min = 0; slider.max = meta.frames - 1; slider.value = 0;
+      slider.style.width = `min(100%, ${Math.max(0, (meta.frames - 1) * 12)}px)`;
+      slider.disabled = meta.frames < 2;
+      const data = h('details', null, h('summary', null, 'Frame data'));
+      const raw = h('pre'); data.append(raw);
+      let sequence = 0, playing = false;
+      const show = async () => {
+        const generation = ++sequence, index = Number(slider.value);
+        img.src = '/api/game/cwm/frame?' + query + `&index=${index}&image=true`;
+        label.textContent = `Frame ${index + 1}/${meta.frames} · real recorded experience`;
+        const result = await api('/api/game/cwm/frame?' + query + `&index=${index}`);
+        if (generation === sequence) raw.textContent = JSON.stringify(result, null, 2);
+      };
+      slider.oninput = () => { playing = false; show().catch(err => label.textContent = String(err)); };
+      const play = h('button', null, 'Play'); play.disabled = meta.frames < 2;
+      play.onclick = async () => {
+        playing = !playing;
+        if (Number(slider.value) >= meta.frames - 1) slider.value = 0;
+        while (playing && box.isConnected) {
+          await show();
+          if (Number(slider.value) >= meta.frames - 1) break;
+          await new Promise(resolve => setTimeout(resolve, 250));
+          if (!playing) break;
+          slider.value = Number(slider.value) + 1;
+        }
+        playing = false;
+      };
+      const unload = h('button', null, 'Unload');
+      unload.onclick = () => { playing = false; sequence++; clear(box); box.append(button); button.disabled = false; };
+      clear(box); box.append(label, img, h('div', null, slider), play, unload, data);
+      await show();
+    } catch (err) { button.disabled = false; box.append(h('p', 'err', String(err))); }
+  };
   return box;
 }
 
@@ -1126,7 +1207,7 @@ async function renderArtifacts(name) {
       item.classList.add("on");
       clear(view);
       view.append(h("h3", null, f.relpath),
-        f.too_large ? h("div", "muted", "(too large to show)") : h("pre", "code", f.content));
+        f.too_large ? h("div", "muted", `Preview omitted: ${fmt(f.size_bytes)} bytes exceeds the 200,000-byte automatic preview limit. The complete file is retained in the run's workdir.`) : h("pre", "code", f.content));
     };
     list.append(item);
   }

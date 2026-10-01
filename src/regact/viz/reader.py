@@ -33,6 +33,7 @@ class ToolCallView:
     tag: str | None = None  # policy submissions, CWM commands, or flagged calls
     framework_tool: str | None = None
     succeeded: bool | None = None
+    controller_playback_id: int | None = None
     flags: list[str] = field(default_factory=list)  # why a call was tagged "cheat" (the reasons)
 
 
@@ -95,6 +96,7 @@ class ArtifactFile:
     relpath: str
     content: str
     too_large: bool = False
+    size_bytes: int = 0
 
 
 _MAX_ARTIFACT_BYTES = 200_000
@@ -256,10 +258,11 @@ def list_artifacts(experiment_dir: str, game: str) -> list[ArtifactFile]:
             continue
         rel = str(path.relative_to(workdir))
         try:
-            if path.stat().st_size > _MAX_ARTIFACT_BYTES:
-                out.append(ArtifactFile(rel, "", too_large=True))
+            size = path.stat().st_size
+            if size > _MAX_ARTIFACT_BYTES:
+                out.append(ArtifactFile(rel, "", too_large=True, size_bytes=size))
             else:
-                out.append(ArtifactFile(rel, path.read_text(encoding="utf-8", errors="replace")))
+                out.append(ArtifactFile(rel, path.read_text(encoding="utf-8", errors="replace"), size_bytes=size))
         except OSError:
             continue
     return out
@@ -399,31 +402,58 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
                     feedback.get("status") in ("Accepted", "Plan found", "Completed")
                     and not call.is_error
                 ) if feedback else None
+                if type(feedback.get("exploration_id")) is int and type(feedback.get("current_observation_id")) is int:
+                    call.controller_playback_id = feedback["exploration_id"]
             elif _is_submit_call(call):
                 won = wins[submit_index] if submit_index < len(wins) else False
                 call.tag = "submit_win" if won else "submit"
                 submit_index += 1
-            else:
-                kw = flag_tool_call(call.name, call.input, policy)
-                denied = flag_os_denial(call.result or "")
-                cwm_denied = "cwm_direct_environment_disabled" in (call.result or "") or "Direct environment access is unavailable in CWM" in (call.result or "")
-                if kw or denied or cwm_denied:
+            kw = flag_tool_call(call.name, call.input, policy)
+            denied = flag_os_denial(call.result or "")
+            cwm_denied = "cwm_direct_environment_disabled" in (call.result or "") or "Direct environment access is unavailable in CWM" in (call.result or "")
+            if kw or denied or cwm_denied:
+                if not call.framework_tool and call.tag not in ("submit", "submit_win"):
                     call.tag = "cheat"
-                    call.flags = [*kw, *(["OS/proxy denial in result"] if denied else []), *(["Direct CWM environment access denied"] if cwm_denied else [])]
+                call.flags = [*kw, *(["OS/proxy denial in result"] if denied else []), *(["Direct CWM environment access denied"] if cwm_denied else [])]
 
 
-def _cwm_command(call: ToolCallView) -> str | None:
+def _cwm_command(call: ToolCallView, _depth: int = 0) -> str | None:
     """Recognize native calls or actual Python CLI invocations, not grep/echo mentions."""
     import shlex
 
-    from regact.protocols.cwm.commands import COMMANDS
+    from regact.protocols.cwm.commands import COMMANDS as CWM_COMMANDS
 
+    COMMANDS = {**CWM_COMMANDS, "SubmitExplorationController": "", "ResetLevel": "", "ResetEnvironment": ""}
+
+    if _depth > 8:
+        return None
     if call.name in COMMANDS:
         return call.name
     raw = call.input if isinstance(call.input, dict) else {}
     text = raw.get("command", raw.get("cmd", ""))
     if not isinstance(text, str):
         return None
+    # Codex quotes the entire script in `sh -lc '...'`. Unwrap that *before*
+    # stripping heredocs: otherwise removing a quoted heredoc also destroys the
+    # outer quotes and hides commands following it. Only parse; never execute.
+    try:
+        outer = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
+        outer.whitespace_split = True
+        if Path(outer.get_token() or "").name in ("sh", "bash", "dash", "zsh"):
+            for token in outer:
+                if not token.startswith("-"):
+                    break
+                if "c" in token[1:]:
+                    import dataclasses
+
+                    script = outer.get_token()
+                    if script is not None:
+                        nested = dataclasses.replace(call, input={"command": script})
+                        if command := _cwm_command(nested, _depth + 1):
+                            return command
+                    break
+    except ValueError:
+        pass
     lines = []
     delimiter = None
     for line in text.splitlines(keepends=True):
@@ -447,6 +477,15 @@ def _cwm_command(call: ToolCallView) -> str | None:
             else:
                 statements[-1].append(token)
         for tokens in statements:
+            if len(tokens) >= 3 and Path(tokens[0]).name in ("sh", "bash", "dash", "zsh"):
+                for i, token in enumerate(tokens[1:-1], 1):
+                    if token.startswith("-") and "c" in token[1:]:
+                        import dataclasses
+                        nested = dataclasses.replace(call, input={"command": tokens[i + 1]})
+                        command = _cwm_command(nested, _depth + 1)
+                        if command:
+                            return command
+                        break
             if tokens[:2] == ["uv", "run"]:
                 tokens = tokens[2:]
             if not tokens or not Path(tokens[0]).name.startswith("python"):
@@ -455,7 +494,7 @@ def _cwm_command(call: ToolCallView) -> str | None:
             if "-c" in tokens or "-" in tokens:
                 continue
             for i, token in enumerate(tokens[:-1]):
-                if Path(token).name == "control.py" and tokens[i + 1] in COMMANDS:
+                if Path(token).name in {"control.py", "commands.py"} and tokens[i + 1] in COMMANDS:
                     return tokens[i + 1]
     except ValueError:
         pass
@@ -463,7 +502,11 @@ def _cwm_command(call: ToolCallView) -> str | None:
 
 
 def _cwm_feedback(text: str) -> dict[str, Any]:
-    """Read the result JSON after optional stage messages; no claim from missing output."""
+    """Read available result fields, including a prefix cut by `head` or a tool cap.
+
+    Only complete top-level key/value pairs count; never infer missing fields or
+    mistake a nested status for the command's outcome. The transcript is unchanged.
+    """
     offset = 0
     for line in text.splitlines(keepends=True):
         start, offset = offset, offset + len(line)
@@ -471,10 +514,49 @@ def _cwm_feedback(text: str) -> dict[str, Any]:
             try:
                 value, _ = json.JSONDecoder().raw_decode(text[start:].lstrip())
             except ValueError:
-                continue
+                value = _json_object_prefix(text[start:].lstrip())
             if isinstance(value, dict) and "status" in value:
                 return value
     return {}
+
+
+def _json_object_prefix(text: str) -> dict[str, Any]:
+    """Recover complete fields before an interrupted JSON object value."""
+    decoder = json.JSONDecoder()
+    result: dict[str, Any] = {}
+    position = 1  # caller checked the opening brace
+    while True:
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text) or text[position] == "}":
+            return result
+        try:
+            key, position = decoder.raw_decode(text, position)
+            if not isinstance(key, str):
+                return {}
+            while position < len(text) and text[position].isspace():
+                position += 1
+            if position == len(text):
+                return result
+            if text[position] != ":":
+                return {}
+            position += 1
+            while position < len(text) and text[position].isspace():
+                position += 1
+            value, position = decoder.raw_decode(text, position)
+        except ValueError:
+            return result
+        # Require a delimiter: a cut number, e.g. 123|45, is not a complete ID.
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text):
+            return result
+        if text[position] not in ",}":
+            return {}
+        result[key] = value
+        if text[position] == "}":
+            return result
+        position += 1
 
 
 def _is_submit_call(call: ToolCallView) -> bool:

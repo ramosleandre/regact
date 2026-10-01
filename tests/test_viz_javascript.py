@@ -33,6 +33,10 @@ vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$
     if (file.files[0].name !== 'code.py') throw Error('file label');
     const original = 'python - <<EOF\nno closing marker';
     if (parseHeredocs(original).text !== original) throw Error('unclosed heredoc');
+    const replay = controllerResultIds('prefix\n{"status":"Completed","exploration_id":2,"current_observation_id":5}\nPhase transition');
+    if (replay.length !== 1 || replay[0] !== 2) throw Error('managed replay missing');
+    if (controllerResultIds('{"status":"Completed","exploration_id":2}').length)
+      throw Error('historical submission has no per-call recording');
     const pending = api('/api/game');
     navigation.abort(); navigation = new AbortController();
     try { await pending; throw Error('stale response accepted'); }

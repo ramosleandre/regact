@@ -70,19 +70,21 @@ def build_app(experiment_dir: str) -> FastAPI:
 
     def metrics(view: reader.GameView, name: str) -> dict[str, Any]:
         result = game_metrics(view)
-        if view.config.get("protocol", {}).get("name") == "cwm":
+        protocol_name = view.config.get("protocol", {}).get("name")
+        if protocol_name in ("cwm", "vanilla"):
             path = root / name / "cwm" / "status.json"
             if path.is_file():
                 state = json.loads(path.read_text())
                 latest = state.get("latest_exploration") or {}
                 result.update(
-                    protocol="cwm",
+                    protocol=protocol_name,
                     final_aggregate=latest.get("aggregate", {}),
                     score_source="latest real exploration",
                     best_exploration_aggregate=(state.get("best_exploration") or {}).get(
                         "aggregate", {}
                     ),
-                    env_moves=state.get("n_total_transitions", state.get("n_step_events")),
+                    env_moves=state.get("n_total_transitions", state.get("n_step_events", 0))
+                    + state.get("reset_actions", 0),
                     success_rate=latest.get("aggregate", {}).get("success_rate"),
                 )
         return result
