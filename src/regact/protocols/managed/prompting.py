@@ -126,7 +126,7 @@ def build_prompt(
         WORKSPACE_EXTENSIONS=workspace_extensions.strip() + " " if workspace_extensions else "",
         IMAGE_PREVIEWS=image_preview_instructions(
             options.n_tmp_images_saved_per_exploration,
-            can_view_images=is_vision_agent(config.agent.name),
+            can_view_images=is_vision_agent(config.agent.name, config.agent.base_url),
         ),
     )
     workflow = _render(

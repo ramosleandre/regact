@@ -323,3 +323,10 @@ def test_removed_max_actions_per_env_fails_loudly() -> None:
         }
     )
     assert old.limits.max_turns_per_task == 9
+
+
+def test_self_hosted_model_gets_no_png_helper_by_default() -> None:
+    base = {"agent": {"name": "claude"}, "problem": {"name": "arc_agi"}}
+    assert run_config_from_mapping(base).problem.helper.to_png is True
+    local = {**base, "agent": {"name": "claude", "base_url": "http://127.0.0.1:8080"}}
+    assert run_config_from_mapping(local).problem.helper.to_png is False

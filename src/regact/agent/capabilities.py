@@ -17,9 +17,11 @@ from regact.config.schema import AgentName
 _VISION_AGENTS = frozenset({AgentName.CLAUDE, AgentName.CODEX})
 
 
-def is_vision_agent(agent_name: AgentName) -> bool:
-    """Whether the agent backend can read images (the default for problem.helper.to_png)."""
-    return agent_name in _VISION_AGENTS
+def is_vision_agent(agent_name: AgentName, base_url: str | None = None) -> bool:
+    """Whether the agent can read images (the default for problem.helper.to_png). A self-hosted
+    model behind ``base_url`` is treated as text-only: a llama.cpp serve without a vision
+    projector rejects every request carrying an image."""
+    return agent_name in _VISION_AGENTS and not base_url
 
 
 # How the agent invokes tools. Selects BOTH the prompt's tool-invocation fragment AND how

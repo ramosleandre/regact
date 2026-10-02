@@ -69,7 +69,11 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
 
 
 def _helper_from(
-    raw: Any, agent_name: AgentName, *, protocol: str = "policy_search"
+    raw: Any,
+    agent_name: AgentName,
+    *,
+    protocol: str = "policy_search",
+    base_url: str | None = None,
 ) -> HelperConfig:
     """Build ``HelperConfig`` from the ``problem.helper`` block.
 
@@ -80,7 +84,8 @@ def _helper_from(
     """
     d = dict(raw or {})
     to_png = d.get("to_png")
-    resolved = is_vision_agent(agent_name) and protocol != "cwm" if to_png is None else bool(to_png)
+    sees = is_vision_agent(agent_name, base_url)
+    resolved = sees and protocol != "cwm" if to_png is None else bool(to_png)
     return HelperConfig(to_png=resolved)
 
 
@@ -174,6 +179,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
                 problem.get("helper"),
                 AgentName(agent["name"]),
                 protocol=_protocol_from(data.get("protocol")).name,
+                base_url=agent.get("base_url"),
             ),
             kwargs=dict(problem.get("kwargs") or {}),
         ),

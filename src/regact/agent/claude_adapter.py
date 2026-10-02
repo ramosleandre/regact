@@ -33,8 +33,12 @@ from regact.agent.usage import claude_usage
 from regact.obs.errors import ErrorCategory
 from regact.security.policy import SecurityPolicy, default_policy
 
+_IMAGE_SUFFIXES = ("png", "jpg", "jpeg", "gif", "webp")
 
-def claude_deny_settings(workdir: str, policy: SecurityPolicy | None = None) -> dict[str, Any]:
+
+def claude_deny_settings(
+    workdir: str, policy: SecurityPolicy | None = None, *, deny_images: bool = False
+) -> dict[str, Any]:
     """Claude-native defense-in-depth: deny Claude's file tools from reading game data.
 
     Backend-specific (Claude's ``.claude/settings.json``), so it lives with the adapter,
@@ -45,6 +49,8 @@ def claude_deny_settings(workdir: str, policy: SecurityPolicy | None = None) -> 
     """
     policy = policy or default_policy()
     deny = [f"Read(**/{sub.rstrip('/')}/**)" for sub in sorted(policy.forbidden_path_substrings)]
+    if deny_images:  # a text-only self-hosted model rejects any request that carries an image
+        deny += [f"Read(**/*.{suffix})" for suffix in _IMAGE_SUFFIXES]
     return {"permissions": {"deny": deny}}
 
 
@@ -107,7 +113,9 @@ class ClaudeAgent(_CliAgent):
         settings_dir = os.path.join(self._cwd, ".claude")
         os.makedirs(settings_dir, exist_ok=True)
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
-            json.dump(claude_deny_settings(self._cwd), handle, indent=2)
+            json.dump(
+                claude_deny_settings(self._cwd, deny_images=bool(self._base_url)), handle, indent=2
+            )
         self._configure_home()
         if self._base_url:  # an Anthropic-compatible server, e.g. llama.cpp's llama-server
             self._env_overrides |= {
