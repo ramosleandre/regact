@@ -39,6 +39,10 @@ from regact.obs.errors import ErrorCategory
 # Cheaper serves make the waste affordable; the number cannot be chosen from one arm's data.
 
 
+# alancode's result for a call it refused to run: every call of a reply cut at the output cap.
+_NOT_EXECUTED = "was NOT executed"
+
+
 def _usage_dict(usage: Any) -> dict[str, Any] | None:
     """Coerce a native usage record into a plain JSON-able dict (``None`` if opaque)."""
     if usage is None or isinstance(usage, dict):
@@ -189,16 +193,22 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
         content = getattr(native, "content", None)
         if not isinstance(content, list):
             return []
-        return [
-            ToolResult(
-                id=getattr(block, "tool_use_id", ""),
-                output=_result_text(getattr(block, "content", "")),
-                is_error=bool(getattr(block, "is_error", False)),
-                images=tool_result_images(getattr(block, "content", "")),
+        results = []
+        for block in content:
+            if type(block).__name__ != "ToolResultBlock":
+                continue
+            output = _result_text(getattr(block, "content", ""))
+            is_error = bool(getattr(block, "is_error", False))
+            results.append(
+                ToolResult(
+                    id=getattr(block, "tool_use_id", ""),
+                    output=output,
+                    is_error=is_error,
+                    images=tool_result_images(getattr(block, "content", "")),
+                    executed=not (is_error and _NOT_EXECUTED in output),
+                )
             )
-            for block in content
-            if type(block).__name__ == "ToolResultBlock"
-        ]
+        return results
     one = _map_legacy(native)
     return [one] if one is not None else []
 

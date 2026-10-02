@@ -291,3 +291,16 @@ def test_remote_agent_does_not_apply_unrequested_settings(monkeypatch) -> None:
         args={"backend": "scripted"},
     )
     assert captured.get("settings", {}) == {}
+
+
+def test_a_call_cut_at_the_output_cap_is_marked_not_executed() -> None:
+    """alancode fails every call of a reply cut at the output cap instead of running it; the
+    result must say so, or regact charges never-run calls to the tool budget."""
+    cut = (
+        "This tool call was cut off by the output token limit and was NOT executed. "
+        "Re-issue it completely, in smaller pieces if needed."
+    )
+    msg = UserMessage([ToolResultBlock("a", cut, True), ToolResultBlock("b", "boom", True)])
+    refused, failed = map_alan_events(msg)
+    assert refused.executed is False
+    assert failed.executed is True  # an ordinary failure did run

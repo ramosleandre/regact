@@ -44,6 +44,7 @@ class ToolResult:
     output: str
     is_error: bool = False
     images: list[dict[str, str]] = field(default_factory=list)
+    executed: bool = True  # False: the agent refused to run the call; it spends no budget
 
 
 def tool_result_images(content: Any) -> list[dict[str, str]]:

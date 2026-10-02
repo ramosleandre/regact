@@ -248,3 +248,18 @@ async def test_delayed_warning_retains_flagged_command_after_later_clean_calls(m
     assert "START" in sent and "END'" in sent and "[truncated]" in sent
     assert "echo unrelated" not in sent and "x" * 800 not in sent
     assert not ctx.pending_warnings and not ctx.warning_calls
+
+
+async def test_calls_the_agent_never_ran_do_not_spend_the_tool_budget():
+    """One degenerate reply held 818 calls, all refused at the output cap; counting them ended
+    the run on tool_call_limit after a single turn with nothing executed."""
+    ctx = context()
+    outcome = _TurnOutcome()
+    for i in range(3):
+        await _dispatch_event(ToolCall(f"c{i}", "Bash", {"command": "echo x"}), ctx, outcome)
+    await _dispatch_event(ToolResult("c0", "ran", False), ctx, outcome)
+    for i in (1, 2):
+        await _dispatch_event(
+            ToolResult(f"c{i}", "NOT executed", True, executed=False), ctx, outcome
+        )
+    assert ctx.experiment.tool_calls_total == 1

@@ -93,8 +93,11 @@ class TranscriptWriter:
 def event_to_json(event: AgentEvent) -> dict[str, object]:
     """Serialize one event, tagged by its type; enums rendered as their value."""
     payload = asdict(event)
-    if isinstance(event, ToolResult) and not event.images:
-        payload.pop("images", None)  # preserve the existing text-only event shape
+    if isinstance(event, ToolResult):  # preserve the existing event shape for the common case
+        if not event.images:
+            payload.pop("images", None)
+        if event.executed:
+            payload.pop("executed", None)
     if isinstance(event, AgentError):
         payload["category"] = event.category.value
     return {"type": type(event).__name__, **payload}

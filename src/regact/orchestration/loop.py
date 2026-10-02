@@ -423,6 +423,8 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             outcome.pending_tools.discard(event.id)
     elif isinstance(event, ToolResult):
         outcome.pending_tools.discard(event.id)
+        if not event.executed:  # never ran (e.g. cut at the output cap): refund its budget
+            ctx.experiment.tool_calls_total -= 1
         await _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)
     elif isinstance(event, AgentError):
         ctx.logger.log(
