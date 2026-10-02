@@ -62,6 +62,7 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         "max_seconds_per_task",
         "max_actions_per_episode",
         "max_actions_per_task",
+        "deadline_unix",
     ):
         if name in fields:
             fields[name] = _int_or_none(fields[name])

@@ -8,6 +8,7 @@ closed choice is a ``str``-valued ``Enum``.
 from __future__ import annotations
 
 import dataclasses
+import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -99,6 +100,16 @@ class LimitsConfig:
     # roughly 5N wasted model calls, not N - set it in turns and read the cost in calls.
     max_consecutive_no_tool_turns: int | None = 0
     max_actions_per_task: int | None = None  # vanilla/CWM only: real steps, resets excluded
+    # Absolute end of the task (UNIX seconds), e.g. the scheduler job's end minus a margin. A
+    # relative budget counts from session start, so a slow startup pushed it past the job kill.
+    deadline_unix: int | None = None
+
+    def seconds_left(self) -> int | None:
+        """The wall budget from now: max_seconds_per_task, cut to what deadline_unix leaves."""
+        if self.deadline_unix is None:
+            return self.max_seconds_per_task
+        left = max(0, int(self.deadline_unix - time.time()))
+        return left if self.max_seconds_per_task is None else min(self.max_seconds_per_task, left)
 
 
 @dataclass

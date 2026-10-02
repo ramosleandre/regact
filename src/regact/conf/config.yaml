@@ -26,6 +26,7 @@ limits:  # every max_* accepts null to disable its cap
   max_turns: null               # deprecated alias of max_turns_per_task (old launchers)
   max_tool_calls: null          # total tool calls across the run (the primary budget); null = off
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit
+  deadline_unix: null           # absolute task end (UNIX s), e.g. job end - margin; caps the above
   max_actions_per_task: null # vanilla/CWM only: total real steps across collection and calls
   max_actions_per_episode: null     # env.step cap per episode; reset renews this budget;
                                 # null = no cap

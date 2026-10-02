@@ -7,6 +7,7 @@ results.json) plus the error-path exits.
 """
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -411,7 +412,9 @@ async def test_the_verdict_is_on_disk_before_teardown_runs(tmp_path: Path) -> No
 async def test_stop_waits_for_enclosing_shell_result(tmp_path: Path, stop_kind: str) -> None:
     """A submission/exit inside a shell command must not interrupt its remaining writes."""
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_turns_per_task=10, max_tool_calls=1 if stop_kind == "budget" else None)
+    stack.limits = LimitsConfig(
+        max_turns_per_task=10, max_tool_calls=1 if stop_kind == "budget" else None
+    )
     solution = stack.workdir / "solution.py"
 
     class WritingAgent(ScriptedAgent):
@@ -541,3 +544,26 @@ async def test_interrupt_during_long_turn(tmp_path, pending, force):
     assert agent.aborted
     assert completed == (pending and not force)
     assert "agent_error" not in (stack.logs / "events.jsonl").read_text()
+
+
+async def test_absolute_deadline_caps_a_budget_that_counts_from_session_start(
+    tmp_path: Path,
+) -> None:
+    """GLM-5.2 runs started late enough that start + max_seconds_per_task fell after the Slurm
+    kill, so they were SIGKILLed with no verdict. A deadline already past ends the run on
+    walltime_limit before any turn, however generous the relative budget."""
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(
+        max_turns_per_task=10, max_seconds_per_task=36000, deadline_unix=int(time.time()) - 1
+    )
+    agent = ScriptedAgent([[TextDelta("never sent"), IterationComplete()]])
+    assert await stack.run(agent) == "walltime_limit"
+    assert stack.experiment.turn == 0
+
+
+def test_seconds_left_takes_the_tighter_of_budget_and_deadline() -> None:
+    now = int(time.time())
+    assert LimitsConfig(max_seconds_per_task=100).seconds_left() == 100
+    assert 0 < LimitsConfig(max_seconds_per_task=100, deadline_unix=now + 50).seconds_left() <= 50
+    assert LimitsConfig(max_seconds_per_task=10, deadline_unix=now + 500).seconds_left() == 10
+    assert 400 < LimitsConfig(deadline_unix=now + 500).seconds_left() <= 500

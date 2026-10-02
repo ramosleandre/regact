@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import time
 from collections.abc import Callable
@@ -130,6 +131,7 @@ async def run_session(
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
+    limits = dataclasses.replace(limits, max_seconds_per_task=limits.seconds_left())
     protocol.on_start(start)
     ctx = _LoopContext(
         agent=agent,
