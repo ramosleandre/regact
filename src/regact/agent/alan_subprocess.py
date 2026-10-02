@@ -47,6 +47,22 @@ _DRAIN_TIMEOUT_S = 10.0  # bound on consuming an abandoned turn's leftover frame
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
+def _alancode_paths() -> list[str]:
+    """The dir(s) holding the ``alancode`` package this process would import, via ``find_spec``
+    (no import): an editable or PYTHONPATH install lives outside the interpreter prefix."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec("alancode")
+    except (ImportError, ValueError):
+        return []
+    if spec is None:
+        return []
+    if spec.submodule_search_locations:  # the package dir's parent, so `import alancode` resolves
+        return [os.path.realpath(os.path.dirname(p)) for p in spec.submodule_search_locations]
+    return [os.path.realpath(os.path.dirname(spec.origin))] if spec.origin else []
+
+
 def _runner_regact_paths() -> list[str]:
     """The regact source the in-sandbox alan runner imports (its full closure, incl. the lazy
     ``regact.agent.alan_adapter``): the regact/regact.agent/regact.obs package markers plus the
@@ -102,13 +118,19 @@ class AlanSubprocessAgent(CodeAgent):
         argv = [sys.executable, "-m", "regact.agent.alan_runner"]
         if runtime_wrap is not None:
             argv = runtime_wrap(argv)  # the whole child runs inside the OS sandbox
+        child_env = {**os.environ, **(env or {})}
+        # The child imports alancode from where THIS process found it (a pinned checkout on the
+        # parent's PYTHONPATH, not only the venv's install), the same dirs host_read_paths binds.
+        child_env["PYTHONPATH"] = os.pathsep.join(
+            filter(None, [child_env.get("PYTHONPATH", ""), *_alancode_paths()])
+        )
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=cwd or None,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,  # drained below; its tail feeds the crash report
-            env={**os.environ, **(env or {})},
+            env=child_env,
             limit=_STDOUT_LINE_LIMIT,
             start_new_session=True,
         )
@@ -245,21 +267,7 @@ class AlanSubprocessAgent(CodeAgent):
         editable install (``pip install -e ../alancode``) leaves it OUTSIDE the interpreter prefix,
         so binding the venv is not enough and the child dies with ``ModuleNotFoundError``.
         """
-        import importlib.util
-
-        paths: list[str] = []
-        try:
-            spec = importlib.util.find_spec("alancode")
-        except (ImportError, ValueError):
-            spec = None
-        if spec is not None:
-            if spec.submodule_search_locations:
-                # The package dir's parent, so `import alancode` resolves on sys.path.
-                locs = spec.submodule_search_locations
-                paths += [os.path.realpath(os.path.dirname(p)) for p in locs]
-            elif spec.origin:
-                paths.append(os.path.realpath(os.path.dirname(spec.origin)))
-        return paths + _runner_regact_paths()
+        return _alancode_paths() + _runner_regact_paths()
 
     def host_egress_hosts(self) -> list[str]:
         # A loopback base_url needs no egress: its port is bridged into the sandbox

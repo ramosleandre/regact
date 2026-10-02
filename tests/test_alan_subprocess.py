@@ -321,3 +321,38 @@ async def test_runner_starts_and_reports_ready(tmp_path) -> None:  # type: ignor
         )
     finally:
         await agent.close()
+
+
+async def test_child_imports_alancode_from_where_the_parent_found_it(monkeypatch) -> None:
+    """A pinned alancode checkout on the parent's PYTHONPATH was bound into the sandbox but not
+    importable there (the child's PYTHONPATH held only workdir:src), so the run died at once."""
+    monkeypatch.setattr(alan_subprocess, "_alancode_paths", lambda: ["/pinned/alan_wt"])
+    seen = {}
+
+    async def spawn(*argv, env, **kwargs):
+        seen["env"] = env
+        raise RuntimeError("stop after capturing the env")
+
+    monkeypatch.setattr(alan_subprocess.asyncio, "create_subprocess_exec", spawn)
+    agent = AlanSubprocessAgent({})
+    with pytest.raises(RuntimeError, match="capturing"):
+        await agent.start(
+            cwd="/w",
+            model="m",
+            base_url=None,
+            api_key=None,
+            system_prompt=None,
+            env={"PYTHONPATH": "/w:/src"},
+        )
+    assert seen["env"]["PYTHONPATH"].split(":") == ["/w", "/src", "/pinned/alan_wt"]
+
+
+def test_alancode_paths_point_at_the_importable_package_parent() -> None:
+    import importlib.util
+    import os
+
+    paths = alan_subprocess._alancode_paths()
+    spec = importlib.util.find_spec("alancode")
+    if spec is None:
+        pytest.skip("alancode not installed")
+    assert any(os.path.isdir(os.path.join(p, "alancode")) for p in paths)
