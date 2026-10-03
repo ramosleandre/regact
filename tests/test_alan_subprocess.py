@@ -356,3 +356,28 @@ def test_alancode_paths_point_at_the_importable_package_parent() -> None:
     if spec is None:
         pytest.skip("alancode not installed")
     assert any(os.path.isdir(os.path.join(p, "alancode")) for p in paths)
+
+
+async def test_an_alan_child_we_killed_is_not_reported_as_an_agent_error() -> None:
+    """The walltime watchdog kills the runner; before the fix every Kimi run that hit the time
+    limit logged 'alan runner exited -9' as an agent_api error next to walltime_limit."""
+    import asyncio
+
+    agent = AlanSubprocessAgent({})
+    agent._proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(30)",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+
+    async def kill_soon() -> None:
+        await asyncio.sleep(0.3)
+        await agent.abort()
+
+    killer = asyncio.create_task(kill_soon())
+    events = [event async for event in agent.send("go")]
+    await killer
+    assert not any(isinstance(e, AgentError) for e in events)

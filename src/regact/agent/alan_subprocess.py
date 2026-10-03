@@ -96,6 +96,7 @@ class AlanSubprocessAgent(CodeAgent):
         self._stderr_task: asyncio.Task[None] | None = None
         self._at_tool_result = False  # child is waiting for post-tool notices
         self._needs_drain = False  # a prior turn's stream was abandoned before its _turn_end
+        self._aborted = False  # we killed the child (e.g. walltime): its exit is not an error
         self._model_info: dict[str, Any] | None = None  # resolved window/source, from _turn_end
 
     async def start(
@@ -189,7 +190,8 @@ class AlanSubprocessAgent(CodeAgent):
                     self._at_tool_result = False
                 if frame.get("_await_continue"):
                     self._send_command({"cmd": "continue"})
-        yield AgentError(ErrorCategory.AGENT_API, await self._exit_message())
+        if not self._aborted:
+            yield AgentError(ErrorCategory.AGENT_API, await self._exit_message())
 
     async def inject(self, message: str) -> None:
         """Deliver at a paused tool result; otherwise prepend to the next turn."""
@@ -208,6 +210,7 @@ class AlanSubprocessAgent(CodeAgent):
         proc = self._proc
         if proc is None or proc.returncode is not None:
             return
+        self._aborted = True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         with contextlib.suppress(ProcessLookupError):

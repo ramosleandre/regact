@@ -49,6 +49,7 @@ class _CliAgent(CodeAgent):
         self._session_id: str | None = None
         self._pending: list[str] = []  # messages queued by inject(), prepended next turn
         self._proc: asyncio.subprocess.Process | None = None
+        self._aborted = False  # we killed the CLI (e.g. walltime): its exit is not an error
         self._cli_log: TextIO | None = None  # the CLI's own stderr, captured per task (not stdout)
 
     async def start(
@@ -101,6 +102,7 @@ class _CliAgent(CodeAgent):
             self._pending.clear()
 
         argv, stdin_data = self._command(message)
+        self._aborted = False
         if self._runtime_wrap is not None:
             argv = self._runtime_wrap(argv)  # run the whole CLI process inside the OS sandbox
         proc = await asyncio.create_subprocess_exec(
@@ -134,7 +136,7 @@ class _CliAgent(CodeAgent):
                 yield event
 
         await proc.wait()
-        if proc.returncode:
+        if proc.returncode and not self._aborted:
             yield AgentError(
                 ErrorCategory.AGENT_API,
                 f"{type(self).__name__} CLI exited with code {proc.returncode}",
@@ -147,6 +149,7 @@ class _CliAgent(CodeAgent):
     async def abort(self) -> None:
         if self._proc is None or self._proc.returncode is not None:
             return
+        self._aborted = True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(os.getpgid(self._proc.pid), signal.SIGKILL)
         with contextlib.suppress(ProcessLookupError):

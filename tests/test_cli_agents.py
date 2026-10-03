@@ -4,8 +4,10 @@ The meat is the stream-json → AgentEvent parsing and the command builder; both
 without the CLI installed. Actually spawning the CLI is a separate live concern.
 """
 
+import asyncio
 import json
 import os
+import sys
 import tomllib
 from pathlib import Path
 
@@ -573,3 +575,43 @@ async def test_self_hosted_model_is_treated_as_text_only(tmp_path, monkeypatch) 
         assert "features.view_image=false" in argv
     finally:
         await codex.close()
+
+
+class _SleepyCli(CodexAgent):
+    """A CLI agent whose 'CLI' is a process that just sleeps, so abort() can kill it mid-turn."""
+
+    def _command(self, message: str) -> tuple[list[str], str | None]:
+        return [sys.executable, "-c", "import time; time.sleep(30)"], None
+
+
+async def test_a_cli_we_killed_is_not_reported_as_an_agent_error(tmp_path) -> None:
+    """The walltime watchdog SIGKILLs the CLI; that exit is ours, not an API failure. Before the
+    fix every capped run logged 'CLI exited with code -9' next to its walltime_limit verdict."""
+    agent = _SleepyCli({"codex_home": str(tmp_path / "home")})
+    cwd = tmp_path / "w"
+    cwd.mkdir()
+    await agent.start(cwd=str(cwd), model=None, base_url=None, api_key=None, system_prompt=None)
+
+    async def kill_soon() -> None:
+        await asyncio.sleep(0.3)
+        await agent.abort()
+
+    killer = asyncio.create_task(kill_soon())
+    events = [event async for event in agent.send("go")]
+    await killer
+    await agent.close()
+    assert not any(isinstance(e, AgentError) for e in events)
+
+
+async def test_a_cli_that_dies_on_its_own_is_still_an_agent_error(tmp_path) -> None:
+    class _Crashing(CodexAgent):
+        def _command(self, message: str) -> tuple[list[str], str | None]:
+            return [sys.executable, "-c", "raise SystemExit(3)"], None
+
+    agent = _Crashing({"codex_home": str(tmp_path / "home")})
+    cwd = tmp_path / "w"
+    cwd.mkdir()
+    await agent.start(cwd=str(cwd), model=None, base_url=None, api_key=None, system_prompt=None)
+    events = [event async for event in agent.send("go")]
+    await agent.close()
+    assert any(isinstance(e, AgentError) and "code 3" in e.message for e in events)
