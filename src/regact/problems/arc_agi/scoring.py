@@ -10,10 +10,10 @@ Per level ``l`` (1-indexed) the agent completed with ``a>0`` actions, given the 
     S_l = min(1.15, r)        # LRHAE  - the linear variant, EXACTLY RHAE without the squaring
 
 An unsolved level scores 0. Levels are weighted by their number (level ``l`` has weight ``l``). The
-game score is the level scores' weighted average, then capped by the fraction of levels solved so
-credit cannot be banked on levels never reached::
+game score is the level scores' weighted average, capped by the weighted share of levels solved
+(as the arc library's scorecard does), so beating humans on one level never pays for another::
 
-    E = min( levels_completed / total_levels ,  sum_l(S_l * l) / sum_l(l) )
+    E = min( sum_{l solved}(l) / sum_l(l) ,  sum_l(S_l * l) / sum_l(l) )
 
 RHAE and LRHAE differ only in the per-level exponent, so both come from one pass. Scores are on
 a 0-1 scale (the per-level cap 1.15 is only reachable when you beat the human badly; the completion
@@ -72,6 +72,19 @@ def actions_per_level_from_milestones(
     return out
 
 
+def actions_per_level_from_trace(trace: Sequence[tuple[int, int]]) -> list[int]:
+    """Actions spent on each level from ``(actions so far, levels completed)`` samples taken over
+    the whole task: a level counts as done the first time any episode completes it, so with
+    fresh environments per call every replay of earlier levels is charged to the next one."""
+    out: list[int] = []
+    previous = 0
+    for actions, levels in trace:
+        while len(out) < levels:
+            out.append(max(0, actions - previous))
+            previous = actions
+    return out
+
+
 def _efficiency_score(
     *,
     baselines: Sequence[int],
@@ -84,6 +97,7 @@ def _efficiency_score(
     if not baselines or n_levels == 0:
         return 0.0
     total_weight = 0
+    solved_weight = 0
     weighted_sum = 0.0
     for idx in range(n_levels):
         weight = idx + 1  # level l is 1-indexed and weighted by l
@@ -93,12 +107,13 @@ def _efficiency_score(
         if idx < levels_completed and actions > 0 and baseline > 0:
             ratio = baseline / actions
             level_score = min(_LEVEL_CAP, ratio * ratio if square else ratio)
+            solved_weight += weight
         else:
             level_score = 0.0
         weighted_sum += level_score * weight
-    weighted_avg = weighted_sum / total_weight if total_weight else 0.0
-    completion = levels_completed / n_levels
-    return min(completion, weighted_avg)
+    if not total_weight:
+        return 0.0
+    return min(solved_weight, weighted_sum) / total_weight
 
 
 def rhae_score(

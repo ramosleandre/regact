@@ -282,3 +282,12 @@ def test_solving_advice_is_shared_between_protocols_and_uses_no_workflow_specifi
     assert sections[0] == sections[1]
     for name in ("CWM", "make_env", "data_api", "SubmitSolution", "SubmitExplorationController"):
         assert name not in sections[0]
+
+
+def test_trace_metrics_score_all_task_actions() -> None:
+    baseline = _problem()._task("ls20").baseline_actions
+    trace = [(baseline[0], {"levels_completed": 1, "win_levels": len(baseline)})]
+    derived = _problem().derived_trace_metrics("ls20", trace)
+    weight = 1 / sum(range(1, len(baseline) + 1))  # level 1 at human efficiency, weight 1
+    assert derived == {"rhae": round(weight, 3), "lrhae": round(weight, 3)}
+    assert _problem().derived_trace_metrics("ls20", []) == {"rhae": 0.0, "lrhae": 0.0}

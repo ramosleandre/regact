@@ -171,6 +171,13 @@ class BaseProblem(ABC):
         """
         return {}
 
+    def derived_trace_metrics(
+        self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
+    ) -> dict[str, Any]:
+        """Like :meth:`derived_submission_metrics`, for a vanilla/CWM task: ``trace`` is
+        ``(real actions so far, observation info)`` after every real step of the whole task."""
+        return {}
+
     @abstractmethod
     def build_prompt(
         self,

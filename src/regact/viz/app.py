@@ -8,6 +8,7 @@ metrics, and the controller videos when present.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
@@ -87,6 +88,12 @@ def build_app(experiment_dir: str) -> FastAPI:
                     + state.get("reset_actions", 0),
                     success_rate=latest.get("aggregate", {}).get("success_rate"),
                 )
+                with contextlib.suppress(Exception):  # a viewer renders without them
+                    result["derived_metrics"] = cwm_viewer.problem_for(
+                        root / name
+                    ).derived_trace_metrics(
+                        reader.task_name(name, view.state), cwm_viewer.info_trace(root / name)
+                    )
         return result
 
     @app.get("/", response_class=HTMLResponse)

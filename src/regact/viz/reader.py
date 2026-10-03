@@ -214,9 +214,14 @@ def load_game(experiment_dir: str, game: str) -> GameView:
     turns = _group_turns(_load_events(base / "logs" / "transcript.jsonl"))
     submissions = _load_submissions(base / "workdir" / "submissions")
     config = _load_json(base / "config.json") or {}
-    _enrich_derived_metrics(game, submissions, config)
+    _enrich_derived_metrics(task_name(game, state), submissions, config)
     _tag_tool_calls(turns, submissions)
     return GameView(name=game, state=state, turns=turns, submissions=submissions, config=config)
+
+
+def task_name(game: str, state: dict[str, Any]) -> str:
+    """The problem's task name; ``game`` is a path, e.g. ``<experiment>/<stamp>/ls20``."""
+    return str(state.get("task_name") or Path(game).name)
 
 
 def _enrich_derived_metrics(

@@ -34,7 +34,7 @@ def test_image_previews_need_a_vision_agent(protocol_name):
         ProblemConfig("fake"),
         protocol=ProtocolConfig(protocol_name, options),
     )
-    with pytest.raises(ValueError, match="agent.vision"):
+    with pytest.raises(ValueError, match=r"agent\.vision"):
         build_protocol(blind).validate()
     sighted = RunConfig(
         AgentConfig(AgentName.SCRIPTED, vision=True),
@@ -190,6 +190,17 @@ def test_done_stops_prefill_and_allows_reset(make_rig):
     again = c.tool("ResetEnvironment", {"request_id": "reset-1"})
     assert again["replayed"] and c.reset_actions == 1
     assert c.tool("RunController", {})["real_actions"] == 1
+
+
+def test_info_trace_counts_real_steps_and_explicit_resets(make_rig):
+    from regact.protocols.cwm.viewer import info_trace
+
+    c = make_rig(target=3)  # initial collection: 2 real steps
+    exploration(c, (1,))
+    c.tool("RunController", {})
+    c.tool("ResetEnvironment", {})
+    c.tool("RunController", {})
+    assert [actions for actions, _ in info_trace(c.output)] == [1, 2, 3, 5]
 
 
 def test_reset_budget_is_task_wide(make_rig):

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from regact.problems.arc_agi.scoring import (
     actions_per_level_from_milestones,
+    actions_per_level_from_trace,
     rhae_from_results,
     rhae_score,
     summarize_run,
@@ -75,12 +76,11 @@ def test_weights_later_levels_more() -> None:
 
 
 def test_partial_completion_bounds_the_score() -> None:
-    # 1 of 2 levels cleared at human efficiency: score cannot exceed the completion fraction (0.5).
+    # 1 of 2 levels cleared at human efficiency: weighted avg (1*1)/(1+2), the solved-share cap.
     r = rhae_score(
         baseline_actions=[10, 10], actions_per_level=[10], levels_completed=1, total_levels=2
     )
-    assert abs(r.rhae - 1 / 3) < 1e-9  # weighted avg (1*1)/(1+2), below the 0.5 completion cap
-    assert r.rhae <= 0.5
+    assert abs(r.rhae - 1 / 3) < 1e-9
 
 
 def test_rhae_from_results_end_to_end() -> None:
@@ -134,3 +134,20 @@ def test_summarize_run_handles_missing_results(tmp_path: Path) -> None:
     # No results on disk at all -> every game shows a dash, no crash.
     out = summarize_run(str(tmp_path / "nope"), ["ls20"], {"ls20": [19, 16]})
     assert "0 games scored" in out
+
+
+def test_actions_per_level_from_trace_uses_first_completions() -> None:
+    # Level 1 first done after 30 actions; a fresh environment then replays it, and level 2 is
+    # first done after 100: the replay is charged to level 2. Falling back to 0 changes nothing.
+    trace = [(10, 0), (30, 1), (31, 0), (60, 1), (100, 2), (101, 0)]
+    assert actions_per_level_from_trace(trace) == [30, 70]
+    assert actions_per_level_from_trace([]) == []
+
+
+def test_beating_humans_on_one_level_does_not_pay_for_another() -> None:
+    # Level 1 of 2 at 1.15 (capped): the weighted average 1.15/3 is above the weighted share of
+    # solved levels, 1/3, which caps it (the arc library scorecard does the same).
+    r = rhae_score(
+        baseline_actions=[100, 100], actions_per_level=[10], levels_completed=1, total_levels=2
+    )
+    assert abs(r.rhae - 1 / 3) < 1e-9 and abs(r.lrhae - 1 / 3) < 1e-9

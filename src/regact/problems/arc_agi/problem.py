@@ -569,6 +569,26 @@ class ArcAgiProblem(BaseProblem):
             return {}
         return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
 
+    def derived_trace_metrics(
+        self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
+    ) -> dict[str, Any]:
+        """RHAE/LRHAE over all the task's real actions, exploration included."""
+        from regact.problems.arc_agi.scoring import actions_per_level_from_trace, rhae_score
+
+        baseline = self._task(task_name).baseline_actions
+        if not baseline:
+            return {}
+        levels = [(actions, int(info.get("levels_completed", 0) or 0)) for actions, info in trace]
+        per_level = actions_per_level_from_trace(levels)
+        rhae = rhae_score(
+            baseline_actions=baseline,
+            actions_per_level=per_level,
+            levels_completed=len(per_level),
+            total_levels=max([int(info.get("win_levels", 0) or 0) for _, info in trace] or [0])
+            or None,
+        )
+        return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
+
     def build_prompt(
         self,
         task_name: str,

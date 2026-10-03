@@ -14,6 +14,7 @@ function h(tag, cls, ...kids) {
 const clear = (el) => el.replaceChildren();
 const fmt = (n) => (n == null ? "—" : Intl.NumberFormat().format(n));
 const pct = (x) => (x == null ? "—" : (x * 100).toFixed(0) + "%");
+const pct1 = (x) => (x == null ? "\u2014" : (x * 100).toFixed(1) + "%");  // low scores (RHAE) need the decimal
 const dur = (s) => { s = Math.round(s || 0); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
 // Game-agnostic: format an opaque aggregate dict as "key val · key val", skipping
 // bookkeeping keys. Each game owns its metric names (ARC: levels/rhae, MiniGrid: reward).
@@ -332,14 +333,13 @@ function metricSpecs(games) {
           specs.push({ key: "feat:" + feat + "." + k, label: feat + "." + k,
             get: (m) => m.feature_metrics && m.feature_metrics[feat] && m.feature_metrics[feat][k] });
         }
-  // Problem-derived metrics (ARC RHAE/LRHAE): no def and not an "agg:" key, so they land under
-  // "Other" rather than in the main game score. Same dynamic, viz-agnostic treatment.
+  // Problem-derived metrics (ARC RHAE/LRHAE, 0-1): main metrics, shown and graphed by default.
   const seenDrv = new Set();
   for (const g of games)
     for (const [k, v] of Object.entries(g.metrics.derived_metrics || {}))
       if (typeof v === "number" && !seenDrv.has(k)) {
         seenDrv.add(k);
-        specs.push({ key: "derived:" + k, label: k.toUpperCase(),
+        specs.push({ key: "derived:" + k, label: k.toUpperCase(), fmt: pct1, def: true,
           get: (m) => m.derived_metrics && m.derived_metrics[k] });
       }
   specs.push(STATUS_METRIC);
