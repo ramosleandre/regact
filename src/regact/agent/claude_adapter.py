@@ -34,6 +34,7 @@ from regact.obs.errors import ErrorCategory
 from regact.security.policy import SecurityPolicy, default_policy
 
 _IMAGE_SUFFIXES = ("png", "jpg", "jpeg", "gif", "webp")
+_CLAUDE_BASH_MAX_TIMEOUT_MS = 600_000  # Claude Code's own default ceiling for a Bash timeout
 
 
 def claude_deny_settings(
@@ -131,6 +132,11 @@ class ClaudeAgent(_CliAgent):
         budget = self._args.get("max_thinking_tokens")
         if budget:
             self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)
+        timeout = self._args.get("bash_timeout_ms")
+        if timeout:  # the Bash timeout when the model passes none; its own cap must not undercut it
+            ms = int(timeout)
+            self._env_overrides["BASH_DEFAULT_TIMEOUT_MS"] = str(ms)
+            self._env_overrides["BASH_MAX_TIMEOUT_MS"] = str(max(ms, _CLAUDE_BASH_MAX_TIMEOUT_MS))
 
     def _configure_home(self) -> None:
         """Point claude at its config dir. When we isolate, that dir is a fresh per-task home seeded

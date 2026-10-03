@@ -18,6 +18,7 @@ args:
   permission_mode: yolo        # headless: no permission prompts
   max_output_tokens: 4096      # cap per completion — keeps small-context models (~32k) from overflowing
   memory: "off"                # no cross-run memory store
+  bash_timeout_ms: null        # Bash timeout when the model passes none; null = alancode's 120000
   context_window: null         # tell Alan its window (int); null = infer. Set for a local
                                # server (litellm can't fetch it offline; keep < max-model-len).
   # backend: scripted          # provider selection: auto (default) | anthropic-native | scripted

@@ -611,3 +611,21 @@ async def test_a_cli_that_dies_on_its_own_is_still_an_agent_error(tmp_path) -> N
     events = [event async for event in agent.send("go")]
     await agent.close()
     assert any(isinstance(e, AgentError) and "code 3" in e.message for e in events)
+
+
+@pytest.mark.parametrize(("timeout", "ceiling"), [(240000, "600000"), (900000, "900000")])
+async def test_claude_bash_timeout_sets_default_and_keeps_ceiling_above_it(
+    tmp_path, timeout, ceiling
+) -> None:
+    root = tmp_path / "claude-home"
+    root.mkdir()
+    (root / ".credentials.json").write_text("{}")
+    agent = ClaudeAgent({"claude_home": str(root), "bash_timeout_ms": timeout})
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    await agent.start(cwd=str(cwd), model="m", base_url=None, api_key=None, system_prompt=None)
+    try:
+        assert agent._env_overrides["BASH_DEFAULT_TIMEOUT_MS"] == str(timeout)
+        assert agent._env_overrides["BASH_MAX_TIMEOUT_MS"] == ceiling
+    finally:
+        await agent.close()

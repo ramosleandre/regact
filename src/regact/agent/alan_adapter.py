@@ -110,11 +110,15 @@ def build_alan_agent(
         tool_call_format=args.get("tool_call_format"),
         **extra,
     )
-    # Optional empty_response-sweep settings: applied ONLY when the bench sets them, so a
-    # default run still works on an older alancode. Settings (not ctor kwargs) - an unknown
+    # Optional session settings: applied ONLY when the bench sets them, so a default run still
+    # works on an older alancode (bash_timeout_ms needs >= 1.3.18). Settings (not ctor kwargs) - an unknown
     # ctor kwarg would silently become an LLM API param; a
     # rejected setting raises loudly, which is right (a requested sweep arm must not run wrong).
-    for name, cast in (("empty_response_retries", int), ("persist_thinking", _as_bool)):
+    for name, cast in (
+        ("empty_response_retries", int),
+        ("persist_thinking", _as_bool),
+        ("bash_timeout_ms", int),
+    ):
         raw = args.get(name)
         if raw is None:
             continue

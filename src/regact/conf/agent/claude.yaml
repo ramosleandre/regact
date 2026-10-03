@@ -24,6 +24,9 @@ args:
   # null = unset (the CLI's own default budget); an int caps it.
   max_thinking_tokens: null
 
+  # Bash timeout when the model passes none (BASH_DEFAULT_TIMEOUT_MS); null = the CLI's 120000.
+  bash_timeout_ms: null
+
   # Isolated config dir: regact copies only .credentials.json in and sets
   # CLAUDE_CONFIG_DIR here, so the benchmarked agent never sees (or pollutes) your
   # ~/.claude - global CLAUDE.md, settings, hooks, history, skills, memory. Happens
