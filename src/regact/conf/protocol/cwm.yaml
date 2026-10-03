@@ -6,7 +6,7 @@ max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
 threshold_max_state_obs_size_ratio: 0.5
 cwm_validation_policy: required
-max_actions_per_exploration: 2500
+max_actions_per_RunController: 2500
 # PNG previews per RunController; >0 needs agent.vision=true.
 n_tmp_images_saved_per_exploration: 0
 workspace_helpers_enabled: true

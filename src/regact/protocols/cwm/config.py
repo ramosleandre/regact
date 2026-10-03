@@ -48,7 +48,7 @@ class CwmConfig:
     max_seconds_per_initial_collection: float | None = 30
     threshold_max_state_obs_size_ratio: float = 0.5
     cwm_validation_policy: str = "required"
-    max_actions_per_exploration: int | None = 2500
+    max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
     planner: PlannerConfig = field(default_factory=PlannerConfig)
@@ -100,11 +100,11 @@ class CwmConfig:
             raise ValueError("protocol.threshold_max_state_obs_size_ratio must be < 1")
         if (
             config.planner.enabled
-            and config.max_actions_per_exploration is not None
+            and config.max_actions_per_RunController is not None
             and (
                 config.planner.max_depth_per_planner_call is not None
-                and config.planner.max_depth_per_planner_call > config.max_actions_per_exploration
+                and config.planner.max_depth_per_planner_call > config.max_actions_per_RunController
             )
         ):
-            raise ValueError("planner depth cannot exceed protocol.max_actions_per_exploration")
+            raise ValueError("planner depth cannot exceed protocol.max_actions_per_RunController")
         return config

@@ -23,7 +23,7 @@ class VanillaConfig:
     n_unique_observations_in_initial_collection: int = 20
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
-    max_actions_per_exploration: int | None = 2500
+    max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)

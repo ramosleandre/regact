@@ -364,12 +364,12 @@ def test_exploration_action_budget_and_global_real_budget(rig):
     c, _ = rig
     accept(c)
     exploration(c)
-    c.options.max_actions_per_exploration = 4
+    c.options.max_actions_per_RunController = 4
     result = c.tool("RunController", {})
     assert result["real_actions"] == 4
     # The next controller would take five actions, but only two real actions remain.
     exploration(c, (1, 1, 1, 1, 1))
-    c.options.max_actions_per_exploration = 5
+    c.options.max_actions_per_RunController = 5
     c.config.limits.max_actions_per_task = 8
     result = c.tool("RunController", {})
     assert result["real_actions"] == 2, result
@@ -526,7 +526,7 @@ def test_real_playback_and_frozen_source_without_simulation(rig):
     "options",
     [
         {"n_unique_observations_in_initial_collection": "15"},
-        {"max_actions_per_exploration": False},
+        {"max_actions_per_RunController": False},
         {"planner": {"algorithm": "astar"}},
         {"execution": {"max_seconds_per_call": 0}},
     ],

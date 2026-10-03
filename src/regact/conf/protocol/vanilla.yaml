@@ -3,7 +3,7 @@ name: vanilla
 n_unique_observations_in_initial_collection: 20
 max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
-max_actions_per_exploration: 2500
+max_actions_per_RunController: 2500
 n_tmp_images_saved_per_exploration: 0  # >0 needs agent.vision=true
 execution:
   max_seconds_per_call: 5

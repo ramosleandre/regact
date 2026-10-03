@@ -72,9 +72,9 @@ def format_feedback(value: dict[str, Any]) -> str:
 
 def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | None:
     mapping = {
-        "max_actions_per_exploration": (
-            "protocol.max_actions_per_exploration",
-            c.max_actions_per_exploration,
+        "max_actions_per_RunController": (
+            "protocol.max_actions_per_RunController",
+            c.max_actions_per_RunController,
             "real actions per RunController call",
         ),
         "max_actions_per_episode": (

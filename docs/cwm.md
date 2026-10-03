@@ -176,7 +176,7 @@ For shared collection, execution, data, feedback and task settings, see the [com
 | `protocol.planner.max_nodes_per_planner_call` | `10000` | Stored search states, including start |
 | `protocol.planner.max_depth_per_planner_call` | `100` | Maximum action-list length |
 
-All `max_*` options accept `null`. Goal evaluations consume time but not the CWM-call counter. Callback/memory/task limits still apply. With planning enabled, a finite planner depth cannot exceed a finite `protocol.max_actions_per_exploration`.
+All `max_*` options accept `null`. Goal evaluations consume time but not the CWM-call counter. Callback/memory/task limits still apply. With planning enabled, a finite planner depth cannot exceed a finite `protocol.max_actions_per_RunController`.
 
 ## Studying a run
 

@@ -167,7 +167,7 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 | `protocol.n_unique_observations_in_initial_collection` | `20` | Initial collection target, including reset observation |
 | `protocol.max_actions_per_initial_collection` | `1000` | Initial random steps |
 | `protocol.max_seconds_per_initial_collection` | `30` | Initial collection wall time |
-| `protocol.max_actions_per_exploration` | `2500` | Real actions in one `RunController`; the name remains for compatibility |
+| `protocol.max_actions_per_RunController` | `2500` | Real actions in one `RunController` |
 | `protocol.n_tmp_images_saved_per_exploration` | `0` | Maximum automatic previews per call; above `0` requires `agent.vision=true` |
 | `protocol.execution.max_seconds_per_call` | `5` | One isolated callback/startup, including communication and serialization |
 | `protocol.execution.max_seconds_per_RunController` | `90` | Time spent in submitted code during one `RunController`: CWM and controller callbacks plus their module imports. Environment steps, the experience store and framework checks are not charged |

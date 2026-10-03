@@ -616,7 +616,7 @@ class ManagedCoordinator:
                 }
             )
         else:
-            reason = "max_actions_per_exploration"
+            reason = "max_actions_per_RunController"
             evidence: dict[str, Any] = {}
             role = "model"
             call_started = time.monotonic()
@@ -635,7 +635,7 @@ class ManagedCoordinator:
                     )
                     role = "controller"
                     controller.call("controller_init")
-                    for _ in budgets.action_indices(self.options.max_actions_per_exploration):
+                    for _ in budgets.action_indices(self.options.max_actions_per_RunController):
                         if obs["is_done"]:
                             reason = "environment_done"
                             break
@@ -684,7 +684,7 @@ class ManagedCoordinator:
                         result["objective_reached"] = controller.call("objective", state=state)
                     else:
                         reason = (
-                            "environment_done" if obs["is_done"] else "max_actions_per_exploration"
+                            "environment_done" if obs["is_done"] else "max_actions_per_RunController"
                         )
             except TaskStopped:
                 # The limit raced with prediction computation; no real action was attempted.

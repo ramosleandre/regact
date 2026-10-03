@@ -398,12 +398,12 @@ async def test_vanilla_feedback_transport_and_limits(make_rig):
     from regact.tools.base import ToolContext
 
     c = make_rig()
-    c.options.max_actions_per_exploration = 1
+    c.options.max_actions_per_RunController = 1
     exploration(c, (1, 1))
     response = await ManagedTool("RunController", c).call({}, ToolContext(cwd=str(c.workdir)))
     value = json.loads(response.data)
     assert value["real_actions"] == 1
-    assert value["budget"]["parameter"] == "protocol.max_actions_per_exploration"
+    assert value["budget"]["parameter"] == "protocol.max_actions_per_RunController"
     assert value["current_observation_id"] == 4
     reset = await ManagedTool("ResetEnvironment", c).call({}, ToolContext(cwd=str(c.workdir)))
     assert json.loads(reset.data)["current_observation_id"] == 1

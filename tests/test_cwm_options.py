@@ -21,9 +21,9 @@ def test_planner_defaults_and_validation():
         with pytest.raises(ValueError, match="boolean"):
             CwmConfig.from_mapping({"planner": {"enabled": bad}})
     # An unused planner depth must not constrain ordinary explorations.
-    CwmConfig.from_mapping({"max_actions_per_exploration": 1})
+    CwmConfig.from_mapping({"max_actions_per_RunController": 1})
     with pytest.raises(ValueError, match="depth"):
-        CwmConfig.from_mapping({"max_actions_per_exploration": 1, "planner": {"enabled": True}})
+        CwmConfig.from_mapping({"max_actions_per_RunController": 1, "planner": {"enabled": True}})
 
 
 @pytest.mark.integration
