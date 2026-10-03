@@ -374,3 +374,13 @@ def test_game_lookup_is_direct_and_rejects_path_escape(tmp_path, monkeypatch):
     (Path(root) / "escape").symlink_to(outside, target_is_directory=True)
     for name in ("../outside", str(outside), "escape", "missing"):
         assert client.get("/api/game", params={"name": name}).status_code == 404
+
+
+def test_main_metrics_come_from_the_problem(tmp_path: Path) -> None:
+    exp = _make_experiment(tmp_path)
+    assert game_metrics(load_game(exp, "ls20"))["main_metrics"] == ["success_rate"]  # no config
+    (Path(exp) / "ls20" / "config.json").write_text(
+        json.dumps({"problem": {"name": "arc_agi", "kwargs": {}}})
+    )
+    main = game_metrics(load_game(exp, "ls20"))["main_metrics"]
+    assert "rhae" in main and "lrhae" in main and "success_rate" not in main

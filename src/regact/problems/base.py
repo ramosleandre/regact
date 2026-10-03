@@ -26,6 +26,8 @@ class BaseProblem(ABC):
     """Base class for all problems (games)."""
 
     name: str
+    # The score metrics the viewer shows as Main and graphs by default (aggregate or derived keys).
+    main_metrics: tuple[str, ...] = ("success_rate",)
 
     def reset_commands(self) -> dict[str, str]:
         """Explicit reset capabilities for externally managed controller protocols."""

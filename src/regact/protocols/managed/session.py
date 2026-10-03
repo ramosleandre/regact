@@ -194,6 +194,11 @@ class ManagedCoordinator:
             if self.initial_collection is not None:
                 return
             started = time.monotonic()
+            # Runs before the session clock starts (on_start), so only the task's budget from now
+            # and the experiment deadline bound it.
+            budget = self.config.limits.seconds_left()
+            if budget is not None:
+                self.deadline = min(self.deadline, started + budget)
             seed = self.config.problem.seed if self.config.problem.seed is not None else 0
             rng = random.Random(seed)
             deadline = min(

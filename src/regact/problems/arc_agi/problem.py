@@ -338,6 +338,13 @@ class ArcAgiProblem(BaseProblem):
     """ARC-AGI-3 as a regact problem (offline, local game data)."""
 
     name = "arc_agi"
+    main_metrics = (
+        "mean_levels_completed",
+        "mean_levels_completion_rate",
+        "win_rate",
+        "rhae",
+        "lrhae",
+    )
 
     def __init__(
         self,

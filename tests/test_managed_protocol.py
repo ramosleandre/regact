@@ -10,6 +10,7 @@ from regact.config.schema import (
     AgentConfig,
     AgentName,
     Lifecycle,
+    LimitsConfig,
     ProblemConfig,
     ProtocolConfig,
     RunConfig,
@@ -83,7 +84,12 @@ def make_rig(tmp_path):
     coordinators = []
 
     def make(
-        protocol="vanilla", lifecycle=Lifecycle.SINGLE_INSTANCE, problem=None, target=3, **options
+        protocol="vanilla",
+        lifecycle=Lifecycle.SINGLE_INSTANCE,
+        problem=None,
+        target=3,
+        limits=None,
+        **options,
     ):
         root = tmp_path / str(len(coordinators))
         work = root / "workdir"
@@ -100,6 +106,7 @@ def make_rig(tmp_path):
                     **options,
                 },
             ),
+            limits=limits or LimitsConfig(),
         )
         definition = build_protocol(cfg)
         env = EnvSession(
@@ -201,6 +208,13 @@ def test_info_trace_counts_real_steps_and_explicit_resets(make_rig):
     c.tool("ResetEnvironment", {})
     c.tool("RunController", {})
     assert [actions for actions, _ in info_trace(c.output)] == [1, 2, 3, 5]
+
+
+def test_experiment_deadline_bounds_the_initial_collection(make_rig):
+    c = make_rig(target=20, limits=LimitsConfig(experiment_deadline_unix=int(time.time()) - 1))
+    assert c.terminal == "walltime_limit"
+    assert c.initial_collection["stop_reason"] == "walltime_limit"
+    assert c.store.summary()["n_total_transitions"] == 0
 
 
 def test_reset_budget_is_task_wide(make_rig):

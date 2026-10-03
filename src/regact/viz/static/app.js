@@ -187,13 +187,14 @@ const _THEME = { good: "#4ec9a4", warn: "#e0c060", bad: "#e06c6c", muted: "#9aa3
 const _EXP_PALETTE = ["#5aa9e6", "#4ec9a4", "#e0c060", "#e06c6c", "#7d8bd4", "#d47db0", "#8bd47d", "#d4a37d"];
 const _AGG_SKIP = new Set(["n_episodes", "n_errors", "success_rate"]);  // shown elsewhere / bookkeeping
 // `def: true` = a Main metric: shown in the game overview's Main-metrics table AND activated by
-// default in the Graphs panel (the two are kept in sync - see MAIN_METRIC_KEYS + renderOverview).
+// default in the Graphs panel. Score metrics carry `score: <key>` instead: they are Main only when
+// the run's problem lists that key in its main_metrics (ARC: levels/RHAE; MiniGrid: success/reward).
 // ONE registry drives BOTH the Graphs panel and the game Overview (renderOverview reads the same
 // list), so metric names / order / capitalization are identical everywhere by construction. The
 // game's own aggregate keys (success_rate, mean_steps, mean_reward, ARC levels, ...) are appended
 // dynamically in metricSpecs, so e.g. the "Score" line in the overview is split into those keys.
 const FRAMEWORK_METRICS = [
-  { key: "success_rate", label: "Success rate", get: (m) => m.success_rate, fmt: pct, def: true },
+  { key: "success_rate", label: "Success rate", get: (m) => m.success_rate, fmt: pct, score: "success_rate" },
   { key: "env_actions", label: "Env actions", get: (m) => m.env_moves, fmt: fmt, def: true },
   { key: "time", label: "Time", get: (m) => m.duration_s, fmt: dur, def: true },
   { key: "tool_calls", label: "Tool calls", get: (m) => m.n_tool_calls, fmt: fmt, def: true },
@@ -257,9 +258,7 @@ function modelName(exp) {
 
 const _graph = {
   agg: "mean", err: "none", mask: false, barScale: 1,   // barScale: x-axis bar-width zoom (persisted)
-  // Defaults span both problem families; a metric a game never reports draws no bar. success_rate
-  // is MiniGrid's; mean_levels_completion_rate is ARC's graded headline (its success_rate role).
-  active: new Set(["success_rate", "time", "agg:mean_levels_completion_rate", "agg:mean_levels_completed"]),
+  active: new Set(),  // set by applySettings: saved selection, else the Main metrics
   hidden: new Set(), colors: {}, order: [],
 };
 
@@ -276,9 +275,8 @@ function applySettings(s, specs) {
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
   if (Array.isArray(s.active)) {
     _graph.active = new Set(s.active);
-  } else {   // no saved metric selection -> the def-flagged defaults
-    _graph.active = new Set(["success_rate", "time", "agg:mean_levels_completion_rate", "agg:mean_levels_completed"]);
-    for (const spec of specs) if (spec.def) _graph.active.add(spec.key);
+  } else {   // no saved metric selection -> the Main metrics
+    _graph.active = new Set(specs.filter((spec) => spec.main).map((spec) => spec.key));
   }
 }
 
@@ -314,13 +312,16 @@ function svg(tag, attrs, ...kids) {
 }
 
 function metricSpecs(games) {
-  const specs = [...FRAMEWORK_METRICS];
+  // A score metric no run reports (success_rate on ARC) is not offered at all.
+  const specs = FRAMEWORK_METRICS
+    .filter((s) => !s.score || games.some((g) => s.get(g.metrics) != null))
+    .map((s) => ({ ...s }));  // copies: `main` below depends on these games
   const seen = new Set();
   for (const g of games)
     for (const [k, v] of Object.entries(g.metrics.final_aggregate || {}))
       if (typeof v === "number" && !_AGG_SKIP.has(k) && !seen.has(k)) {
         seen.add(k);
-        specs.push({ key: "agg:" + k, label: k, get: (m) => m.final_aggregate && m.final_aggregate[k] });
+        specs.push({ key: "agg:" + k, label: k, score: k, get: (m) => m.final_aggregate && m.final_aggregate[k] });
       }
   // Per-feature submission metrics (e.g. cwm.n_conflicting_transitions), same dynamic treatment as
   // the game aggregate: each numeric key becomes a graphable metric, no per-feature viz code.
@@ -333,16 +334,18 @@ function metricSpecs(games) {
           specs.push({ key: "feat:" + feat + "." + k, label: feat + "." + k,
             get: (m) => m.feature_metrics && m.feature_metrics[feat] && m.feature_metrics[feat][k] });
         }
-  // Problem-derived metrics (ARC RHAE/LRHAE, 0-1): main metrics, shown and graphed by default.
+  // Problem-derived metrics (ARC RHAE/LRHAE, 0-1).
   const seenDrv = new Set();
   for (const g of games)
     for (const [k, v] of Object.entries(g.metrics.derived_metrics || {}))
       if (typeof v === "number" && !seenDrv.has(k)) {
         seenDrv.add(k);
-        specs.push({ key: "derived:" + k, label: k.toUpperCase(), fmt: pct1, def: true,
+        specs.push({ key: "derived:" + k, label: k.toUpperCase(), fmt: pct1, score: k,
           get: (m) => m.derived_metrics && m.derived_metrics[k] });
       }
   specs.push(STATUS_METRIC);
+  const mains = new Set(games.flatMap((g) => g.metrics.main_metrics || []));
+  for (const s of specs) s.main = !!(s.def || (s.score && mains.has(s.score)));
   return specs;
 }
 
@@ -836,7 +839,7 @@ async function renderOverview(name) {
   // game's aggregate keys. Main = the score (agg keys) + the def-flagged effort/cost; Other = rest.
   const specs = metricSpecs([{ metrics: m }]).filter((s) => s.get && !s.count && !s.categorical);
   const fmtOf = (s) => { const v = s.get(m); return v != null && s.fmt ? s.fmt(v) : fmtMetric(v); };
-  const isMain = (s) => s.def || s.key.startsWith("agg:");
+  const isMain = (s) => s.main;
   if (m.protocol === "cwm") wrap.append(h("p", "muted", "CWM protocol · score below = latest real exploration. Open CWM for best progress, phases and replay."));
   const main = [["Status", statusOf(m)], ...specs.filter(isMain).map((s) => [s.label, fmtOf(s)])];
   const other = [

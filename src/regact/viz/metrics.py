@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from regact.viz import reader
 from regact.viz.reader import GameView
 
 
@@ -42,9 +43,10 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         # The reported submission's per-feature metrics, opaque + game/feature-agnostic (each
         # feature owns its keys), e.g. {"cwm": {"n_conflicting_transitions": 0, ...}}.
         "feature_metrics": _final_features(game),
-        # The reported submission's problem-derived metrics (ARC rhae/lrhae) - secondary to the
-        # game score, shown under "Other" in the viz.
+        # The reported submission's problem-derived metrics (ARC rhae/lrhae), opaque.
         "derived_metrics": _final_derived(game),
+        # Which score keys (aggregate or derived) the viz shows as Main: the problem decides.
+        "main_metrics": list(_main_metrics(game)),
         "duration_s": game.state.get("duration_s", 0),
         # Cumulative real env.step calls this task made (exploration + eval rollouts). None for runs
         # recorded before it was tracked, so the viz shows "-" rather than a wrong 0.
@@ -155,6 +157,13 @@ def _final_derived(game: GameView) -> dict[str, Any]:
     """The reported submission's problem-derived metrics (ARC rhae/lrhae), opaque."""
     sub = _scored_submission(game)
     return dict(sub.derived) if sub and sub.derived else {}
+
+
+def _main_metrics(game: GameView) -> tuple[str, ...]:
+    from regact.problems.base import BaseProblem
+
+    problem = reader.problem_of(game.config)
+    return problem.main_metrics if problem is not None else BaseProblem.main_metrics
 
 
 def _final_metric(game: GameView, key: str) -> Any:

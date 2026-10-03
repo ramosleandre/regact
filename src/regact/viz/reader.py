@@ -11,6 +11,7 @@ reads naturally, and pair each ``ToolResult`` to its ``ToolCall`` by id.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -224,29 +225,41 @@ def task_name(game: str, state: dict[str, Any]) -> str:
     return str(state.get("task_name") or Path(game).name)
 
 
+@functools.lru_cache(maxsize=32)
+def _build_problem(name: str, kwargs: str) -> Any:
+    from regact.problems.base import build_problem
+
+    return build_problem(name, json.loads(kwargs))
+
+
+def problem_of(config: dict[str, Any]) -> Any:
+    """The run's problem, rebuilt from its resolved config; None if it cannot be rebuilt here."""
+    problem_cfg = config.get("problem") or {}
+    name = problem_cfg.get("name")
+    if not name:
+        return None
+    try:
+        return _build_problem(name, json.dumps(problem_cfg.get("kwargs") or {}, sort_keys=True))
+    except Exception:  # a viewer must render even if the problem cannot be rebuilt here
+        return None
+
+
 def _enrich_derived_metrics(
     game: str, submissions: list[SubmissionView], config: dict[str, Any]
 ) -> None:
     """Recompute a game's offline derived metrics (e.g. ARC's RHAE/LRHAE) into ``sub.derived``.
 
-    Kept separate from the game-score aggregate so the viewer shows them under "Other". Delegates to
-    the problem named in the resolved config, so the viewer stays agnostic of a game's metric keys.
-    Best-effort: a missing game library or benchmark leaves ``derived`` empty rather than failing.
+    Delegates to the problem named in the resolved config, so the viewer stays agnostic of a game's
+    metric keys. Best-effort: a missing game library or benchmark leaves ``derived`` empty.
     """
-    problem_cfg = config.get("problem") or {}
-    name = problem_cfg.get("name")
-    if not name or not submissions:
+    problem = problem_of(config) if submissions else None
+    if problem is None:
         return
     try:
-        from regact.problems.base import build_problem
-
-        problem = build_problem(name, problem_cfg.get("kwargs") or {})
         for sub in submissions:
             if sub.episodes:
-                # A separate channel from the game score aggregate: derived metrics (ARC RHAE/LRHAE)
-                # are secondary, so the viz shows them under "Other", not among the main score.
                 sub.derived.update(problem.derived_submission_metrics(game, sub.episodes))
-    except Exception:  # a viewer must render even if the problem cannot be rebuilt here
+    except Exception:
         return
 
 
