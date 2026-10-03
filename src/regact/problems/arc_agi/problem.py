@@ -19,7 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from regact.config.schema import HelperConfig, InfoMode, ObsMode
+from regact.config.schema import InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
@@ -320,35 +320,6 @@ def complex_action(x: int, y: int) -> dict:
 '''
 
 
-# Appended to the helper only when problem.helper.to_png is on (vision-capable agents). Its imports
-# are lazy (numpy/PIL, not the game library), so the base helper stays import-free.
-_RENDER_HELPER = '''
-
-# ---- obs -> PNG (vision agents only): save the current grid as an image you can open and SEE ----
-_ARC_PALETTE = [
-    (255, 255, 255), (204, 204, 204), (153, 153, 153), (102, 102, 102),
-    (51, 51, 51), (0, 0, 0), (229, 58, 163), (255, 123, 204),
-    (249, 60, 49), (30, 147, 255), (136, 216, 241), (255, 220, 0),
-    (255, 133, 27), (146, 18, 49), (79, 204, 48), (163, 86, 214),
-]
-
-
-def to_png(obs, path="frame.png", scale=8):
-    """Render the current ARC grid (obs.frame[-1]) to a PNG and return `path`. Open/read the image
-    to SEE objects, walls, symmetry and motion that are invisible in the raw integer grid."""
-    import numpy as np
-    from PIL import Image
-
-    frame = obs.frame
-    grid = frame[-1] if isinstance(frame, (list, tuple)) and frame else frame
-    cells = np.clip(np.asarray(grid, dtype=np.int64), 0, len(_ARC_PALETTE) - 1)
-    rgb = np.asarray(_ARC_PALETTE, dtype=np.uint8)[cells]
-    rgb = np.repeat(np.repeat(rgb, scale, axis=0), scale, axis=1)
-    Image.fromarray(rgb).save(path)
-    return path
-'''
-
-
 _HEX = "0123456789abcdef"
 
 
@@ -445,8 +416,8 @@ class ArcAgiProblem(BaseProblem):
         action_id = action.get("action") if isinstance(action, dict) else action
         if action_id == 0:
             raise InvalidActionError(
-                "Use ResetLevel or ResetEnvironment between RunController calls; "
-                "RESET is not a controller action."
+                "RESET is not a controller action; use the framework's reset commands, if listed, "
+                "between RunController calls."
             )
 
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
@@ -471,11 +442,10 @@ class ArcAgiProblem(BaseProblem):
         task_name: str,
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
-        helper: HelperConfig | None = None,
         direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         # The ARC helper is the action-construction interface (not a rules spoiler), so it ships
-        # under every info_mode. to_png appends an obs->PNG renderer for vision agents.
+        # under every info_mode.
         example = (
             _DIRECT_INTERACTION_EXAMPLE
             if direct_interaction
@@ -485,7 +455,6 @@ class ArcAgiProblem(BaseProblem):
             )
         )
         content = _HELPER.replace("{interaction_example}", example)
-        content += _RENDER_HELPER if helper and helper.to_png else ""
         return [TemplateFile("framework/arc_agi_helper.py", content)]
 
     def secret_modules(self) -> tuple[str, ...]:

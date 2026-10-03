@@ -232,7 +232,6 @@ def _bootstrap_workdir(
         helper_templates=problem.helper_templates(
             task_name,
             info_mode=config.problem.info_mode,
-            helper=config.problem.helper,
             **({"direct_interaction": False} if not protocol.exposes_environment else {}),
         ),
     )

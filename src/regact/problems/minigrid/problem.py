@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from regact.config.schema import HelperConfig, InfoMode, ObsMode
+from regact.config.schema import InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer, jsonify
 from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
@@ -248,11 +248,10 @@ class MiniGridProblem(BaseProblem):
         task_name: str,
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
-        helper: HelperConfig | None = None,
         direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         """Ship the encoding constants in informative modes; minimal mode hands out nothing
-        (the agent must discover the encodings by interaction). ``helper`` is unused here."""
+        (the agent must discover the encodings by interaction)."""
         if info_mode is InfoMode.MINIMAL:
             return []
         return [TemplateFile("framework/minigrid_helper.py", _MINIGRID_HELPER)]

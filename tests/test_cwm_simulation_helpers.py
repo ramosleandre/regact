@@ -38,12 +38,12 @@ def test_inclusive_id_ranges_are_compact_bounded_and_loadable():
 
 def test_new_settings_and_optional_workspace_helpers():
     cfg = CwmConfig.from_mapping({})
-    assert cfg.n_tmp_images_saved_per_exploration == 8 and cfg.workspace_helpers_enabled
+    assert cfg.n_tmp_images_saved_per_exploration == 0 and cfg.workspace_helpers_enabled
     assert (
         CwmConfig.from_mapping(
-            {"n_tmp_images_saved_per_exploration": 0}
+            {"n_tmp_images_saved_per_exploration": 8}
         ).n_tmp_images_saved_per_exploration
-        == 0
+        == 8
     )
     for options in (
         {"n_tmp_images_saved_per_exploration": -1},

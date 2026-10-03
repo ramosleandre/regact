@@ -41,9 +41,10 @@ class Worker:
         runtime: SandboxRuntime = SandboxRuntime.AUTO,
         deny_read: list[str] | None = None,
         task_deadline: Callable[[], float] | None = None,
-        budget_key: str = "protocol.execution.max_seconds_per_controller_call",
+        budget_key: str = "protocol.execution.max_seconds_per_RunController",
         budget_seconds: float | None = None,
         load_model: bool = True,
+        clock: budgets.AgentClock | None = None,
     ) -> None:
         # The subprocess changes cwd to private scratch; bundle paths must survive that.
         bundle = bundle.resolve()
@@ -52,6 +53,8 @@ class Worker:
         self.budget_seconds = budget_seconds
         self.deadline = deadline
         self.task_deadline = task_deadline or (lambda: float("inf"))
+        self.clock = clock
+        self.clock_bound = False  # the next limit is the clock's, not max_seconds_per_call
         self.closed = False
         self.seq = 0
         self.buffer = b""
@@ -113,29 +116,55 @@ class Worker:
         assert self.proc.stdout is not None
         self.selector.register(self.proc.stdout, selectors.EVENT_READ)
         try:
-            reply = self._receive(budgets.deadline(self.config.max_seconds_per_call))
+            spawned = time.monotonic()
+            reply = self._receive(self._next_limit())
             if not reply.get("ready"):
                 raise WorkerError(str(reply.get("error", "worker initialization failed")))
+            self._charge(reply, spawned)
         except BaseException:
             self.close()
             raise
 
+    def _charge(self, reply: dict[str, Any] | None, started: float) -> None:
+        """Charge the clock the submitted-code seconds the worker reports. Submitted code shares
+        that process and could misreport, so the report is clamped to the wall time observed; a
+        callback with no reply (killed at its limit) is charged its whole wall time."""
+        if self.clock is None:
+            return
+        elapsed = time.monotonic() - started
+        reported = (reply or {}).get("seconds")
+        if isinstance(reported, (int, float)) and not isinstance(reported, bool):
+            elapsed = min(max(float(reported), 0.0), elapsed)
+        self.clock.used += elapsed
+
+    def _next_limit(self) -> float:
+        """Wall limit of the next callback: max_seconds_per_call, or what the clock has left."""
+        seconds = budgets.deadline(self.config.max_seconds_per_call, start=0.0)
+        left = self.clock.left() if self.clock is not None else float("inf")
+        self.clock_bound = left < seconds
+        return time.monotonic() + min(seconds, left)
+
+    def _operation_timeout(self) -> WorkerError:
+        error = WorkerError(
+            f"Operation stopped at its deadline ({self.budget_key}={self.budget_seconds:g} seconds; an earlier task deadline or interruption can also stop it)."
+            if self.budget_seconds is not None
+            else "Operation stopped at its deadline.",
+            kind="operation_timeout",
+        )
+        if self.budget_seconds is not None:
+            error.context["budget"] = {
+                "parameter": self.budget_key,
+                "value": self.budget_seconds,
+                "unit": "seconds",
+            }
+        return error
+
     def _remaining(self, limit: float) -> float:
         now = time.monotonic()
         if now >= min(self.deadline, self.task_deadline()):
-            error = WorkerError(
-                f"Operation stopped at its deadline ({self.budget_key}={self.budget_seconds:g} seconds; an earlier task deadline or interruption can also stop it)."
-                if self.budget_seconds is not None
-                else "Operation stopped at its deadline.",
-                kind="operation_timeout",
-            )
-            if self.budget_seconds is not None:
-                error.context["budget"] = {
-                    "parameter": self.budget_key,
-                    "value": self.budget_seconds,
-                    "unit": "seconds",
-                }
-            raise error
+            raise self._operation_timeout()
+        if now >= limit and self.clock_bound:
+            raise self._operation_timeout()
         if now >= limit:
             error = WorkerError(
                 f"Callback exceeded protocol.execution.max_seconds_per_call={budgets.describe(self.config.max_seconds_per_call)} seconds.",
@@ -190,13 +219,15 @@ class Worker:
             raise
 
     def _call(self, op: str, **kwargs: Any) -> Any:
-        limit = budgets.deadline(self.config.max_seconds_per_call)
+        limit = self._next_limit()
         self._remaining(limit)
         self.seq += 1
         request = (canonical({"id": self.seq, "op": op, **kwargs}) + "\n").encode()
         if len(request) > 16 * 1024 * 1024:
             raise WorkerError("worker input exceeds 16 MiB", kind="input_limit")
         assert self.proc.stdin is not None
+        started = time.monotonic()
+        reply = None
         try:
             self._send(request, limit)
             reply = self._receive(limit)
@@ -207,6 +238,8 @@ class Worker:
             return reply["result"]
         except (BrokenPipeError, OSError, ValueError, KeyError) as exc:
             raise WorkerError(f"worker transport error: {exc}") from exc
+        finally:
+            self._charge(reply, started)
 
     def close(self) -> None:
         if self.closed:

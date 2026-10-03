@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from regact.agent.capabilities import ToolProtocol, is_vision_agent
+from regact.agent.capabilities import ToolProtocol
 from regact.config.schema import Lifecycle, RunConfig
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
@@ -116,7 +116,6 @@ def build_prompt(
     helpers = problem.helper_templates(
         task_name,
         info_mode=config.problem.info_mode,
-        helper=config.problem.helper,
         direct_interaction=False,
     )
     tree = workspace_tree([*files, *helpers], {f.relpath for f in helpers}, descriptions)
@@ -126,7 +125,7 @@ def build_prompt(
         WORKSPACE_EXTENSIONS=workspace_extensions.strip() + " " if workspace_extensions else "",
         IMAGE_PREVIEWS=image_preview_instructions(
             options.n_tmp_images_saved_per_exploration,
-            can_view_images=is_vision_agent(config.agent.name, config.agent.base_url),
+            can_view_images=config.agent.vision,
         ),
     )
     workflow = _render(
@@ -157,17 +156,24 @@ def build_prompt(
     )
 
 
+def reset_commands(config, problem):
+    """Reset commands exist only in single_instance: a multi_instance RunController starts from a
+    fresh environment anyway, so a reset there would only spend an action."""
+    if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
+        return problem.reset_commands()
+    return {}
+
+
 def lifecycle_instructions(config, problem):
     if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
         start = "RunController continues from the current live observation, including where initial random collection stopped."
     else:
         start = "Each RunController starts a fresh environment from the initial state."
-    resets = " ".join(
-        f"You can {description[0].lower()}{description[1:].rstrip('.')} with the {name} command."
-        for name, description in problem.reset_commands().items()
+    resets = "".join(
+        f" You can {description[0].lower()}{description[1:].rstrip('.')} with the {name} command."
+        for name, description in reset_commands(config, problem).items()
     )
     return (
         start + " Every call creates a fresh controller; its private memory is not carried over. "
-        "An environment reporting is_done=True stops this controller call. "
-        + resets
+        "An environment reporting is_done=True stops this controller call." + resets
     )

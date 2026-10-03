@@ -9,9 +9,23 @@ import json
 import math
 import resource
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+_now = time.perf_counter  # bound before any submitted code can rebind time.perf_counter
+spent = 0.0  # seconds in submitted code for the current request
+
+
+def agent(fn: Callable[..., Any], *args: Any) -> Any:
+    """Run submitted code, charging its duration to the agent's RunController budget."""
+    global spent
+    started = _now()
+    try:
+        return fn(*args)
+    finally:
+        spent += _now() - started
 
 
 def encode(value: Any) -> Any:
@@ -63,7 +77,7 @@ def decode(value: Any) -> Any:
 
 def immutable_call(fn: Callable[..., Any], value: Any, *args: Any) -> Any:
     before = encode((value, args))
-    result = fn(value, *args)
+    result = agent(fn, value, *args)
     if encode((value, args)) != before:
         raise ValueError("CWM/goal callbacks must not mutate their input")
     return result
@@ -85,7 +99,7 @@ def handle(request: dict[str, Any]) -> Any:
     if op == "step":
         return state_result(immutable_call(step, decode(request["state"]), request["action"]))
     if op == "goal":
-        goal = importlib.import_module("goal")
+        goal = agent(importlib.import_module, "goal")
         state = decode(request["state"])
         achieved = immutable_call(goal.achieved, state)
         utility = (
@@ -103,7 +117,7 @@ def handle(request: dict[str, Any]) -> Any:
             raise ValueError("an achieved goal must have utility 1")
         return {"achieved": achieved, "utility": utility}
     if op == "controller_init":
-        controller = importlib.import_module("controller").get_controller()
+        controller = agent(lambda: importlib.import_module("controller").get_controller())
         if not callable(getattr(controller, "act", None)) or not callable(
             getattr(controller, "is_done", None)
         ):
@@ -112,21 +126,21 @@ def handle(request: dict[str, Any]) -> Any:
             )
         return None
     if op == "is_done":
-        result = controller.is_done(decode(request["state"]))
+        result = agent(controller.is_done, decode(request["state"]))
         if type(result) is not bool:
             raise TypeError("is_done must return bool")
         return result
     if op == "act":
-        return controller.act(decode(request["state"]))
+        return agent(controller.act, decode(request["state"]))
     if op == "completion_reason":
         fn = getattr(controller, "completion_reason", None)
-        result = fn(decode(request["state"])) if callable(fn) else "controller_done"
+        result = agent(fn, decode(request["state"])) if callable(fn) else "controller_done"
         if result not in ("controller_done", "goal_achieved", "plan_exhausted"):
             raise TypeError("invalid completion_reason")
         return result
     if op == "objective":
         fn = getattr(controller, "objective_reached", None)
-        value = fn(decode(request["state"])) if callable(fn) else None
+        value = agent(fn, decode(request["state"])) if callable(fn) else None
         if value is not None and type(value) is not bool:
             raise TypeError("objective_reached must return bool or None")
         return value
@@ -148,11 +162,12 @@ if __name__ == "__main__":
     try:
         with contextlib.redirect_stdout(sys.stderr):
             if len(sys.argv) < 4 or sys.argv[3] == "1":
-                State = importlib.import_module("world_model.model_state").State
-                parse = importlib.import_module("world_model.model_parser").parse
-                render = importlib.import_module("world_model.model_render").render
-                step = importlib.import_module("world_model.model_transition").step
-        wire.write(json.dumps({"ready": True}) + "\n")
+                load = importlib.import_module
+                State = agent(load, "world_model.model_state").State
+                parse = agent(load, "world_model.model_parser").parse
+                render = agent(load, "world_model.model_render").render
+                step = agent(load, "world_model.model_transition").step
+        wire.write(json.dumps({"ready": True, "seconds": spent}) + "\n")
         wire.flush()
     except BaseException as exc:
         wire.write(json.dumps({"error": f"{type(exc).__name__}: {exc}"}) + "\n")
@@ -161,12 +176,17 @@ if __name__ == "__main__":
     controller: Any = None
     for line in sys.stdin:
         request = json.loads(line)
+        spent = 0.0
         try:
             with contextlib.redirect_stdout(sys.stderr):
                 result = handle(request)
-            payload = json.dumps({"id": request["id"], "result": result}, allow_nan=False)
+            payload = json.dumps(
+                {"id": request["id"], "result": result, "seconds": spent}, allow_nan=False
+            )
         except BaseException as exc:
             # Only submitted-code paths go back; no trusted traceback/credentials.
-            payload = json.dumps({"id": request["id"], "error": f"{type(exc).__name__}: {exc}"})
+            payload = json.dumps(
+                {"id": request["id"], "error": f"{type(exc).__name__}: {exc}", "seconds": spent}
+            )
         wire.write(payload + "\n")
         wire.flush()

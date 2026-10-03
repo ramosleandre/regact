@@ -8,7 +8,6 @@ import sys
 
 import pytest
 
-from regact.config.loader import _helper_from
 from regact.config.schema import AgentName
 from regact.protocols.cwm.feedback import present
 from regact.protocols.cwm.session import CwmTool
@@ -130,10 +129,3 @@ def test_image_helper_prints_source_after_success_and_returns_none(rig, capsys):
     for name in ("UpdateCodeWorldModel", "PlanInCWM", "RunController"):
         assert f"{name}: " in help_result.stdout
     assert "request" not in help_result.stdout.lower()
-
-
-def test_cwm_png_default_and_explicit_override():
-    for agent in (AgentName.CODEX, AgentName.CLAUDE):
-        assert _helper_from(None, agent).to_png
-        assert not _helper_from(None, agent, protocol="cwm").to_png
-        assert _helper_from({"to_png": True}, agent, protocol="cwm").to_png

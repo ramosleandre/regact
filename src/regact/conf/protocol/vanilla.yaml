@@ -4,10 +4,10 @@ n_unique_observations_in_initial_collection: 20
 max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
 max_actions_per_exploration: 2500
-n_tmp_images_saved_per_exploration: 8
+n_tmp_images_saved_per_exploration: 0  # >0 needs agent.vision=true
 execution:
   max_seconds_per_call: 5
-  max_seconds_per_controller_call: 90  # < the agents' 120 s shell timeout
+  max_seconds_per_RunController: 90  # < the agents' 120 s shell timeout
   max_memory_mb: 512
 feedback:
   max_counterexamples: 5

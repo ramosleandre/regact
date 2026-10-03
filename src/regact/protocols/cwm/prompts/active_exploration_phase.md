@@ -38,8 +38,6 @@ The result is an indented JSON dictionary. A refusal before starting explains wh
 - `goal_achieved`: your controller's optional goal check, not necessarily game completion. Finishing an action list also does not imply its goal was achieved.
 - Counterexample/diagnostic IDs: evidence to investigate when a check or callback fails.
 
-Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at every new submission, including a refused one; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
-
-## 4. Follow the next phase
+__IMAGE_PREVIEWS__## 4. Follow the next phase
 
 A CWM contradiction (incorrect prediction/reconstruction, state collision or a compactness failure on new evidence) stops the controller call and returns you to **CWM Modeling**. Use the new data to repair and resubmit the CWM. Ordinary exploration completion leaves you in **Active Exploration**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the separate phase notice and the reported error. Controller errors receive worst performance metrics; already recorded experience is retained. A successful subgoal does not end the task unless the full game is solved.

@@ -130,23 +130,11 @@ def test_render_frame_colorizes_grid_for_video() -> None:
 
 
 def test_helper_template_is_import_free() -> None:
-    [tmpl] = _problem().helper_templates("ls20")  # default helper (to_png off)
+    [tmpl] = _problem().helper_templates("ls20")
     assert tmpl.relpath == "framework/arc_agi_helper.py"
     assert "import" not in tmpl.content.split('"""', 2)[-1]  # no imports in the code body
     assert "def complex_action" in tmpl.content
     assert "ACTION6 = 6" in tmpl.content
-    assert "def to_png" not in tmpl.content  # the renderer is opt-in
-
-
-def test_helper_to_png_is_gated_and_game_library_free() -> None:
-    from regact.config.schema import HelperConfig
-
-    [on] = _problem().helper_templates("ls20", helper=HelperConfig(to_png=True))
-    assert "def to_png" in on.content
-    assert "from PIL import Image" in on.content  # lazy image import, not the game engine
-    for secret in ("import arcengine", "import arc_agi"):
-        assert secret not in on.content
-    compile(on.content, "arc_agi_helper.py", "exec")  # the concatenated helper is valid Python
 
 
 def test_build_prompt_informative_vs_minimal() -> None:

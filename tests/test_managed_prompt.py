@@ -17,6 +17,7 @@ from regact.features.base import FeatureContext
 from regact.problems.arc_agi.problem import ArcAgiProblem
 from regact.problems.minigrid.problem import MiniGridProblem
 from regact.protocols.cwm.commands import enabled_commands
+from regact.protocols.managed.prompting import reset_commands
 from regact.protocols.registry import build_protocol
 
 
@@ -41,7 +42,7 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
     prompts = {}
     for name in ("vanilla", "cwm"):
         config = RunConfig(
-            AgentConfig(AgentName.CLAUDE),  # a vision agent: image previews are offered
+            AgentConfig(AgentName.CLAUDE, vision=True),
             ProblemConfig(problem.name, lifecycle=lifecycle),
             protocol=ProtocolConfig(
                 name,
@@ -49,7 +50,7 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
                     "n_tmp_images_saved_per_exploration": image_count,
                     "execution": {
                         "max_seconds_per_call": None,
-                        "max_seconds_per_controller_call": 13,
+                        "max_seconds_per_RunController": 13,
                     },
                 },
             ),
@@ -62,7 +63,7 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
             problem,
             task,
             tool_protocol=dialect,
-            tool_names=[*commands, *problem.reset_commands()],
+            tool_names=[*commands, *reset_commands(config, problem)],
             verbalize_variant="off",
         )
         prompt = prompts[name]
@@ -83,7 +84,9 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
         )
         assert "Every call creates a fresh controller; its private memory is not carried over." in prompt
         assert "An environment reporting is_done=True stops this controller call." in prompt
-        if game == "arc":
+        if lifecycle is Lifecycle.MULTI_INSTANCE:
+            assert "ResetLevel" not in prompt and "ResetEnvironment" not in prompt
+        elif game == "arc":
             assert "You can reset the current ARC level, preserving completed levels with the ResetLevel command." in prompt
             assert "You can reset the whole environment from level 1 with the ResetEnvironment command." in prompt
         else:
@@ -138,3 +141,27 @@ def test_text_only_agent_is_not_told_to_open_images(name):
     )
     assert "image-reading tool" not in prompt
     assert "cannot display images" in prompt
+
+
+@pytest.mark.parametrize("name", ["vanilla", "cwm"])
+def test_text_only_agent_is_never_offered_images(name, tmp_path):
+    config = RunConfig(
+        AgentConfig(AgentName.ALAN),
+        ProblemConfig("minigrid"),
+        protocol=ProtocolConfig(name),
+    )
+    protocol = build_protocol(config)
+    problem = MiniGridProblem(fully_obs=True)
+    prompt = protocol.build_system_prompt(
+        problem,
+        "MiniGrid-Empty-5x5-v0",
+        tool_protocol="client_cli",
+        tool_names=["RunController"],
+        verbalize_variant="off",
+    )
+    assert "Your tools cannot display images" in prompt
+    files = protocol.templates(
+        FeatureContext(problem_name="minigrid", task_name="MiniGrid-Empty-5x5-v0", workdir="")
+    )
+    for f in files:
+        assert "save_image" not in f.content and "image-reading tool" not in f.content, f.relpath

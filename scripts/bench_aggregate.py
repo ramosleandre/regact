@@ -645,7 +645,11 @@ def _run_row(
     }
     if row["protocol"] in _MANAGED_PROTOCOLS:
         execution = (config.get("protocol") or {}).get("execution") or {}
-        managed = _managed_metrics(task_dir, execution.get("max_seconds_per_controller_call"))
+        # Runs before the rename recorded max_seconds_per_controller_call.
+        budget = execution.get(
+            "max_seconds_per_RunController", execution.get("max_seconds_per_controller_call")
+        )
+        managed = _managed_metrics(task_dir, budget)
         row.update(
             managed,
             controller=_classify_controller(_managed_controller_path(task_dir / "workdir")),

@@ -554,7 +554,7 @@ async def test_absolute_deadline_caps_a_budget_that_counts_from_session_start(
     walltime_limit before any turn, however generous the relative budget."""
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(
-        max_turns_per_task=10, max_seconds_per_task=36000, deadline_unix=int(time.time()) - 1
+        max_turns_per_task=10, max_seconds_per_task=36000, experiment_deadline_unix=int(time.time()) - 1
     )
     agent = ScriptedAgent([[TextDelta("never sent"), IterationComplete()]])
     assert await stack.run(agent) == "walltime_limit"
@@ -564,6 +564,6 @@ async def test_absolute_deadline_caps_a_budget_that_counts_from_session_start(
 def test_seconds_left_takes_the_tighter_of_budget_and_deadline() -> None:
     now = int(time.time())
     assert LimitsConfig(max_seconds_per_task=100).seconds_left() == 100
-    assert 0 < LimitsConfig(max_seconds_per_task=100, deadline_unix=now + 50).seconds_left() <= 50
-    assert LimitsConfig(max_seconds_per_task=10, deadline_unix=now + 500).seconds_left() == 10
-    assert 400 < LimitsConfig(deadline_unix=now + 500).seconds_left() <= 500
+    assert 0 < LimitsConfig(max_seconds_per_task=100, experiment_deadline_unix=now + 50).seconds_left() <= 50
+    assert LimitsConfig(max_seconds_per_task=10, experiment_deadline_unix=now + 500).seconds_left() == 10
+    assert 400 < LimitsConfig(experiment_deadline_unix=now + 500).seconds_left() <= 500

@@ -53,23 +53,12 @@ def test_mapping_defaults() -> None:
     assert config.first_obs_in_prompt is False  # the first message carries no obs by default
 
 
-def test_helper_to_png_defaults_to_agent_vision() -> None:
-    def to_png(agent: str, helper: object = "unset") -> bool:
-        problem: dict = {"name": "arc_agi"}
-        if helper != "unset":
-            problem["helper"] = helper
-        return run_config_from_mapping(
-            {"agent": {"name": agent}, "problem": problem}
-        ).problem.helper.to_png
+def test_agent_vision_is_explicit_and_defaults_off() -> None:
+    def vision(agent: dict) -> bool:
+        return run_config_from_mapping({"agent": agent, "problem": {"name": "arc_agi"}}).agent.vision
 
-    # unset -> auto: on for vision agents (Claude/Codex), off for text-only Alan / scripted
-    assert to_png("claude") is True
-    assert to_png("codex") is True
-    assert to_png("alan") is False
-    assert to_png("claude", {"to_png": None}) is True  # null is also "auto"
-    # an explicit value always wins over the vision default
-    assert to_png("alan", {"to_png": True}) is True
-    assert to_png("claude", {"to_png": False}) is False
+    assert vision({"name": "claude"}) is False  # never inferred from the agent name
+    assert vision({"name": "alan", "vision": True}) is True
 
 
 def test_mapping_carries_first_obs_in_prompt() -> None:
@@ -286,25 +275,6 @@ def test_launch_facts_from_env_records_only_what_is_set() -> None:
     assert launch_facts_from_env({"SLURM_JOB_ID": ""}) == {}
 
 
-def test_legacy_max_turns_override_composes_and_wins() -> None:
-    """The ClusterControl launchers still pass ``limits.max_turns=350`` on the CLI: it must
-    compose under Hydra and override the YAML default of the renamed field."""
-    from hydra import compose, initialize_config_dir
-    from omegaconf import OmegaConf
-
-    import regact
-
-    conf_dir = str(Path(regact.__file__).parent / "conf")
-    with initialize_config_dir(version_base=None, config_dir=conf_dir):
-        cfg = compose(
-            config_name="config",
-            overrides=["limits.max_turns=123", "limits.max_tool_calls=300"],
-        )
-    config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
-    assert config.limits.max_turns_per_task == 123
-    assert config.limits.max_tool_calls == 300
-
-
 def test_removed_max_actions_per_env_fails_loudly() -> None:
     with pytest.raises(ValueError, match="max_actions_per_episode"):
         run_config_from_mapping(
@@ -319,14 +289,7 @@ def test_removed_max_actions_per_env_fails_loudly() -> None:
         {
             "agent": {"name": "scripted"},
             "problem": {"name": "minigrid"},
-            "limits": {"max_actions_per_env": None, "max_turns": 9},
+            "limits": {"max_actions_per_env": None, "max_turns_per_task": 9},
         }
     )
     assert old.limits.max_turns_per_task == 9
-
-
-def test_self_hosted_model_gets_no_png_helper_by_default() -> None:
-    base = {"agent": {"name": "claude"}, "problem": {"name": "arc_agi"}}
-    assert run_config_from_mapping(base).problem.helper.to_png is True
-    local = {**base, "agent": {"name": "claude", "base_url": "http://127.0.0.1:8080"}}
-    assert run_config_from_mapping(local).problem.helper.to_png is False

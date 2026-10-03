@@ -1,6 +1,7 @@
 """Lifecycle, reset, fresh-controller and baseline invariants with actual isolated code."""
 
 import concurrent.futures
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,24 @@ from regact.protocols.registry import build_protocol
 from test_cwm_protocol import Native, Problem, exploration, model
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("protocol_name", ["vanilla", "cwm"])
+def test_image_previews_need_a_vision_agent(protocol_name):
+    options = {"n_tmp_images_saved_per_exploration": 2}
+    blind = RunConfig(
+        AgentConfig(AgentName.SCRIPTED),
+        ProblemConfig("fake"),
+        protocol=ProtocolConfig(protocol_name, options),
+    )
+    with pytest.raises(ValueError, match="agent.vision"):
+        build_protocol(blind).validate()
+    sighted = RunConfig(
+        AgentConfig(AgentName.SCRIPTED, vision=True),
+        ProblemConfig("fake"),
+        protocol=ProtocolConfig(protocol_name, options),
+    )
+    build_protocol(sighted).validate()
 
 
 @pytest.mark.parametrize("protocol_name", ["vanilla", "cwm"])
@@ -237,7 +256,7 @@ def test_action_cap_survives_multiple_calls(make_rig, protocol):
 
 @pytest.mark.parametrize("protocol", ["vanilla", "cwm"])
 def test_controller_timeout_preserves_episode_and_next_call_gets_fresh_budget(make_rig, protocol):
-    c = make_rig(protocol, execution={"max_seconds_per_controller_call": 1})
+    c = make_rig(protocol, execution={"max_seconds_per_RunController": 1})
     (c.workdir / "controller.py").write_text(
         '\"\"\"Try one slow action.\"\"\"\n'
         "import time\n"
@@ -254,9 +273,9 @@ def test_controller_timeout_preserves_episode_and_next_call_gets_fresh_budget(ma
     assert result["error_type"] == "operation_timeout"
     feedback = present("RunController", result, c.options, c.config.limits)
     assert feedback["budget"] == {
-        "parameter": "protocol.execution.max_seconds_per_controller_call",
+        "parameter": "protocol.execution.max_seconds_per_RunController",
         "value": 1,
-        "unit": "active execution seconds per RunController call",
+        "unit": "seconds of submitted-code execution per RunController call",
     }
     assert feedback["error"]["budget"] == feedback["budget"]
     assert "reset" not in feedback["message"].lower()
@@ -266,6 +285,42 @@ def test_controller_timeout_preserves_episode_and_next_call_gets_fresh_budget(ma
     result = c.tool("RunController", {})
     assert result["real_actions"] == 1 and result["stop_reason"] == "plan_exhausted", result
     assert c.episode == episode and c.env.live.last_obs.frame[0] == 3
+
+
+@pytest.mark.parametrize("protocol", ["vanilla", "cwm"])
+def test_controller_budget_charges_submitted_code_not_framework_time(
+    make_rig, protocol, monkeypatch
+):
+    c = make_rig(protocol, execution={"max_seconds_per_RunController": 1})
+    exploration(c, (1, 1, 1))
+    step = c._step
+
+    def slow_step(action):  # a slow environment or store, i.e. framework time
+        time.sleep(0.5)
+        return step(action)
+
+    monkeypatch.setattr(c, "_step", slow_step)
+    result = c.tool("RunController", {})
+    assert result["real_actions"] == 3 and result["stop_reason"] == "plan_exhausted", result
+    assert result["timings"]["submitted_code_seconds"] < 1 < result["elapsed_seconds"]
+
+
+@pytest.mark.parametrize("protocol", ["vanilla", "cwm"])
+def test_controller_budget_sums_submitted_code_across_callbacks(make_rig, protocol):
+    c = make_rig(protocol, execution={"max_seconds_per_RunController": 1})
+    (c.workdir / "controller.py").write_text(
+        '\"\"\"Each action is slow, none alone reaches the budget.\"\"\"\n'
+        "import time\n"
+        "class Controller:\n"
+        " def act(self, obs):\n"
+        "  time.sleep(0.4)\n"
+        "  return 1\n"
+        " def is_done(self, obs): return False\n"
+        "def get_controller(): return Controller()\n"
+    )
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] == "controller_call_time_limit", result
+    assert result["real_actions"] == 2
 
 
 def test_call_playback_retains_order_and_repeated_ids(make_rig):

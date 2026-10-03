@@ -10,20 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from regact.config.schema import AgentName
-
-# Backends that can VIEW images, so an obs->PNG helper is worth shipping them. Claude Code and Codex
-# read images natively; Alan Code is text-only; the scripted test backend has no vision.
-_VISION_AGENTS = frozenset({AgentName.CLAUDE, AgentName.CODEX})
-
-
-def is_vision_agent(agent_name: AgentName, base_url: str | None = None) -> bool:
-    """Whether the agent can read images (the default for problem.helper.to_png). A self-hosted
-    model behind ``base_url`` is treated as text-only: a llama.cpp serve without a vision
-    projector rejects every request carrying an image."""
-    return agent_name in _VISION_AGENTS and not base_url
-
-
 # How the agent invokes tools. Selects BOTH the prompt's tool-invocation fragment AND how
 # framework actions (submit/exit) are wired, so no agent is hardcoded anywhere:
 #   "native"     - in-process Python Tool objects (only the scripted test backend); the loop

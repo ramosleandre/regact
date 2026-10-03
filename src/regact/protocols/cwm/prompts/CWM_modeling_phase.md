@@ -49,7 +49,7 @@ Counterexamples include evidence IDs and one of these failure types:
 
 `failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__, with at most __DIFF_ITEMS__ differences per example. `differences_omitted` counts additional differences when there are any. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
-Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs. `save_image(diagnostic_id=..., which="observed", path=...)` and `which="predicted"` help compare images, when the diagnostic contains them. Size errors and code exceptions may have no image; inspect their structured data.
+Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs.__DIAGNOSTIC_IMAGES__
 
 ## Code execution rules
 

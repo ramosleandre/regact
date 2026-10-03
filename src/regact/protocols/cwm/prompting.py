@@ -11,6 +11,7 @@ from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.limits import describe
 from regact.protocols.managed.prompting import build_prompt as build_managed_prompt
+from regact.protocols.managed.prompting import reset_commands
 from regact.workspace.templates import TemplateFile
 
 _PROMPTS = Path(__file__).with_name("prompts")
@@ -41,11 +42,22 @@ _LOCAL_HELPERS = """
 `python simulate.py --max-actions 20` runs controller.py locally and prints each action and State. Edit simulate.py freely to inspect predictions or try different starting states. Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
 
+_IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at every new submission, including a refused one; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
 
-def _render(name: str, options: CwmConfig, **extra: str) -> str:
+"""
+_DIAGNOSTIC_IMAGES = """ `save_image(diagnostic_id=..., which="observed", path=...)` and `which="predicted"` help compare images, when the diagnostic contains them. Size errors and code exceptions may have no image; inspect their structured data."""
+
+
+def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str) -> str:
     """Render only named markers; Python braces inside Markdown remain literal."""
     planner = "PlanInCWM" in enabled_commands(options)
     values = {
+        "IMAGE_PREVIEWS": _IMAGE_PREVIEWS.replace(
+            "__IMAGE_COUNT__", str(options.n_tmp_images_saved_per_exploration)
+        )
+        if vision and options.n_tmp_images_saved_per_exploration
+        else "",
+        "DIAGNOSTIC_IMAGES": _DIAGNOSTIC_IMAGES if vision else "",
         "PLANNING_WORKFLOW": (
             "- **Optional planning.** In Active Exploration, define a goal in `goal.py` and "
             "use `PlanInCWM` to find an action list in the accepted CWM. You can then use "
@@ -67,7 +79,6 @@ def _render(name: str, options: CwmConfig, **extra: str) -> str:
         "INITIAL_TARGET": options.n_unique_observations_in_initial_collection,
         "SIZE_RATIO": options.threshold_max_state_obs_size_ratio,
         "EXPLORATION_ACTIONS": options.max_actions_per_exploration,
-        "IMAGE_COUNT": options.n_tmp_images_saved_per_exploration,
         "CALL_SECONDS": options.execution.max_seconds_per_call,
         "VALIDATION_SECONDS": options.execution.max_seconds_per_UpdateCodeWorldModel,
         "MEMORY_MB": options.execution.max_memory_mb,
@@ -90,11 +101,11 @@ def _render(name: str, options: CwmConfig, **extra: str) -> str:
     return text
 
 
-def workspace_docs(options: CwmConfig) -> Iterator[TemplateFile]:
+def workspace_docs(options: CwmConfig, *, vision: bool) -> Iterator[TemplateFile]:
     for source, destination in _DOCS.items():
         if source == "plan_in_CWM.md" and "PlanInCWM" not in enabled_commands(options):
             continue
-        yield TemplateFile(destination, _render(source, options))
+        yield TemplateFile(destination, _render(source, options, vision=vision))
 
 
 def build_prompt(
@@ -130,7 +141,8 @@ def build_prompt(
         files=templates(
             context,
             options,
-            commands={**enabled_commands(options), **problem.reset_commands()},
+            commands={**enabled_commands(options), **reset_commands(config, problem)},
+            vision=config.agent.vision,
         ),
         descriptions=_DESCRIPTIONS,
         workspace_extensions=workspace_notes,

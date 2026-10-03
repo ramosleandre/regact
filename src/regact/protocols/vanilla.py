@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 
 from regact.features.base import FeatureContext
 from regact.protocols.cwm.config import DataApiConfig, FeedbackConfig
-from regact.protocols.managed.prompting import build_prompt
+from regact.protocols.managed.prompting import build_prompt, reset_commands
 from regact.protocols.managed.protocol import ManagedProtocol
 from regact.protocols.managed.templates import templates as common_templates
 from regact.workspace.templates import TemplateFile
@@ -14,7 +14,7 @@ from regact.workspace.templates import TemplateFile
 @dataclass
 class ExecutionConfig:
     max_seconds_per_call: float | None = 5
-    max_seconds_per_controller_call: float | None = 120
+    max_seconds_per_RunController: float | None = 90
     max_memory_mb: int | None = 512
 
 
@@ -24,7 +24,7 @@ class VanillaConfig:
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
     max_actions_per_exploration: int | None = 2500
-    n_tmp_images_saved_per_exploration: int = 8
+    n_tmp_images_saved_per_exploration: int = 0
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     data_api: DataApiConfig = field(default_factory=DataApiConfig)
@@ -87,15 +87,13 @@ class VanillaProtocol(ManagedProtocol):
             return self.coordinator.commands
         return {
             "RunController": "Run a fresh controller from controller.py.",
-            **(
-                problem.reset_commands()
-                if problem
-                else {"ResetEnvironment": "Restart the environment."}
-            ),
+            **(reset_commands(self.config, problem) if problem else {}),
         }
 
     def templates(self, ctx):
-        yield from common_templates(ctx, self.options, self.commands())
+        yield from common_templates(
+            ctx, self.options, self.commands(), vision=self.config.agent.vision
+        )
         yield TemplateFile("controller.py", CONTROLLER)
 
     def build_system_prompt(
@@ -108,7 +106,9 @@ class VanillaProtocol(ManagedProtocol):
             self.config,
             self.options,
             files=[
-                *common_templates(ctx, self.options, self.commands(problem)),
+                *common_templates(
+                    ctx, self.options, self.commands(problem), vision=self.config.agent.vision
+                ),
                 TemplateFile("controller.py", CONTROLLER),
             ],
             tool_protocol=tool_protocol,

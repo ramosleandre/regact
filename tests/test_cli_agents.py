@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from regact.agent.base import build_agent
-from regact.agent.claude_adapter import ClaudeAgent, claude_deny_settings
+from regact.agent.claude_adapter import ClaudeAgent
 from regact.agent.codex_adapter import CodexAgent
 from regact.agent.events import (
     AgentError,
@@ -544,35 +544,31 @@ async def test_codex_base_url_writes_a_local_responses_provider(tmp_path, monkey
         await agent.close()
 
 
-async def test_self_hosted_model_is_treated_as_text_only(tmp_path, monkeypatch) -> None:
-    """A llama.cpp serve without a vision projector returns HTTP 500 for any request carrying an
-    image (Codex hit it by viewing its own renders), so neither CLI may send one."""
+@pytest.mark.parametrize("vision", [False, True])
+async def test_agent_vision_gates_the_cli_image_tools(tmp_path, monkeypatch, vision) -> None:
+    """A text-only serve returns HTTP 500 for any request carrying an image (Codex hit it by
+    viewing its own renders), so without agent.vision neither CLI may send one."""
     root = tmp_path / "claude-home"
     root.mkdir()
     (root / ".credentials.json").write_text("{}")
-    claude = ClaudeAgent({"claude_home": str(root)})
+    claude = ClaudeAgent({"claude_home": str(root)}, vision=vision)
     cwd = tmp_path / "claude-work"
     cwd.mkdir()
-    await claude.start(
-        cwd=str(cwd), model="m", base_url="http://127.0.0.1:8080", api_key=None, system_prompt=None
-    )
+    await claude.start(cwd=str(cwd), model="m", base_url=None, api_key=None, system_prompt=None)
     try:
         deny = json.loads((cwd / ".claude" / "settings.json").read_text())["permissions"]["deny"]
-        assert "Read(**/*.png)" in deny
+        assert ("Read(**/*.png)" in deny) is not vision
     finally:
         await claude.close()
-    assert "Read(**/*.png)" not in claude_deny_settings(str(cwd))["permissions"]["deny"]
 
-    codex = CodexAgent({"codex_home": str(tmp_path / "codex-home")})
+    codex = CodexAgent({"codex_home": str(tmp_path / "codex-home")}, vision=vision)
     monkeypatch.setattr(codex, "_freshest_auth", lambda: None)
     work = tmp_path / "codex-work"
     work.mkdir()
-    await codex.start(
-        cwd=str(work), model="m", base_url="http://127.0.0.1:8080", api_key=None, system_prompt=None
-    )
+    await codex.start(cwd=str(work), model="m", base_url=None, api_key=None, system_prompt=None)
     try:
         argv, _ = codex._command("go")
-        assert "features.view_image=false" in argv
+        assert ("features.view_image=false" in argv) is not vision
     finally:
         await codex.close()
 

@@ -129,7 +129,7 @@ def test_docs_show_run_values_and_have_no_unresolved_markers():
             "data_api": {"max_items": 7},
         }
     )
-    docs = {f.relpath: f.content for f in workspace_docs(options)}
+    docs = {f.relpath: f.content for f in workspace_docs(options, vision=True)}
     assert "**0.25**" in docs["docs/CWM_modeling_phase.md"]
     assert "unlimited second limit" in docs["docs/CWM_modeling_phase.md"]
     assert not re.search(r"__[A-Z_]+__", "\n".join(docs.values()))

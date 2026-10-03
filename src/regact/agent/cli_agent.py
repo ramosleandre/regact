@@ -37,8 +37,9 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 class _CliAgent(CodeAgent):
     """Base for subprocess CLI agents; subclasses override the three hooks below."""
 
-    def __init__(self, args: dict[str, object] | None = None) -> None:
+    def __init__(self, args: dict[str, object] | None = None, *, vision: bool = False) -> None:
         self._args = dict(args or {})  # backend-specific CLI params (mode, effort, …)
+        self._vision = vision  # agent.vision: False hides the CLI's image tools
         self._cwd: str = ""
         self._model: str | None = None
         self._base_url: str | None = None  # a self-hosted endpoint; None = the CLI's own service

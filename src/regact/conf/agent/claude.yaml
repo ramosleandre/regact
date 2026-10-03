@@ -9,6 +9,9 @@ model: opus
 # agent.args.effort=null (+ agent.args.context_window=<served ctx>).
 base_url: null
 
+# Whether the model reads images; the launcher sets it (true for the subscription models).
+vision: false
+
 args:
   # --permission-mode. bypassPermissions = fully headless (no interactive prompts);
   # the workdir .claude/settings.json deny-list still confines the agent's file reads.

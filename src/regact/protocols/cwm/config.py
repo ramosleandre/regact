@@ -24,7 +24,7 @@ class ExecutionConfig:
     # Below the 120 s the agents' shells (Claude Code, Alan) give one command: a call at its full
     # budget plus cleanup must still return before the shell kills the command that started it.
     max_seconds_per_UpdateCodeWorldModel: float | None = 90
-    max_seconds_per_controller_call: float | None = 90
+    max_seconds_per_RunController: float | None = 90
     max_memory_mb: int | None = 512  # MiB
 
 
@@ -49,7 +49,7 @@ class CwmConfig:
     threshold_max_state_obs_size_ratio: float = 0.5
     cwm_validation_policy: str = "required"
     max_actions_per_exploration: int | None = 2500
-    n_tmp_images_saved_per_exploration: int = 8
+    n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)

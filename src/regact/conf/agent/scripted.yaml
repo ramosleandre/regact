@@ -1,2 +1,3 @@
 # Deterministic test backend (no LLM).
 name: scripted
+vision: false

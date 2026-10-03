@@ -7,8 +7,8 @@ max_seconds_per_initial_collection: 30
 threshold_max_state_obs_size_ratio: 0.5
 cwm_validation_policy: required
 max_actions_per_exploration: 2500
-# Set 0 to disable automatic preview images.
-n_tmp_images_saved_per_exploration: 8
+# PNG previews per RunController; >0 needs agent.vision=true.
+n_tmp_images_saved_per_exploration: 0
 workspace_helpers_enabled: true
 planner:
   enabled: false
@@ -20,7 +20,7 @@ planner:
 execution:
   max_seconds_per_call: 5
   max_seconds_per_UpdateCodeWorldModel: 90  # < the agents' 120 s shell timeout
-  max_seconds_per_controller_call: 90  # < the agents' 120 s shell timeout
+  max_seconds_per_RunController: 90  # < the agents' 120 s shell timeout
   max_memory_mb: 512
 feedback:
   max_counterexamples: 5

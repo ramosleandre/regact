@@ -26,6 +26,11 @@ class ManagedProtocol(ExperimentProtocol):
         self.coordinator = None
 
     def validate(self) -> None:
+        if self.options.n_tmp_images_saved_per_exploration and not self.config.agent.vision:
+            raise ValueError(
+                "protocol.n_tmp_images_saved_per_exploration > 0 needs agent.vision=true: "
+                "a text-only agent cannot read the saved images"
+            )
         if self.config.features:
             raise ValueError(
                 "Managed controller protocols do not compose legacy policy-search features; use features=none"

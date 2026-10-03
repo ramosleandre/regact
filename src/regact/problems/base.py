@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
-from regact.config.schema import HelperConfig, InfoMode, ObsMode
+from regact.config.schema import InfoMode, ObsMode
 from regact.env.renderer import ObsRenderer
 
 if TYPE_CHECKING:
@@ -62,7 +62,6 @@ class BaseProblem(ABC):
         task_name: str,
         *,
         info_mode: InfoMode = InfoMode.INFORMATIVE,
-        helper: HelperConfig | None = None,
         direct_interaction: bool = True,
     ) -> list[TemplateFile]:
         """Game-specific helper files dropped into the agent's workdir.
@@ -70,8 +69,7 @@ class BaseProblem(ABC):
         Distinct from a feature's templates: these are problem-specific (e.g. ARC's
         action-id constants + ``complex_action`` builder). They must never import the game
         library (that would spoil the rules). ``info_mode`` lets a problem withhold
-        game-revealing helpers under ``minimal`` (discover-it-yourself); ``helper`` toggles
-        optional capabilities (e.g. an obs->PNG renderer for vision agents). Default: none.
+        game-revealing helpers under ``minimal`` (discover-it-yourself). Default: none.
         """
         return []
 

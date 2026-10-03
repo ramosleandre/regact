@@ -5,6 +5,9 @@ model: gpt-5.6-luna            # e.g. "gpt-5.6-luna"
 # appended): agent.base_url=http://127.0.0.1:8080 agent.model=<served name>
 # +agent.args.context_window=<served ctx> +agent.args.max_output_tokens=<cap>.
 base_url: null
+
+# Whether the model reads images; the launcher sets it (true for the subscription models).
+vision: false
 args:
   reasoning_effort: high   # low | medium | high
   subagents_enabled: false # true = allow Codex to spawn subagents (e.g. for tool use); false = off

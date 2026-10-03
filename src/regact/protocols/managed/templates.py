@@ -57,10 +57,7 @@ Example from a workspace script:
     print(data_api.summary())
     ids = data_api.list_observation_ids(limit=3)
     observations = data_api.load_observations(ids)  # same order as ids
-    print(observations[0]["available_actions"])
-    data_api.save_image("observation.png", observation_id=ids[0])
-
-If your tools can display images, open observation.png; otherwise analyse the arrays from load_observations. Saving a PNG prints its path and returns None; it does not display the image to you automatically. The function docstrings also cover transition and diagnostic images.
+    print(observations[0]["available_actions"])__IMAGE_EXAMPLE__
 """
 import base64
 from pathlib import Path
@@ -174,7 +171,8 @@ def load_diagnostic(diagnostic_id):
     of the bulk byte cap.
     """
     return _query("diagnostic", id=diagnostic_id)
-
+'''
+SAVE_IMAGE = '''
 
 def save_image(path, *, observation_id=None, transition_id=None, diagnostic_id=None, which=None):
     """Save a PNG, print its source and path, and return None; no real action occurs.
@@ -239,8 +237,16 @@ if __name__ == "__main__":
 '''
 
 
-def templates(ctx, options, commands):
-    for filename, body in (("framework/commands.py", CONTROL), ("framework/data_api.py", DATA)):
+IMAGE_EXAMPLE = """
+    data_api.save_image("observation.png", observation_id=ids[0])
+
+Open observation.png with your image-reading tool. Saving a PNG prints its path and returns None; it does not display the image to you automatically. The function docstrings also cover transition and diagnostic images."""
+
+
+def templates(ctx, options, commands, *, vision):
+    data = DATA.replace("__IMAGE_EXAMPLE__", IMAGE_EXAMPLE if vision else "")
+    data += SAVE_IMAGE if vision else ""
+    for filename, body in (("framework/commands.py", CONTROL), ("framework/data_api.py", data)):
         yield TemplateFile(
             filename,
             body.replace("__BASE_URL__", repr(ctx.env_base_url))

@@ -49,7 +49,7 @@ def claude_deny_settings(
     """
     policy = policy or default_policy()
     deny = [f"Read(**/{sub.rstrip('/')}/**)" for sub in sorted(policy.forbidden_path_substrings)]
-    if deny_images:  # a text-only self-hosted model rejects any request that carries an image
+    if deny_images:  # a text-only model rejects any request that carries an image
         deny += [f"Read(**/*.{suffix})" for suffix in _IMAGE_SUFFIXES]
     return {"permissions": {"deny": deny}}
 
@@ -57,8 +57,8 @@ def claude_deny_settings(
 class ClaudeAgent(_CliAgent):
     """``CodeAgent`` backed by the headless Claude Code CLI."""
 
-    def __init__(self, args: dict[str, object] | None = None) -> None:
-        super().__init__(args)
+    def __init__(self, args: dict[str, object] | None = None, *, vision: bool = False) -> None:
+        super().__init__(args, vision=vision)
         raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
         self._home_root = os.path.realpath(os.path.expanduser(raw_home))
         self._session_home: str | None = None  # this task's fresh config dir (created on demand)
@@ -114,7 +114,7 @@ class ClaudeAgent(_CliAgent):
         os.makedirs(settings_dir, exist_ok=True)
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
             json.dump(
-                claude_deny_settings(self._cwd, deny_images=bool(self._base_url)), handle, indent=2
+                claude_deny_settings(self._cwd, deny_images=not self._vision), handle, indent=2
             )
         self._configure_home()
         if self._base_url:  # an Anthropic-compatible server, e.g. llama.cpp's llama-server

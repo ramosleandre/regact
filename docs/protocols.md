@@ -175,6 +175,6 @@ messages but retains flag recording.
 | `framework/cwm_data.py` | `framework/data_api.py` |
 | `framework/simulation.py` or an agent-owned model environment | `framework/cwm_env.py` plus editable `simulate.py` |
 | Preliminary simulated episode / novelty gate | Direct real execution with per-action checks; local simulation is optional |
-| `protocol.execution.max_seconds_per_episode` | Removed; use `protocol.execution.max_seconds_per_controller_call` |
+| `protocol.execution.max_seconds_per_episode` | Removed; use `protocol.execution.max_seconds_per_RunController` |
 
 Policy search retains its own `solution.py`, `framework/control.py` and evaluation settings. Existing saved runs/workspaces are not rewritten. Historical field names in their logs describe the implementation that produced them. Current limitations and deferred changes are listed in [CWM v5](cwm.md#scientific-and-operational-limitations).

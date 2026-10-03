@@ -13,6 +13,7 @@ from regact.protocols.cwm.planner import plan
 from regact.protocols.cwm.store import canonical
 from regact.protocols.cwm.validation import add_state_size, check_observation, validate
 from regact.protocols.cwm.worker import Worker
+from regact.protocols.managed.prompting import reset_commands
 from regact.protocols.managed.session import (
     EXPLORATION,
     MODEL_FILES,
@@ -29,9 +30,21 @@ class Coordinator(ManagedCoordinator):
     initial_phase = MODELING
     uses_model = True
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Incremental views of self.states, so each real step costs O(1), not O(states).
+        self.state_owner: dict[str, int] = {}  # canonical state -> its observation id
+        self.state_sizes: dict[str, Any] = {}  # add_state_size totals over self.states
+
+    def _index_states(self) -> None:
+        self.state_owner, self.state_sizes = {}, {}
+        for oid, state in self.states.items():
+            self.state_owner.setdefault(canonical(state), oid)
+            add_state_size(self.state_sizes, oid, state, self.store.observation(oid))
+
     @property
     def commands(self):
-        return {**enabled_commands(self.options), **self.problem.reset_commands()}
+        return {**enabled_commands(self.options), **reset_commands(self.config, self.problem)}
 
     def exploration_model(self):
         assert self.accepted is not None
@@ -39,14 +52,10 @@ class Coordinator(ManagedCoordinator):
         require_unchanged_model(self.workdir, model, MODEL_FILES)
         return model
 
-    def open_model(self, stack, model, deadline):
-        worker = stack.enter_context(
-            self.worker(
-                model, self.options.execution.max_seconds_per_controller_call, deadline=deadline
-            )
+    def open_model(self, stack, model, clock):
+        return stack.enter_context(
+            self.worker(model, self.options.execution.max_seconds_per_RunController, clock=clock)
         )
-        worker.deadline = deadline
-        return worker
 
     def controller_input(self, worker, obs):
         return self._model_observation(worker, obs, self.current_id)
@@ -94,6 +103,7 @@ class Coordinator(ManagedCoordinator):
                 "validation": summary,
             }
             self.states = states
+            self._index_states()
             self.change_phase(EXPLORATION, "model_accepted")
             self.event("cwm_accepted", cwm_version=rid)
         return {**summary, "cwm_version": self.accepted["cwm_version"] if self.accepted else None}
@@ -187,16 +197,14 @@ class Coordinator(ManagedCoordinator):
         if canonical(restored) != canonical(obs):
             raise ModelMismatch("reconstruction_mismatch", restored, obs, {"observation_id": oid})
         text = canonical(state)
-        for other, represented in self.states.items():
-            if other != oid and canonical(represented) == text:
-                raise ModelMismatch(
-                    "parser_collision", None, obs, {"observation_ids": [other, oid]}
-                )
+        other = self.state_owner.get(text, oid)
+        if other != oid:
+            raise ModelMismatch("parser_collision", None, obs, {"observation_ids": [other, oid]})
         if oid not in self.states:
             self.states[oid] = state
-        sizes: dict[str, Any] = {}
-        for i, represented in self.states.items():
-            add_state_size(sizes, i, represented, self.store.observation(i))
+            self.state_owner[text] = oid
+            add_state_size(self.state_sizes, oid, state, obs)
+        sizes = dict(self.state_sizes)
         numerator = sizes["state_bytes"]
         denominator = sizes["observation_bytes"]
         if numerator / max(1, denominator) >= self.options.threshold_max_state_obs_size_ratio:

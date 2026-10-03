@@ -19,6 +19,21 @@ def deadline(seconds: float | None, *, start: float | None = None) -> float:
     )
 
 
+class AgentClock:
+    """Seconds spent running submitted code, as the workers measure it, against one budget.
+
+    Framework work in between (real environment steps, the experience store, checks on the
+    trusted side) is not charged: the budget bounds how slow the agent's code is.
+    """
+
+    def __init__(self, seconds: float | None) -> None:
+        self.budget = seconds
+        self.used = 0.0
+
+    def left(self) -> float:
+        return float("inf") if self.budget is None else self.budget - self.used
+
+
 def action_indices(cap: int | None) -> Iterable[int]:
     return itertools.count() if cap is None else range(cap)
 

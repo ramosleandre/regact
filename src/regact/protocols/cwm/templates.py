@@ -10,16 +10,18 @@ from regact.protocols.managed.templates import templates as common_templates
 from regact.workspace.templates import TemplateFile
 
 
-def templates(ctx: FeatureContext, options: CwmConfig | None = None, *, commands=None) -> Iterator[TemplateFile]:
+def templates(
+    ctx: FeatureContext, options: CwmConfig | None = None, *, commands=None, vision: bool = False
+) -> Iterator[TemplateFile]:
     options = options or CwmConfig()
     commands = commands or enabled_commands(options)
-    yield from common_templates(ctx, options, commands)
+    yield from common_templates(ctx, options, commands, vision=vision)
     if options.workspace_helpers_enabled:
         yield TemplateFile("framework/cwm_env.py", CWM_ENV)
         yield TemplateFile("simulate.py", SIMULATE)
     from regact.protocols.cwm.prompting import workspace_docs
 
-    yield from workspace_docs(options)
+    yield from workspace_docs(options, vision=vision)
     yield TemplateFile("world_model/__init__.py", "")
     yield TemplateFile(
         "world_model/model_state.py",

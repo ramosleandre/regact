@@ -31,6 +31,7 @@ from regact.protocols.cwm.images import clear_images, save_preview, select_previ
 from regact.protocols.cwm.store import ExperienceStore, atomic_json, canonical, digest
 from regact.protocols.cwm.validation import differences
 from regact.protocols.cwm.worker import Worker, WorkerError
+from regact.protocols.managed.prompting import reset_commands
 from regact.security.runtime import SandboxRuntime
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -367,27 +368,25 @@ class ManagedCoordinator:
         self,
         bundle: Path,
         seconds: float | None,
-        budget_key: str = "protocol.execution.max_seconds_per_controller_call",
+        budget_key: str = "protocol.execution.max_seconds_per_RunController",
         *,
-        deadline: float | None = None,
+        clock: budgets.AgentClock | None = None,
     ) -> Worker:
+        """``seconds`` bounds the worker's wall time, or with a ``clock`` its submitted-code time."""
         # Game modules can live inside the interpreter prefix; carve them out.
         from regact.orchestration.task import _secret_module_paths
 
         return Worker(
             bundle,
             self.options.execution,
-            deadline=min(
-                self.deadline,
-                budgets.deadline(seconds),
-                deadline if deadline is not None else float("inf"),
-            ),
+            deadline=min(self.deadline, budgets.deadline(None if clock else seconds)),
             runtime=SandboxRuntime(self.config.sandbox_opts.get("backend", "auto")),
             deny_read=_secret_module_paths(self.problem.secret_modules()),
             task_deadline=lambda: self.deadline,
             budget_key=budget_key,
             budget_seconds=seconds,
             load_model=self.uses_model,
+            clock=clock,
         )
 
     def data(self, body: dict[str, Any]) -> Any:
@@ -507,7 +506,7 @@ class ManagedCoordinator:
     def commands(self):
         return {
             "RunController": "Run a fresh controller from controller.py.",
-            **self.problem.reset_commands(),
+            **reset_commands(self.config, self.problem),
         }
 
     def reset_environment(self, kind):
@@ -542,7 +541,7 @@ class ManagedCoordinator:
     def exploration_model(self):
         return None
 
-    def open_model(self, stack, model, deadline):
+    def open_model(self, stack, model, clock):
         return None
 
     def controller_input(self, worker, obs):
@@ -623,24 +622,17 @@ class ManagedCoordinator:
             call_started = time.monotonic()
             self.step_timings = {}
             worker = controller = None
+            clock = budgets.AgentClock(self.options.execution.max_seconds_per_RunController)
             try:
-                deadline = min(
-                    self.deadline,
-                    budgets.deadline(
-                        self.options.execution.max_seconds_per_controller_call,
-                        start=call_started,
-                    ),
-                )
                 with ExitStack() as stack:
-                    worker = self.open_model(stack, model, deadline)
+                    worker = self.open_model(stack, model, clock)
                     controller = stack.enter_context(
                         self.worker(
                             bundle,
-                            self.options.execution.max_seconds_per_controller_call,
-                            deadline=deadline,
+                            self.options.execution.max_seconds_per_RunController,
+                            clock=clock,
                         )
                     )
-                    controller.deadline = deadline
                     role = "controller"
                     controller.call("controller_init")
                     for _ in budgets.action_indices(self.options.max_actions_per_exploration):
@@ -673,8 +665,9 @@ class ManagedCoordinator:
                         result["observation_sequence"].append(self.current_id)
                         result["transition_sequence"].append(evidence["transition_id"])
                         result["new_milestones"].extend(evidence.get("new_milestones", []))
-                        if digest(obs) not in known:
-                            known.add(digest(obs))
+                        fingerprint = digest(obs)
+                        if fingerprint not in known:
+                            known.add(fingerprint)
                             result["actual_novel_observations"] += 1
                         if self.terminal == "observation_determinism_violation":
                             reason = self.terminal or "interrupted"
@@ -729,12 +722,12 @@ class ManagedCoordinator:
                 result["error_context"] = dict(getattr(exc, "context", {}))
                 if reason == "controller_call_time_limit":
                     result["error_context"]["budget"] = {
-                        "parameter": "protocol.execution.max_seconds_per_controller_call",
-                        "value": self.options.execution.max_seconds_per_controller_call,
-                        "unit": "active execution seconds per RunController call",
+                        "parameter": "protocol.execution.max_seconds_per_RunController",
+                        "value": self.options.execution.max_seconds_per_RunController,
+                        "unit": "seconds of submitted-code execution per RunController call",
                     }
                     result["error"] = (
-                        "This controller call reached its active execution time limit."
+                        "This controller call used up its submitted-code time limit."
                     )
 
                 if (
@@ -755,6 +748,7 @@ class ManagedCoordinator:
                 result["history_complete"] = False
             result["elapsed_seconds"] = time.monotonic() - call_started
             result["timings"] = {
+                "submitted_code_seconds": clock.used,
                 **self.step_timings,
                 **{
                     f"{name}_close_seconds": proc.close_seconds
@@ -866,7 +860,7 @@ class ManagedCoordinator:
                         self.event("image_preview_error", error=preview_error)
                 if self._limit():
                     raise ValueError(self.terminal)
-                if name in self.problem.reset_commands():
+                if name in reset_commands(self.config, self.problem):
                     response = self.reset_environment(
                         "level" if name == "ResetLevel" else "environment"
                     )

@@ -39,7 +39,7 @@ print(obs["available_actions"])
 data_api.save_image("current.png", observation_id=obs_id)
 ```
 
-A vision agent then opens `current.png` with its own image-reading tool; a text-only agent is told to analyse the arrays instead. Dataset reads and image creation take no game actions. The default `first_obs_in_prompt=false` keeps the initial grid out of the first message.
+With `agent.vision=true` the agent opens `current.png` with its own image-reading tool. A text-only agent (the default) gets no `save_image` and is told to analyse the arrays instead. Dataset reads and image creation take no game actions. The default `first_obs_in_prompt=false` keeps the initial grid out of the first message.
 
 ### 3. Implement a controller
 
@@ -92,7 +92,7 @@ Command results are indented JSON, with separate phase notices when relevant. Th
 
 `actual_novel_observations` counts new complete observations. Novelty is a signal, not a requirement to execute the controller or proof of useful progress. `new_milestones` highlights first-time real events. Within an observation, `info["milestones"]` describes the preceding action's events, not cumulative achievement.
 
-When enabled, previews are written to `tmp/images/obs_id_<ID>.png`. At most `protocol.n_tmp_images_saved_per_exploration` images are selected from the first and last distinct observations encountered. The folder is emptied on every new `RunController`, including refused calls. The underlying dataset is retained.
+When enabled (it needs `agent.vision=true`), previews are written to `tmp/images/obs_id_<ID>.png`. At most `protocol.n_tmp_images_saved_per_exploration` images are selected from the first and last distinct observations encountered. The folder is emptied on every new `RunController`, including refused calls. The underlying dataset is retained.
 
 ### 6. End the call or end the task
 
@@ -117,7 +117,7 @@ ARC's `info.state="GAME_OVER"` is game metadata. The generic framework uses `is_
 | `ResetLevel` | Restart the current level, preserving completed levels | Not available |
 | `ResetEnvironment` | Restart from level 1 | Restart the environment |
 
-Invoke them with `python framework/commands.py ResetLevel` or `ResetEnvironment`, without arguments. Each successful explicit reset consumes **one task action**, starts a recorded episode, and renews the episode action allowance. It does not clear the dataset or replenish task budgets. Reset boundaries are not ordinary CWM transition examples.
+They exist only in `single_instance`: in `multi_instance` every `RunController` starts from a fresh environment, so the commands are neither offered nor described. Invoke them with `python framework/commands.py ResetLevel` or `ResetEnvironment`, without arguments. Each successful explicit reset consumes **one task action**, starts a recorded episode, and renews the episode action allowance. It does not clear the dataset or replenish task budgets. Reset boundaries are not ordinary CWM transition examples.
 
 CWM permits resets in either phase. A new reset observation requires validation; an already validated one does not cause redundant validation. ARC `RESET` is rejected as a controller action: use the explicit commands. Separate ARC reset scopes currently depend on its offline/local engine.
 
@@ -168,9 +168,9 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 | `protocol.max_actions_per_initial_collection` | `1000` | Initial random steps |
 | `protocol.max_seconds_per_initial_collection` | `30` | Initial collection wall time |
 | `protocol.max_actions_per_exploration` | `2500` | Real actions in one `RunController`; the name remains for compatibility |
-| `protocol.n_tmp_images_saved_per_exploration` | `8` | Maximum automatic previews per call; `0` disables them |
+| `protocol.n_tmp_images_saved_per_exploration` | `0` | Maximum automatic previews per call; above `0` requires `agent.vision=true` |
 | `protocol.execution.max_seconds_per_call` | `5` | One isolated callback/startup, including communication and serialization |
-| `protocol.execution.max_seconds_per_controller_call` | `90` | One `RunController` execution, including submitted-code startup and CWM/controller computation; below the agents' 120 s shell timeout |
+| `protocol.execution.max_seconds_per_RunController` | `90` | Time spent in submitted code during one `RunController`: CWM and controller callbacks plus their module imports. Environment steps, the experience store and framework checks are not charged |
 | `protocol.execution.max_memory_mb` | `512` | MiB per isolated submitted-code process |
 | `protocol.feedback.max_counterexamples` | `5` | Counterexamples included in CWM feedback; shared schema, normally unused by vanilla |
 | `protocol.feedback.max_diff_items` | `6` | Structural differences displayed per comparison |
@@ -189,9 +189,10 @@ Each `RunController` gets a fresh time allowance. **There is no accumulated time
 | `limits.max_tool_calls` | `null` | Agent tool calls per task; one framework command can contain many real steps |
 | `limits.max_turns_per_task` | `350` | Outer Regact send cycles, not backend-internal messages |
 | `limits.max_seconds_per_task` | `null` | Whole-task wall time, including preparation and agent work |
+| `limits.experiment_deadline_unix` | `null` | Absolute end (UNIX seconds) shared by every task of the launch, e.g. the scheduler job's end minus a margin; caps `max_seconds_per_task` |
 | `limits.max_actions_per_task` | `null` | Real steps plus explicit resets across the task |
 | `limits.max_actions_per_episode` | `null` | Real steps since the latest reset |
-| `limits.max_consecutive_no_tool_turns` | `0` | Stop after this many consecutive outer turns without tools; `0`/`null` disable it |
+| `limits.max_consecutive_no_tool_turns` | `15` | Stop after this many consecutive outer turns without tools; `0`/`null` disable it |
 | `first_obs_in_prompt` | `false` | Add the first observation to the initial agent message |
 | `flagging_warning_cap` | `3` | Maximum delivered suspicious-command warnings; `0` hides warnings, not recorded flags |
 

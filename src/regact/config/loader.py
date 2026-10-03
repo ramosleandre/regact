@@ -8,17 +8,14 @@ config) keeps it simple and avoids ``StrEnum`` round-trip surprises.
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Mapping
 from typing import Any
 
-from regact.agent.capabilities import is_vision_agent
 from regact.config.schema import (
     AgentConfig,
     AgentName,
     ControllerConfig,
-    HelperConfig,
     InfoMode,
     Lifecycle,
     LimitsConfig,
@@ -27,8 +24,6 @@ from regact.config.schema import (
     ProtocolConfig,
     RunConfig,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
@@ -45,11 +40,6 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         return int(value)
 
     fields: dict[str, Any] = dict(raw)
-    # Old launchers still pass limits.max_turns; when set it wins over the YAML default.
-    legacy_turns = fields.pop("max_turns", None)
-    if legacy_turns is not None:
-        logger.warning("limits.max_turns is deprecated, use limits.max_turns_per_task")
-        fields["max_turns_per_task"] = legacy_turns
     if fields.pop("max_actions_per_env", None) is not None:
         raise ValueError(
             "limits.max_actions_per_env was removed: use limits.max_actions_per_episode, "
@@ -62,32 +52,11 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         "max_seconds_per_task",
         "max_actions_per_episode",
         "max_actions_per_task",
-        "deadline_unix",
+        "experiment_deadline_unix",
     ):
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
-
-
-def _helper_from(
-    raw: Any,
-    agent_name: AgentName,
-    *,
-    protocol: str = "policy_search",
-    base_url: str | None = None,
-) -> HelperConfig:
-    """Build ``HelperConfig`` from the ``problem.helper`` block.
-
-    ``to_png`` unset (absent or null) defaults to the agent's vision capability, so an ad-hoc
-    ``agent=claude problem=arc_agi`` run gets the obs->PNG helper without a bench-script override,
-    while a text-only Alan run does not. CWM defaults it off because its data API
-    exports stored observations. An explicit true/false always wins.
-    """
-    d = dict(raw or {})
-    to_png = d.get("to_png")
-    sees = is_vision_agent(agent_name, base_url)
-    resolved = sees and protocol != "cwm" if to_png is None else bool(to_png)
-    return HelperConfig(to_png=resolved)
 
 
 def _sandbox_bool(value: Any) -> bool:
@@ -168,6 +137,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             base_url=agent.get("base_url"),
             api_key=agent.get("api_key"),
             args=dict(agent.get("args") or {}),
+            vision=bool(agent.get("vision", False)),
         ),
         problem=ProblemConfig(
             name=str(problem["name"]),
@@ -176,12 +146,6 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             obs_mode=ObsMode(problem.get("obs_mode", ObsMode.RAW)),
             info_mode=InfoMode(problem.get("info_mode", InfoMode.INFORMATIVE)),
             seed=problem.get("seed"),
-            helper=_helper_from(
-                problem.get("helper"),
-                AgentName(agent["name"]),
-                protocol=_protocol_from(data.get("protocol")).name,
-                base_url=agent.get("base_url"),
-            ),
             kwargs=dict(problem.get("kwargs") or {}),
         ),
         protocol=_protocol_from(data.get("protocol")),

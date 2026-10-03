@@ -37,8 +37,8 @@ from regact.agent.usage import codex_usage
 class CodexAgent(_CliAgent):
     """``CodeAgent`` backed by the headless codex CLI."""
 
-    def __init__(self, args: dict[str, object] | None = None) -> None:
-        super().__init__(args)
+    def __init__(self, args: dict[str, object] | None = None, *, vision: bool = False) -> None:
+        super().__init__(args, vision=vision)
         # Run codex against a generated, isolated home rather than the user's ~/.codex, so
         # the session is reproducible and carries no ambient user config. Kept outside the
         # per-run workdir so the auth token stays out of run artifacts. Override via
@@ -189,7 +189,7 @@ class CodexAgent(_CliAgent):
             argv += ["-c", "features.multi_agent_v2=false"]
         if self._model:
             argv += ["-m", self._model]
-        if self._base_url:  # a text-only self-hosted model rejects any request carrying an image
+        if not self._vision:  # a text-only model rejects any request carrying an image
             argv += ["-c", "features.view_image=false"]
         if self._args.get("reasoning_effort"):
             argv += ["-c", f"model_reasoning_effort={self._args['reasoning_effort']}"]

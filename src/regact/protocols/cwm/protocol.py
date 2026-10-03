@@ -21,7 +21,7 @@ class CwmProtocol(ManagedProtocol):
 
     def templates(self, ctx: FeatureContext) -> Iterator[TemplateFile]:
         commands = self.coordinator.commands if self.coordinator else enabled_commands(self.options)
-        yield from templates(ctx, self.options, commands=commands)
+        yield from templates(ctx, self.options, commands=commands, vision=self.config.agent.vision)
 
     def build_system_prompt(
         self,

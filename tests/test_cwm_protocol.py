@@ -95,7 +95,7 @@ def rig(tmp_path, request):
     if detect() is SandboxRuntime.NONE:
         pytest.skip("CWM requires an OS sandbox")
     cfg = RunConfig(
-        AgentConfig(AgentName.SCRIPTED),
+        AgentConfig(AgentName.SCRIPTED, vision=True),  # the image tests read save_image
         ProblemConfig("fake", seed=0),
         protocol=ProtocolConfig(
             "cwm",
@@ -238,6 +238,21 @@ def test_plan_real_exploration_and_replay(rig):
     assert playback.load(c.output, "episode", result["episode_id"])["frames"] == 5
     assert playback.frame(c.output, "episode", result["episode_id"], 4)["obs"]["frame"][0] == 4
     assert c.phase == "Active Exploration"
+
+
+def test_incremental_state_index_matches_a_full_recompute(rig):
+    from regact.protocols.cwm.store import canonical
+    from regact.protocols.cwm.validation import add_state_size
+
+    c, _ = rig
+    accept(c)
+    exploration(c)
+    assert c.tool("RunController", {})["real_actions"] == 4
+    full: dict = {}
+    for oid, state in c.states.items():
+        add_state_size(full, oid, state, c.store.observation(oid))
+    assert c.state_sizes == full and len(c.states) == 5
+    assert c.state_owner == {canonical(state): oid for oid, state in c.states.items()}
 
 
 def test_first_mismatch_recorded_then_requires_repair(rig):

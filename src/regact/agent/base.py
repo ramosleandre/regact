@@ -188,9 +188,9 @@ def build_agent(config: AgentConfig) -> CodeAgent:
     if config.name is AgentName.CLAUDE:
         from regact.agent.claude_adapter import ClaudeAgent
 
-        return ClaudeAgent(config.args)
+        return ClaudeAgent(config.args, vision=config.vision)
     if config.name is AgentName.CODEX:
         from regact.agent.codex_adapter import CodexAgent
 
-        return CodexAgent(config.args)
+        return CodexAgent(config.args, vision=config.vision)
     raise ValueError(f"unknown agent {config.name!r}")

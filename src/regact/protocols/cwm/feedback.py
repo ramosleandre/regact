@@ -38,7 +38,7 @@ REASONS = {
     "plan_exhausted": "The action list finished.",
     "controller_done": "The controller requested the end of this exploration.",
     "goal_achieved": "The controller's goal predicate is true in the real environment.",
-    "controller_call_time_limit": "This controller call reached its active execution time limit.",
+    "controller_call_time_limit": "This controller call used up its submitted-code time limit.",
     "environment_done": "The environment ended the episode. Use an available reset command before continuing.",
     "reset_environment": "The environment restarted from its initial state.",
     "reset_level": "The current level restarted; completed levels are preserved.",
@@ -93,9 +93,9 @@ def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | 
             "seconds per task",
         ),
         "controller_call_time_limit": (
-            "protocol.execution.max_seconds_per_controller_call",
-            c.execution.max_seconds_per_controller_call,
-            "active execution seconds per RunController call",
+            "protocol.execution.max_seconds_per_RunController",
+            c.execution.max_seconds_per_RunController,
+            "seconds of submitted-code execution per RunController call",
         ),
         "search_memory_limit": (
             "protocol.execution.max_memory_mb",
