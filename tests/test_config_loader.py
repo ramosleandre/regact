@@ -293,3 +293,12 @@ def test_removed_max_actions_per_env_fails_loudly() -> None:
         }
     )
     assert old.limits.max_turns_per_task == 9
+
+
+def test_alan_remote_under_network_isolation_fails_at_launch() -> None:
+    remote = {"name": "alan", "model": "remote", "args": {"backend": "scripted"}}
+    base = {"agent": remote, "problem": {"name": "arc_agi"}, "sandbox": True}
+    with pytest.raises(ValueError, match="network_isolation=false"):
+        run_config_from_mapping(base)
+    open_net = {**base, "sandbox_opts": {"network_isolation": False}}
+    assert run_config_from_mapping(open_net).agent.model == "remote"

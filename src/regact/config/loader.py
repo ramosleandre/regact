@@ -130,7 +130,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
     """Map a plain ``{agent, problem, limits, ...}`` mapping to a ``RunConfig``."""
     agent = dict(data.get("agent") or {})
     problem = dict(data.get("problem") or {})
-    return RunConfig(
+    config = RunConfig(
         agent=AgentConfig(
             name=AgentName(agent["name"]),
             model=agent.get("model"),
@@ -163,3 +163,10 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         output_root=str(data.get("output_root", "experiments")),
         launch=dict(data.get("launch") or {}),
     )
+    remote = config.agent.model == "remote" and config.agent.args.get("backend") == "scripted"
+    if remote and config.sandbox and config.sandbox_opts.get("network_isolation", True):
+        raise ValueError(
+            "agent=alan_remote needs sandbox_opts.network_isolation=false: its HTTP endpoint "
+            "listens inside the sandbox's network namespace, which the host cannot reach"
+        )
+    return config
