@@ -25,7 +25,7 @@ class ExecutionConfig:
     # command's wall time adds framework work, so the agent's shell timeout must cover both.
     max_seconds_per_UpdateCodeWorldModel: float | None = 90
     max_seconds_per_RunController: float | None = 90
-    max_memory_mb: int | None = 512  # MiB
+    max_memory_mb: int | None = 2048  # MiB
 
 
 @dataclass

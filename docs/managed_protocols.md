@@ -171,7 +171,7 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 | `protocol.n_tmp_images_saved_per_exploration` | `0` | Maximum automatic previews per call; above `0` requires `agent.vision=true` |
 | `protocol.execution.max_seconds_per_call` | `5` | One isolated callback/startup, including communication and serialization |
 | `protocol.execution.max_seconds_per_RunController` | `90` | Time spent in submitted code during one `RunController`: CWM and controller callbacks plus their module imports. Environment steps, the experience store and framework checks are not charged |
-| `protocol.execution.max_memory_mb` | `512` | MiB per isolated submitted-code process |
+| `protocol.execution.max_memory_mb` | `2048` | MiB per isolated submitted-code process |
 | `protocol.feedback.max_counterexamples` | `5` | Counterexamples included in CWM feedback; shared schema, normally unused by vanilla |
 | `protocol.feedback.max_diff_items` | `6` | Structural differences displayed per comparison |
 | `protocol.feedback.max_error_chars` | `1000` | Error text length; truncation preserves beginning and end |

@@ -15,7 +15,7 @@ from regact.workspace.templates import TemplateFile
 class ExecutionConfig:
     max_seconds_per_call: float | None = 5
     max_seconds_per_RunController: float | None = 90
-    max_memory_mb: int | None = 512
+    max_memory_mb: int | None = 2048
 
 
 @dataclass

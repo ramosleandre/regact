@@ -21,7 +21,7 @@ execution:
   max_seconds_per_call: 5
   max_seconds_per_UpdateCodeWorldModel: 90  # seconds of submitted code per validation
   max_seconds_per_RunController: 90  # < the agents' 120 s shell timeout
-  max_memory_mb: 512
+  max_memory_mb: 2048
 feedback:
   max_counterexamples: 5
   max_diff_items: 6
