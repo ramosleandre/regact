@@ -23,7 +23,9 @@ class ExecutionConfig:
     max_seconds_per_call: float | None = 5  # wall time of one callback
     # The two command budgets count only time in submitted code (see limits.AgentClock). The
     # command's wall time adds framework work, so the agent's shell timeout must cover both.
+    # A validation gets the larger of the two, so long recorded runs are not refused for length.
     max_seconds_per_UpdateCodeWorldModel: float | None = 90
+    max_seconds_per_UpdateCodeWorldModel_per_1000_steps: float | None = 30
     max_seconds_per_RunController: float | None = 90
     max_memory_mb: int | None = 2048  # MiB
 

@@ -3,7 +3,9 @@
 CWM_ENV = r'''"""Local environment backed by your current workspace CWM; no real actions.
 
 EnvCWM(initial_state=state) never queries the dataset.
-make_cwm_env() reads the next controller's starting observation once and parses it.
+make_cwm_env() starts where the next controller starts (replaying the live chain in
+single_instance). replay_episode(episode_id) shows where your CWM first diverges from a
+recorded episode.
 For an editable controller loop with printed states/actions, see simulate.py.
 Local simulation does not validate or accept code. Submit changed CWM code with
 UpdateCodeWorldModel before using RunController.
@@ -58,21 +60,88 @@ class EnvCWM:
 
 
 def make_cwm_env(obs_mode=False, initial_state=None):
-    """Create EnvCWM. Without State, read/parse the next controller's start once.
+    """Create EnvCWM starting where the next RunController will start, unless a State is given.
 
-    This is the live observation in single_instance and the original starting
-    observation in multi_instance. See data_api.summary() for both IDs.
-
-    This factory is for workspace scripts, not submitted callbacks. Passing a
-    State skips data access entirely. Further resets never query the dataset.
+    single_instance: the current State, rebuilt by replaying the live chain through your
+    workspace CWM (parse its first observation, then step through every recorded action).
+    multi_instance: parse(initial observation). This factory is for workspace scripts, not
+    submitted callbacks. Further resets never query the dataset.
     """
     if initial_state is None:
-        from framework.data_api import summary, load_observations
-        from world_model import model_parser
-        oid = summary()["controller_start_observation_id"]
-        initial_state = model_parser.parse(load_observations([oid])[0])
+        from framework import data_api
+        summary = data_api.summary()
+        if summary["lifecycle"] == "single_instance":
+            initial_state = replay_episode(summary["episode_id"], quiet=True)["state"]
+        else:
+            from world_model import model_parser
+            obs = data_api.load_observations([summary["initial_observation_id"]])[0]
+            initial_state = model_parser.parse(obs)
     return EnvCWM(obs_mode=obs_mode, initial_state=initial_state)
 
+
+def replay_episode(episode_id, quiet=False):
+    """Replay a recorded episode through your WORKSPACE CWM, as UpdateCodeWorldModel does, and
+    report the first divergence. Replays the whole chain up to that episode: parse its first
+    observation, step through every action, and at an explicit reset call your optional
+    reset(state, kind) hook (or parse the reset observation). Returns a dict: diverged (bool),
+    episode_id, step (actions applied in that episode; 0 = its first observation), state (the
+    State there; on divergence, the State that rendered wrong) and, on divergence, state_before,
+    predicted, observed and differences (up to 20). Prints a short report unless quiet."""
+    from framework import data_api
+    from world_model import model_parser, model_render, model_transition
+    episodes = data_api.list_episodes()
+    target = next(e for e in episodes if e["episode_id"] == episode_id)
+    chain = [e for e in episodes if e["chain_id"] == target["chain_id"] and e["episode_id"] <= episode_id]
+    reset = getattr(model_transition, "reset", None)
+    state = None
+    for segment in chain:
+        observations, actions = data_api.load_history(segment["episode_id"])
+        before = state
+        if segment["continues_episode"] is not None and callable(reset) and state is not None:
+            state = reset(state, segment["started_by"].removeprefix("reset_"))
+        else:
+            state = model_parser.parse(deepcopy(observations[0]))
+        result = _compare(segment["episode_id"], 0, before, state, observations[0], quiet)
+        if result:
+            return result
+        for t, action in enumerate(actions, start=1):
+            before = state
+            state = model_transition.step(state, deepcopy(action))
+            result = _compare(segment["episode_id"], t, before, state, observations[t], quiet)
+            if result:
+                return result
+    if not quiet:
+        print(f"Episode {episode_id}: your CWM reproduces every recorded observation.")
+    return {"diverged": False, "episode_id": episode_id, "step": len(actions), "state": state}
+
+
+def _compare(episode_id, step, before, state, observed, quiet):
+    from world_model import model_render
+    predicted = model_render.render(state)
+    if predicted == observed:
+        return None
+    diffs = []
+    def visit(a, b, path):
+        if len(diffs) >= 20:
+            return
+        if isinstance(a, dict) and isinstance(b, dict):
+            for key in sorted(set(a) | set(b), key=str):
+                visit(a.get(key, "<missing>"), b.get(key, "<missing>"), f"{path}.{key}")
+        elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+            for i, (x, y) in enumerate(zip(a, b)):
+                visit(x, y, f"{path}[{i}]")
+        elif a != b:
+            diffs.append({"path": path.lstrip("."), "predicted": a, "observed": b})
+    visit(predicted, observed, "")
+    if not quiet:
+        print(f"Episode {episode_id}, step {step}: first divergence ({len(diffs)} differences shown).")
+        print(f"State before: {before!r}")
+        for d in diffs:
+            print(f"  {d['path']}: predicted {d['predicted']!r}, observed {d['observed']!r}")
+    return {
+        "diverged": True, "episode_id": episode_id, "step": step, "state": state,
+        "state_before": before, "predicted": predicted, "observed": observed, "differences": diffs,
+    }
 '''
 
 SIMULATE = r'''"""Edit this script to inspect your controller in the current workspace CWM.

@@ -192,7 +192,7 @@ def test_data_api_module_docstring_example_runs(rig, monkeypatch, capsys):  # no
     monkeypatch.setitem(sys.modules, "framework", package)
     monkeypatch.setitem(sys.modules, "framework.data_api", module)
     monkeypatch.chdir(c.workdir)
-    example = module.__doc__.split("Example from a workspace script:\n", 1)[1].split("\n\n", 1)[0]
+    example = module.__doc__.split("Example:\n", 1)[1].split("\n\n", 1)[0]
     exec(textwrap.dedent(example), {})
     assert (c.workdir / "observation.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert "Image of observation" in capsys.readouterr().out

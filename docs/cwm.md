@@ -49,9 +49,11 @@ The system prompt gives the workflow and actual file inventory. The generated ph
 | File | Definition | Purpose |
 |---|---|---|
 | `world_model/model_state.py` | `State` | A compact representation, usually a dataclass |
-| `world_model/model_parser.py` | `parse(obs) -> State` | Extract a State from a complete observation dictionary |
+| `world_model/model_parser.py` | `parse(obs) -> State` | Build the State from the **first** observation of a chain |
 | `world_model/model_render.py` | `render(state) -> dict` | Reconstruct the complete observation |
-| `world_model/model_transition.py` | `step(state, action) -> State` | Predict the State after one problem-format action |
+| `world_model/model_transition.py` | `step(state, action) -> State` | Predict the State after one problem-format action, carrying hidden state too; optional `reset(state, kind)` for explicit resets |
+
+Since v6, **parse is called on the first observation of a chain only; step carries everything else, including what the screen does not show.** A chain starts at a fresh environment start (the run start in single_instance, each RunController in multi_instance). Explicit resets continue the chain through the optional `reset(state, kind)` hook, or re-parse the reset observation without it. This lets a CWM model hidden state, such as a budget counter shown at lower resolution than it counts, which a function of the current observation alone cannot.
 
 Normal package imports work, for example `from world_model.model_state import State`. Callbacks must be repeatable and must not mutate their inputs. `step` predicts the environment; it does not contact it.
 
@@ -63,28 +65,28 @@ States can contain JSON-compatible values, tuples and instances of classes defin
 python framework/commands.py UpdateCodeWorldModel
 ```
 
-The command has no arguments. It snapshots the current CWM and static local Python imports, then checks every unique observation and transition in the dataset.
-
-For a recorded observation `o` and transition `(o, a, o_next)`:
+The command has no arguments. It snapshots the current CWM and static local Python imports, then replays every recorded chain in time order:
 
 ```text
-Reconstruction: render(parse(o)) == o
-Prediction:     render(step(parse(o), a)) == o_next
-Injectivity:    different observations must have different serialized States
-Repeatability:  identical callback inputs must produce identical outputs
+state = parse(o_0)                          render(state) == o_0
+for each recorded (a_t, o_t):  state = step(state, a_t)   render(state) == o_t
+at an explicit reset:          state = reset(state, kind) (or parse(o_reset))   render(state) == o_reset
+Repeatability: identical callback inputs must produce identical outputs (chain starts, every 10th step)
 ```
+
+A chain stops at its first divergence, since the State after it is unreliable; validation reports one counterexample per diverging chain. Chains that share a start and an action prefix (multi_instance replays) reuse the validated States of the shared prefix. The agent-code budget is the larger of `max_seconds_per_UpdateCodeWorldModel` and `max_seconds_per_UpdateCodeWorldModel_per_1000_steps` per 1,000 recorded steps.
 
 Equality covers the **complete observation**: `frame`, `reward`, `is_done`, `available_actions` and `info`, including nested values, dimensions and list order. JSON dictionary key order does not matter. A correct-looking image can still have incorrect reward or metadata.
 
 The compactness condition is:
 
 ```text
-sum(serialized State bytes over unique observations)
+sum(serialized State bytes over the validated States)
 --------------------------------------------------- < protocol.threshold_max_state_obs_size_ratio
-sum(serialized observation bytes over the same set)
+sum(serialized observation bytes they render)
 ```
 
-The default threshold is **0.5**, strictly. This is a ratio of totals, not the average of per-observation ratios and not a separate cap on each State. On failure, feedback includes the smallest/largest state sizes and their observation IDs. Python source/constants are not counted in this ratio.
+The default threshold is **0.5**, strictly. The ratio of the single largest State must also stay below it, so States that grow along a chain fail. On failure, feedback includes the smallest/largest state sizes and their observation IDs. Python source/constants are not counted in this ratio.
 
 ### Interpret validation feedback
 
@@ -94,11 +96,11 @@ The default threshold is **0.5**, strictly. This is a ratio of totals, not the a
 | `Refused` | Validation finished with failed checks; inspect counterexamples and repair |
 | `Incomplete` | Validation could not finish, for example due to code/resource errors |
 
-`checked` reports how much evidence was processed, not only successful checks. `cwm_version` identifies the accepted frozen code and `dataset_version` the evidence checked. These are identifiers, not scores; version numbers can have gaps. A refused/incomplete replacement does not replace the previously accepted snapshot.
+`checked` reports how much evidence was processed, not only successful checks. `cwm_version` identifies the accepted frozen code and `dataset_version` the evidence checked. These are identifiers, not scores; `cwm_version` counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement does not replace the previously accepted snapshot.
 
-Failure types include reconstruction or prediction mismatches, parser collisions, compression failure, and non-repeatable CWM callbacks. Feedback points to observation/transition/diagnostic IDs. Structural differences are bounded by `protocol.feedback.max_diff_items`; `differences_omitted` appears only when additional differences exist. Full diagnostic evidence remains readable through the data API.
+Failure types include reconstruction mismatches (a chain start), prediction mismatches (the carried State stopped matching; named by episode and step), compression failure, and non-repeatable CWM callbacks. Feedback points to episode/step/observation/transition/diagnostic IDs. `data_api.load_history(episode_id)` gives the recorded order, and `cwm_env.replay_episode(episode_id)` replays it through the workspace CWM. Structural differences are bounded by `protocol.feedback.max_diff_items`; `differences_omitted` appears only when additional differences exist. Full diagnostic evidence remains readable through the data API.
 
-A separate phase message announces transitions. The agent can run real controllers only during Active Exploration. Editing accepted CWM files or their imported dependencies requires another successful validation before real execution. Editing only a controller or local test script does not, unless the CWM itself imports that file.
+A `phase_change` field in the command result announces transitions. The agent can run real controllers only during Active Exploration. Editing accepted CWM files or their imported dependencies requires another successful validation before real execution. Editing only a controller or local test script does not, unless the CWM itself imports that file.
 
 ## Active Exploration
 
@@ -110,11 +112,11 @@ python framework/commands.py RunController
 
 There is **no preliminary simulated episode and no novelty requirement** for real execution. For each action, the framework:
 
-1. Parses the actual observation using the accepted CWM and checks its reconstruction, distinctness and size.
+1. Gives the controller the current State: `parse(starting observation)` in multi_instance, or the State carried across calls in single_instance (caught up through any explicit reset since, checked against its observation). After an acceptance, that carried State is the end of validation's replay of the live chain.
 2. Checks whether the fresh controller wants to stop; otherwise calls `act(state)`.
-3. Computes the CWM's predicted successor observation.
+3. Computes the CWM's next State with `step` and its predicted observation with `render`.
 4. Executes the real action and records the actual transition.
-5. Compares predicted and actual observations, then checks the new observation's State representation.
+5. Compares predicted and actual observations; on a match the predicted State becomes the current State and its size is checked.
 
 A prediction computation error prevents that action from being taken. A wrong prediction is detected **after** the real action, so its consequence remains in the live environment and the evidence is retained.
 
@@ -122,7 +124,7 @@ The first CWM contradiction stops the call and returns the agent to CWM Modeling
 
 New observations can reveal a contradiction, but a familiar predicted observation can also be useful evidence. Neither `actual_novel_observations` nor the controller's `goal_achieved` is an external measure of game success. The problem supplies performance metrics and the full-game completion predicate.
 
-Explicit reset commands work in either phase. An unseen reset observation requires validation; resets themselves are recorded episode boundaries, not transition examples the CWM must predict. See [reset semantics](managed_protocols.md#explicit-resets).
+Explicit reset commands work in either phase. The next RunController checks the reset observation against the carried State (`reset` hook) or `parse`; a mismatch returns the agent to CWM Modeling. See [reset semantics](managed_protocols.md#explicit-resets).
 
 ## Local simulation
 
@@ -131,7 +133,7 @@ The optional `framework/cwm_env.py` exposes `EnvCWM` and `make_cwm_env`. The edi
 ```python
 from framework.cwm_env import make_cwm_env
 
-env = make_cwm_env()  # parse the next real controller's starting observation
+env = make_cwm_env()  # the State the next real controller starts from
 state = env.reset()
 # action = ...       # choose a valid game action for this State
 # next_state = env.step(action)
@@ -169,6 +171,7 @@ For shared collection, execution, data, feedback and task settings, see the [com
 | `protocol.cwm_validation_policy` | `required` | Only implemented policy; validation cannot currently be disabled |
 | `protocol.workspace_helpers_enabled` | `true` | Supply local environment helpers and `simulate.py` |
 | `protocol.execution.max_seconds_per_UpdateCodeWorldModel` | `90` | Time spent in submitted code during one validation: world-model callbacks plus their module imports. Store reads and comparisons are not charged |
+| `protocol.execution.max_seconds_per_UpdateCodeWorldModel_per_1000_steps` | `30` | The same budget per 1,000 recorded steps; a validation gets the larger of the two, so long runs are not refused for length |
 | `protocol.planner.enabled` | `false` | Expose planner command, goal template and guide |
 | `protocol.planner.algorithm` | `bfs` | Only implemented search algorithm |
 | `protocol.planner.max_seconds_per_planner_call` | `30` | Whole planner operation, including startup and goal evaluation |
@@ -190,7 +193,7 @@ Read feedback and metadata alongside pictures: images alone do not show reward m
 
 - **Acceptance is in-sample consistency.** Passing all checks does not prove the rules generalize. A CWM can memorize observed cases in Python constants. Isolation prevents runtime database access, but cannot prevent the agent embedding previously read data. The size ratio measures State encoding, not conceptual quality or source complexity.
 - **Novelty is not understanding.** A timer or combinatorial visual change can produce many unique observations without learning a new mechanism. Evaluate task progress, hypotheses tested and successful repairs alongside novelty.
-- **The observation must determine the next observation given an action.** CWM v5 models `next_obs = f(obs, action)`, not hidden state or observation/action history. If the same complete observation/action pair produces different successors, the framework stops with `observation_determinism_violation`; this can be an interface limitation rather than an agent failure.
+- **The game must be deterministic given its history.** Since v6 the State carried by `step` can hold hidden state, so the same observation and action may legitimately lead to different successors. The framework stops with `observation_determinism_violation` only when the same chain history (same start, same actions, resets included) and the same action lead to different results: genuine randomness.
 - **MiniGrid's fully observed grid is not a complete predictive state.** Its hidden step counter can affect terminal reward and truncation. Two paths can reach the same exposed observation and then get different reward from the same action. `fully_obs=true` does not fix this; CWM–MiniGrid comparisons need this limitation accounted for. ARC games can also contain hidden state; observation determinism is not guaranteed for every game.
 - **Search and compute affect the experiment.** BFS can spend its budget enumerating a large action space; default planning is off. CWM overhead differs from vanilla even at identical real-action budgets.
 - **Exploration scores are not held-out evaluation.** Neither CWM nor vanilla runs an independent final policy test. Best observed progress is not evidence of robust performance across new seeds.

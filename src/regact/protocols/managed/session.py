@@ -93,7 +93,6 @@ class ManagedCoordinator:
         self.step_timings: dict[str, float] = {}  # per RunController call; see _note_timing
         self.context: ProtocolContext | None = None
         self.accepted: dict[str, Any] | None = None
-        self.states: dict[int, Any] = {}
         self.latest: dict[str, Any] | None = None
         self.best: dict[str, Any] | None = None
         self.closed = False
@@ -412,6 +411,7 @@ class ManagedCoordinator:
             if op == "summary":
                 value = {
                     "phase": self.phase,
+                    "lifecycle": self.config.problem.lifecycle.value,
                     "initial_observation_id": self.initial_id,
                     "current_observation_id": self.current_id,
                     "controller_start_observation_id": self.current_id
@@ -433,7 +433,35 @@ class ManagedCoordinator:
             elif op == "observations":
                 value = [self.store.observation(int(i)) for i in ids]
             elif op == "transitions":
-                value = [self.store.transition(int(i)) for i in ids]
+                value = [_public_transition(self.store.transition(int(i))) for i in ids]
+            elif op == "episodes":
+                value = [
+                    {
+                        "episode_id": e["episode_id"],
+                        "started_by": e["purpose"],
+                        "chain_id": e["chain_id"],
+                        "continues_episode": e["continues"],
+                        "start_observation_id": e["initial_obs_id"],
+                        "n_steps": e["n_steps"],
+                        "live": e["episode_id"] == self.episode,
+                    }
+                    for e in self.store.episodes()
+                ]
+            elif op == "history":
+                episode = body.get("episode_id")
+                upto = body.get("step")
+                if type(episode) is not int or (upto is not None and type(upto) is not int):
+                    raise ValueError("episode_id must be an integer, and step an integer or null")
+                start = next(
+                    (e for e in self.store.episodes() if e["episode_id"] == episode), None
+                )
+                if start is None:
+                    raise ValueError(f"unknown episode ID {episode}")
+                steps = self.store.episode_steps(episode)[:upto]
+                value = {
+                    "observation_ids": [start["initial_obs_id"], *(i["after_obs_id"] for i in steps)],
+                    "actions": [i["action"] for i in steps],
+                }
             elif op == "diagnostic":
                 value = self.store.get_diagnostic(int(body["id"]))
             elif op == "image":
@@ -510,10 +538,11 @@ class ManagedCoordinator:
         try:
             obs = env.reset_explicit(kind, seed=self.config.problem.seed).to_json()
             self.reset_actions += 1
-            if self.episode is not None:
-                self.store.finish_episode(self.episode, "reset_" + kind, {})
+            previous = self.episode
+            if previous is not None:
+                self.store.finish_episode(previous, "reset_" + kind, {})
             self.episode, self.current_id = self.store.start_episode(
-                obs, "reset_" + kind, {"previous_observation_id": before}
+                obs, "reset_" + kind, {"previous_observation_id": before}, continues=previous
             )
         except Exception:
             self.terminal = "environment_or_storage_failure"
@@ -528,6 +557,9 @@ class ManagedCoordinator:
         }
 
     def after_reset(self):
+        pass
+
+    def begin_exploration(self):
         pass
 
     def exploration_model(self):
@@ -613,6 +645,7 @@ class ManagedCoordinator:
             role = "model"
             call_started = time.monotonic()
             self.step_timings = {}
+            self.begin_exploration()
             worker = controller = None
             clock = budgets.AgentClock(self.options.execution.max_seconds_per_RunController)
             try:
@@ -955,6 +988,18 @@ class ManagedCoordinator:
                 finally:
                     self.store.close()
                     self.closed = True
+
+
+def _public_transition(t: dict[str, Any]) -> dict[str, Any]:
+    """The data API's transition record, with the key names agents expect."""
+    return {
+        "transition_id": t["transition_id"],
+        "observation_id": t["before_obs_id"],
+        "action": t["action"],
+        "next_observation_id": t["after_obs_id"],
+        "observation": t["o"],
+        "next_observation": t["o_next"],
+    }
 
 
 class ModelMismatch(Exception):

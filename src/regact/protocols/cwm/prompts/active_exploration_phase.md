@@ -9,7 +9,7 @@ Put a short, plain-text description of the experiment in the file's **module doc
 - `act(state)`: return one action in the game's format, using a CWM State as input.
 - `is_done(state)`: return True to stop this exploration before its next action. The default False is valid: the game ending or an action/time limit can stop it. Add an earlier stopping condition when it suits your experiment.
 
-The controller may retain internal memory. Each real exploration starts with a fresh controller instance. Real observations are parsed into States by the accepted CWM before being passed to your controller. __CONTROLLER_KINDS__ cannot query the dataset or the live environment themselves.
+The controller may retain internal memory. Each real exploration starts with a fresh controller instance. Your controller receives the State carried by the accepted CWM: parsed at the start of a chain, then advanced by `step` and checked against every real observation. __CONTROLLER_KINDS__ cannot query the dataset or the live environment themselves.
 
 Optional `objective_reached(state) -> bool` reports whether your particular goal was achieved. It is independent of `is_done`: stopping because a list ran out does not establish success. You do not need this optional method to submit a controller.
 
@@ -21,10 +21,10 @@ Run `python framework/commands.py RunController` with no arguments. The command 
 
 There is no preliminary simulated episode or predicted-novelty requirement. The command follows the task lifecycle described in your instructions: it continues the live environment in single-instance mode and starts fresh in multi-instance mode. At each step:
 
-1. Parse the actual observation into a CWM State, then check whether the controller wants to stop.
-2. Obtain an action from `act(state)` and compute the CWM's predicted next observation.
-3. Execute the action in the real environment, record the transition and compare the actual observation with the prediction.
-4. Check reconstruction, distinct states and compactness on the new observation. Stop at the first contradiction, controller completion, game end or limit.
+1. Give the current State to the controller and check whether it wants to stop. The first State is `parse(starting observation)` in multi-instance mode, or the State carried from earlier calls in single-instance mode (through any explicit reset since, which is checked against its observation).
+2. Obtain an action from `act(state)` and compute the CWM's next State with `step` and its predicted observation with `render`.
+3. Execute the action in the real environment, record the transition and compare the actual observation with the prediction. If they match, the predicted State becomes the current State; compactness is checked on it.
+4. Stop at the first contradiction, controller completion, game end or limit.
 
 If the CWM cannot compute a prediction, the action is not executed: repair the reported error and revalidate. An incorrect prediction is recorded as a counterexample after executing the action.
 
@@ -40,4 +40,4 @@ The result is an indented JSON dictionary. A refusal before starting explains wh
 
 __IMAGE_PREVIEWS__## 4. Follow the next phase
 
-A CWM contradiction (incorrect prediction/reconstruction, state collision or a compactness failure on new evidence) stops the controller call and returns you to **CWM Modeling**. Use the new data to repair and resubmit the CWM. Ordinary exploration completion leaves you in **Active Exploration**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the result's `phase_change` field and the reported error. Controller errors receive worst performance metrics; already recorded experience is retained. A successful subgoal does not end the task unless the full game is solved.
+A CWM contradiction (incorrect prediction or reconstruction, or a compactness failure on new evidence) stops the controller call and returns you to **CWM Modeling**. Use the new data to repair and resubmit the CWM. Ordinary exploration completion leaves you in **Active Exploration**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the result's `phase_change` field and the reported error. Controller errors receive worst performance metrics; already recorded experience is retained. A successful subgoal does not end the task unless the full game is solved.

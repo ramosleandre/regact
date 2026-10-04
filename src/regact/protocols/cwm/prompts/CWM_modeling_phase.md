@@ -9,25 +9,32 @@ If framework tools are available directly, invoke them by name. Otherwise use th
 | File in `world_model/` | Required definition | Meaning |
 |---|---|---|
 | `model_state.py` | `State` | Your compact state representation, preferably a dataclass. |
-| `model_parser.py` | `parse(obs) -> State` | Extract that state from a complete observation dictionary. |
+| `model_parser.py` | `parse(obs) -> State` | Build the State from the **first** observation of a chain (see below). It is not called on later observations. |
 | `model_render.py` | `render(state) -> dict` | Reconstruct the complete observation dictionary. |
-| `model_transition.py` | `step(state, action) -> State` | Predict the state after one game-format action. |
+| `model_transition.py` | `step(state, action) -> State` | Predict the State after one game-format action. It must carry everything later observations depend on, including what the screen does not show. |
 
 Use normal workspace imports, e.g. `from world_model.model_state import State` or `from world_model.model_parser import parse`; Regact makes the workspace root importable in scripts and submitted code. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
 
 The complete observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. Preserve all of them, including nested metadata, frame shape and list order. JSON dictionary key order is irrelevant. Read data dictionaries rather than inferring all fields from PNGs. `obs["info"]["milestones"]` lists events produced by the action leading to this observation; an empty list means no event. The list is not cumulative.
 
+## How the State is carried
+
+**parse is called on the first observation only; step must carry everything else, including what the screen does not show.** A *chain* starts at a fresh environment start: the run start in single-instance mode, each RunController in multi-instance mode. From there, the State only evolves through `step`. Explicit resets (ResetLevel, ResetEnvironment) are part of the chain: if `model_transition.py` defines the optional `reset(state, kind) -> State` (`kind` is `"level"` or `"environment"`), the State continues through the reset; otherwise the reset observation is parsed again.
+
+Example of hidden state: a budget bar with 64 cells for a budget of 75 clicks, where a click blocked by a wall still spends budget. One frame cannot tell how many clicks are left, so `parse` cannot know it. Keep a `clicks` field in the State: `parse` sets it at the start of a level (full bar), `step` adds 1 on every click (blocked ones included), and `render` draws the bar from it.
+
+Your controller receives the State carried this way: the model's belief, not something read from the screen. A hidden field that is wrong but has not yet shown up on screen misleads the controller until a contradiction reveals it.
+
 States may use JSON-compatible values, tuples and instances of classes defined in submitted Python modules. Dictionary keys cannot begin with `@` (reserved encoding). Use compact fields and reusable rules/constants rather than keeping a full grid in every State. Serialized state size includes class/field names; it is not Python source size or process memory.
 
 ## 2. Submit for validation
 
-Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It reads your current `world_model/` code and checks all recorded evidence:
+Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It reads your current `world_model/` code and replays every recorded chain in time order:
 
-1. **Reconstruction:** `render(parse(obs))` equals the complete `obs`.
-2. **Prediction:** for every recorded `(obs, action, next_obs)`, `render(step(parse(obs), action))` equals `next_obs`.
-3. **Distinct states:** distinct observations cannot parse to the same State.
-4. **Repeatability:** callbacks give the same results on repeated identical inputs.
-5. **Compactness:** `sum(serialized State bytes) / sum(serialized observation bytes)` over the unique observations must be strictly below **__SIZE_RATIO__**. This is a ratio of totals, not a separate threshold on each observation.
+1. **Chain start:** `state = parse(first observation)` (or `reset(state, kind)` at an explicit reset when you define it), and `render(state)` must equal that observation.
+2. **Every recorded action:** `state = step(state, action)`, and `render(state)` must equal the next recorded observation. A chain stops at its first divergence: the State after it is unreliable.
+3. **Repeatability:** callbacks give the same results on repeated identical inputs (checked on chain starts and every 10th step).
+4. **Compactness:** `sum(serialized State bytes) / sum(serialized observation bytes)` must be strictly below **__SIZE_RATIO__**, and so must the ratio of the single largest State. States that grow along a chain (visited sets, action logs) fail.
 
 ## 3. Use the result
 
@@ -37,19 +44,18 @@ Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It re
 | `Refused` | Checks finished but some failed. | Inspect evidence, revise the CWM, submit again. |
 | `Incomplete` | Validation could not finish, e.g. a code error or timeout. | Fix the reported error or expensive computation, then retry. |
 
-`checked` counts processed observations/transitions, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores: cwm_version counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
+`checked` counts the chains and steps processed, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores: cwm_version counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
 
 Counterexamples include evidence IDs and one of these failure types:
 
-- `reconstruction_mismatch`: information was lost or rendered incorrectly.
-- `prediction_mismatch`: the predicted successor disagreed with the recorded one.
-- `parser_collision`: two different observations share a State.
-- `compression_ratio`: the aggregate representation is too large; size feedback includes the smallest/largest state and their observation IDs to help inspect it.
+- `reconstruction_mismatch`: `render` does not reproduce a chain's first observation (after `parse`, or after `reset`).
+- `prediction_mismatch`: the State carried by `step` stopped matching a recorded observation. It names the `episode_id` and `step` (actions applied in that episode). The real mistake can be earlier, when a hidden field went wrong before it showed on screen.
+- `compression_ratio`: States are too large on average or for one State; size feedback includes the smallest/largest State and their observation IDs.
 - `non_deterministic_model`: identical callback inputs produced different outputs.
 
 `failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__, with at most __DIFF_ITEMS__ differences per example. `differences_omitted` counts additional differences when there are any. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
-Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs.__DIAGNOSTIC_IMAGES__
+Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs. To see what happened in order, use `data_api.list_episodes()` and `data_api.load_history(episode_id)`.__REPLAY_HELPER____DIAGNOSTIC_IMAGES__
 
 ## Code execution rules
 

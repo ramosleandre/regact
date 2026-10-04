@@ -98,6 +98,10 @@ def handle(request: dict[str, Any]) -> Any:
         return immutable_call(render, decode(request["state"]))
     if op == "step":
         return state_result(immutable_call(step, decode(request["state"]), request["action"]))
+    if op == "reset":
+        if reset is None:
+            raise ValueError("this CWM defines no reset(state, kind) hook")
+        return state_result(immutable_call(reset, decode(request["state"]), request["kind"]))
     if op == "goal":
         goal = agent(importlib.import_module, "goal")
         state = decode(request["state"])
@@ -158,6 +162,7 @@ if __name__ == "__main__":
         resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
     # Mirror the agent workspace: one root, ordinary package imports, one State class.
     sys.path.insert(0, str(BUNDLE))
+    reset = None
     wire = sys.stdout
     try:
         with contextlib.redirect_stdout(sys.stderr):
@@ -166,8 +171,13 @@ if __name__ == "__main__":
                 State = agent(load, "world_model.model_state").State
                 parse = agent(load, "world_model.model_parser").parse
                 render = agent(load, "world_model.model_render").render
-                step = agent(load, "world_model.model_transition").step
-        wire.write(json.dumps({"ready": True, "seconds": spent}) + "\n")
+                transition = agent(load, "world_model.model_transition")
+                step = transition.step
+                reset = getattr(transition, "reset", None)
+                reset = reset if callable(reset) else None
+        wire.write(
+            json.dumps({"ready": True, "seconds": spent, "reset_hook": reset is not None}) + "\n"
+        )
         wire.flush()
     except BaseException as exc:
         wire.write(json.dumps({"error": f"{type(exc).__name__}: {exc}"}) + "\n")

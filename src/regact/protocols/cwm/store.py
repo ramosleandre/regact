@@ -20,6 +20,10 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def _link(*parts: str) -> str:
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
+
 def atomic_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -51,10 +55,12 @@ class ExperienceStore:
                 INTEGER REFERENCES observations(id), UNIQUE(before_id,action_id,after_id));
             CREATE TABLE IF NOT EXISTS episodes(id INTEGER PRIMARY KEY, initial_obs_id INTEGER
                 REFERENCES observations(id), purpose TEXT, metadata TEXT, status TEXT,
-                stop_reason TEXT, result TEXT);
+                stop_reason TEXT, result TEXT, chain_id INTEGER, continues INTEGER,
+                start_hash TEXT);
             CREATE TABLE IF NOT EXISTS step_events(id INTEGER PRIMARY KEY, episode_id INTEGER
                 REFERENCES episodes(id), step_index INTEGER, transition_id INTEGER REFERENCES
-                transitions(id), UNIQUE(episode_id,step_index));
+                transitions(id), prev_hash TEXT, chain_hash TEXT,
+                UNIQUE(episode_id,step_index));
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, timestamp REAL, kind TEXT,
                 phase TEXT, payload TEXT);
             CREATE TABLE IF NOT EXISTS records(id INTEGER PRIMARY KEY, kind TEXT NOT NULL,
@@ -66,6 +72,7 @@ class ExperienceStore:
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT OR IGNORE INTO meta VALUES('dataset_version','0');
             CREATE INDEX IF NOT EXISTS event_episode ON step_events(episode_id,step_index);
+            CREATE INDEX IF NOT EXISTS event_history ON step_events(prev_hash);
         """)
 
     def _intern(self, table: str, value: Any) -> int:
@@ -88,20 +95,55 @@ class ExperienceStore:
             "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='dataset_version'"
         )
 
+    def _hash_of(self, table: str, row_id: int) -> str:
+        return str(self.db.execute(f"SELECT hash FROM {table} WHERE id=?", (row_id,)).fetchone()[0])
+
+    def last_hash(self, episode: int) -> str:
+        """The chain hash after the episode's latest step: what happened since the chain began."""
+        row = self.db.execute(
+            "SELECT chain_hash FROM step_events WHERE episode_id=? ORDER BY step_index DESC LIMIT 1",
+            (episode,),
+        ).fetchone()
+        if row is not None:
+            return str(row[0])
+        return str(
+            self.db.execute("SELECT start_hash FROM episodes WHERE id=?", (episode,)).fetchone()[0]
+        )
+
     def start_episode(
-        self, obs: dict[str, Any], purpose: str, metadata: dict[str, Any]
+        self,
+        obs: dict[str, Any],
+        purpose: str,
+        metadata: dict[str, Any],
+        *,
+        continues: int | None = None,
     ) -> tuple[int, int]:
+        """Start an episode: a fresh chain, or with ``continues`` (an explicit reset) the next
+        segment of that episode's chain, so the chain hash keeps covering what came before."""
         with self.db:
             oid = self._intern("observations", obs)
+            obs_hash = self._hash_of("observations", oid)
+            if continues is None:
+                chain, start = None, _link("start", obs_hash)
+            else:
+                chain = int(
+                    self.db.execute(
+                        "SELECT chain_id FROM episodes WHERE id=?", (continues,)
+                    ).fetchone()[0]
+                )
+                start = _link(self.last_hash(continues), purpose, obs_hash)
             cursor = self.db.execute(
                 (
-                    "INSERT INTO episodes(initial_obs_id,purpose,metadata,status) VALU"
-                    "ES(?,?,?,'running')"
+                    "INSERT INTO episodes(initial_obs_id,purpose,metadata,status,chain_id,"
+                    "continues,start_hash) VALUES(?,?,?,'running',?,?,?)"
                 ),
-                (oid, purpose, canonical(metadata)),
+                (oid, purpose, canonical(metadata), chain, continues, start),
             )
+            episode = int(cursor.lastrowid or 0)
+            if chain is None:
+                self.db.execute("UPDATE episodes SET chain_id=? WHERE id=?", (episode, episode))
             self._bump()  # resets, including repeated ones, are part of the evidence boundary
-            return int(cursor.lastrowid or 0), oid
+            return episode, oid
 
     def record_step(
         self, episode: int, before: dict[str, Any], action: Any, after: dict[str, Any]
@@ -127,19 +169,26 @@ class ExperienceStore:
                     "SELECT COUNT(*) FROM step_events WHERE episode_id=?", (episode,)
                 ).fetchone()[0]
             )
-            cur = self.db.execute(
-                "INSERT INTO step_events(episode_id,step_index,transition_id) VALUES(?,?,?)",
-                (episode, step, tid),
+            prev = self.last_hash(episode)
+            chain_hash = _link(
+                prev, self._hash_of("actions", a), self._hash_of("observations", n)
             )
+            # The same chain history and action that once led elsewhere: genuine randomness.
+            # (The same screen leading elsewhere is expected when the game has hidden state.)
             witnesses = [
                 dict(row)
                 for row in self.db.execute(
                     """SELECT s.id event_id,s.episode_id,t.id transition_id,t.after_id
-                FROM transitions t JOIN step_events s ON s.transition_id=t.id
-                WHERE t.before_id=? AND t.action_id=? AND t.after_id<>? ORDER BY s.id LIMIT 1""",
-                    (b, a, n),
+                FROM step_events s JOIN transitions t ON s.transition_id=t.id
+                WHERE s.prev_hash=? AND t.action_id=? AND t.after_id<>? ORDER BY s.id LIMIT 1""",
+                    (prev, a, n),
                 )
             ]
+            cur = self.db.execute(
+                "INSERT INTO step_events(episode_id,step_index,transition_id,prev_hash,chain_hash) "
+                "VALUES(?,?,?,?,?)",
+                (episode, step, tid, prev, chain_hash),
+            )
             self._bump()
             return {
                 "event_id": cur.lastrowid,
@@ -148,6 +197,7 @@ class ExperienceStore:
                 "transition_id": tid,
                 "before_obs_id": b,
                 "after_obs_id": n,
+                "chain_hash": chain_hash,
                 "conflicting_witnesses": witnesses,
             }
 
@@ -231,6 +281,29 @@ class ExperienceStore:
             (episode_id,),
         ).fetchall()
         return [int(row[0]), *[int(item[1]) for item in rows]], [int(item[0]) for item in rows]
+
+    def episodes(self) -> list[dict[str, Any]]:
+        """Every episode in start order, with its chain and its number of recorded steps."""
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT e.id episode_id,e.purpose,e.chain_id,e.continues,e.initial_obs_id,"
+                "e.start_hash,(SELECT COUNT(*) FROM step_events s WHERE s.episode_id=e.id) n_steps "
+                "FROM episodes e ORDER BY e.id"
+            )
+        ]
+
+    def episode_steps(self, episode_id: int) -> list[dict[str, Any]]:
+        """The episode's recorded steps in time order: action, resulting observation, hashes."""
+        return [
+            {**dict(row), "action": json.loads(row["action"])}
+            for row in self.db.execute(
+                "SELECT s.step_index,s.transition_id,t.after_id after_obs_id,s.chain_hash,"
+                "a.payload action FROM step_events s JOIN transitions t ON t.id=s.transition_id "
+                "JOIN actions a ON a.id=t.action_id WHERE s.episode_id=? ORDER BY s.step_index",
+                (episode_id,),
+            )
+        ]
 
     def event(self, kind: str, phase: str, payload: dict[str, Any]) -> int:
         with self.db:

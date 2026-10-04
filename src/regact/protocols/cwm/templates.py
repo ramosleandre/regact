@@ -38,7 +38,7 @@ class State:
         (
             "parser",
             "parse(obs)",
-            "Convert the full recorded observation dictionary to State. Distinct observations must remain distinct. Do not mutate obs.",
+            "Build the State from the FIRST observation of a chain (the run start, each multi-instance RunController, a reset without a reset hook). Later States come from step. Do not mutate obs.",
         ),
         (
             "render",
@@ -48,7 +48,7 @@ class State:
         (
             "transition",
             "step(state, action)",
-            "Predict a new State after one problem-format action, without real interaction. Do not mutate either input.",
+            "Predict the State after one problem-format action, without real interaction. Carry everything later observations depend on, including what the screen does not show. Do not mutate either input. Optional: define reset(state, kind) for explicit resets (kind is level or environment) to keep hidden state through them; without it the reset observation is parsed.",
         ),
     ]:
         yield TemplateFile(
@@ -73,7 +73,7 @@ def achieved(state):
         '''"""Replace this docstring with the experimental goal (used for logging)."""
 
 class ExplorationController:
-    """Acts on states parsed from real observations; each real exploration gets a fresh instance."""
+    """Acts on the State carried by the accepted CWM; each real exploration gets a fresh instance."""
     def act(self, state):
         """Return one action in the problem's format. Private memory is allowed."""
         raise NotImplementedError("Choose an action for this state")

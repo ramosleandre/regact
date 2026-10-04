@@ -37,7 +37,7 @@ _LOCAL_HELPERS = """
 
 `framework/cwm_env.py` provides `EnvCWM` and `make_cwm_env`. Read their docstrings for arguments and examples. They use the current workspace CWM; they do not validate or submit it, update the dataset, or perform real actions.
 
-`EnvCWM(initial_state=state)` requires an explicit State and never queries the dataset. `make_cwm_env()` instead loads the next controller's starting observation once and parses it: the current observation in single-instance mode, or the original initial observation in multi-instance mode. Passing initial_state skips that lookup. Both return States from reset()/step(action), or full observation dictionaries with obs_mode=True. Reset restores the starting State without taking a real action.
+`EnvCWM(initial_state=state)` requires an explicit State and never queries the dataset. `make_cwm_env()` instead starts where the next controller starts: in single-instance mode it replays the live chain through your workspace CWM (parse the first observation, then step through every recorded action); in multi-instance mode it parses the original initial observation. Passing initial_state skips that lookup. `replay_episode(episode_id)` replays a recorded episode the same way and prints the first divergence. Both return States from reset()/step(action), or full observation dictionaries with obs_mode=True. Reset restores the starting State without taking a real action.
 
 `python simulate.py --max-actions 20` runs controller.py locally and prints each action and State. Edit simulate.py freely to inspect predictions or try different starting states. Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
@@ -93,6 +93,12 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "PLANNER_NODES": options.planner.max_nodes_per_planner_call,
         "PLANNER_DEPTH": options.planner.max_depth_per_planner_call,
         "LOCAL_HELPERS": _LOCAL_HELPERS if options.workspace_helpers_enabled else "",
+        "REPLAY_HELPER": (
+            " `replay_episode(episode_id)` in `framework/cwm_env.py` replays an episode through your "
+            "workspace CWM and prints its first divergence with the State just before it."
+        )
+        if options.workspace_helpers_enabled
+        else "",
         **extra,
     }
     text = (_PROMPTS / name).read_text(encoding="utf-8")

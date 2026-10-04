@@ -23,7 +23,7 @@ Both functions must be repeatable and must not mutate the input. If utility is o
 
 Run `python framework/commands.py PlanInCWM` with **no arguments**. It reads `goal.py` and the accepted CWM; edits to `world_model/` take effect only after another successful `UpdateCodeWorldModel`.
 
-The planner starts from the observation where the next RunController would start: the current live observation in single-instance mode, or the original initial observation in multi-instance mode. It reads that recorded observation without taking a real action. It searches for an action list that visits at least one predicted observation outside the current dataset. It maximizes the final state's utility, then minimizes the number of actions. Utility is not summed along the path.
+The planner starts from the State the next RunController would start from: the State carried by the accepted CWM in single-instance mode, or `parse(initial observation)` in multi-instance mode. It takes no real action. It searches for an action list that visits at least one predicted observation outside the current dataset. It maximizes the final state's utility, then minimizes the number of actions. Utility is not summed along the path.
 
 The search algorithm is **__PLANNER_ALGORITHM__** (breadth-first search). It enumerates the problem's available actions, including valid coordinate actions when present; large action spaces can exhaust the budget quickly. Graded utility ranks candidates; it does not turn breadth-first search into a heuristic-guided algorithm.
 

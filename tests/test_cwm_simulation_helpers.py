@@ -157,7 +157,7 @@ from framework.cwm_env import make_cwm_env
 from simulate import run_controller
 from framework.cwm_env import EnvCWM
 calls=[]
-data_api.summary=lambda: {"controller_start_observation_id": 1}
+data_api.summary=lambda: {"lifecycle": "multi_instance", "initial_observation_id": 1}
 data_api.load_observations=lambda ids: calls.append(ids) or [INITIAL]
 env=make_cwm_env()
 assert calls == [[1]] and env.state.n == 0

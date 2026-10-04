@@ -44,29 +44,39 @@ class ExplorationControllerFromListActions:
         """Distinguish attaining the goal from merely exhausting the action list."""
         return "goal_achieved" if self.objective_reached(state) else "plan_exhausted"
 '''
-DATA = '''"""Read recorded real experience without interacting with the environment.
+DATA = '''"""Read recorded real experience. Reading never resets or steps the environment.
 
-Start by reading the function docstrings below or calling help(function). Initial experience and later exploration use this same API; reads never reset or step the environment. Do not call this API inside submitted callbacks: those run without dataset access.
+Do not call this API inside submitted callbacks (controller.py, world_model/): they run without
+dataset access.
 
-IDs are stable positive integers. Observations and transitions are deduplicated: a repeated real step adds an occurrence, not necessarily a new observation or edge. Full observations are dictionaries with frame, reward, is_done, available_actions and info. Simulations never add predicted observations to this dataset.
+- An observation is a dictionary: frame, reward, is_done, available_actions, info. It is exactly
+  what your controller and world model receive. frame is a list of grids made of plain Python
+  lists, not numpy: use np.array(obs["frame"][-1]) for the last grid.
+- A transition is one recorded step: observation --action--> next_observation.
+- Each distinct observation and transition has a positive integer ID. A repeated step adds no new
+  ID, so IDs are not a time order. For what happened in what order, use list_episodes() and
+  load_history(episode_id).
 
-Queries accept at most __MAX_ITEMS__ items. Bulk replies are capped at __MAX_BYTES__ serialized bytes; request smaller batches if needed. One complete record or image is always readable, even above the byte cap. No observation data is truncated. Inclusive feedback ranges such as "[4:9]" mean IDs 4 through 9 and can be passed directly to the loading functions.
-
-Example from a workspace script:
+Example:
     from framework import data_api
     print(data_api.summary())
-    ids = data_api.list_observation_ids(limit=3)
-    observations = data_api.load_observations(ids)  # same order as ids
-    print(observations[0]["available_actions"])__IMAGE_EXAMPLE__
+    for t in data_api.load_transitions(data_api.list_transition_ids()):
+        print(t["observation_id"], t["action"], t["next_observation_id"])__IMAGE_EXAMPLE__
 """
 import base64
+import re
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
+
 import httpx
+
 _BASE_URL = __BASE_URL__
 _GAME_ID = __GAME_ID__
+_BATCH = __BATCH__  # the server's per-query cap; batching is done here, never by the caller
 
 
-def _query(op, **args):
+def _query(op: str, **args: Any) -> Any:
     with httpx.Client(timeout=120, limits=httpx.Limits(max_keepalive_connections=0)) as http:
         response = http.post(f"{_BASE_URL}/data/{_GAME_ID}", json={"op": op, **args})
         if response.is_error:
@@ -78,98 +88,108 @@ def _query(op, **args):
         return response.json()
 
 
-def summary():
-    """Return the current dataset summary; does not reset or step the environment.
+def _ids(ids: int | str | Iterable[int]) -> list[int]:
+    if isinstance(ids, int):
+        return [ids]
+    if isinstance(ids, str):
+        out: list[int] = []
+        for part in ids.strip().strip("[]").split(","):
+            if part.strip():
+                start, _, end = part.partition(":")
+                out.extend(range(int(start), int(end or start) + 1))
+        return out
+    return [int(i) for i in ids]
 
-    phase: the current workflow phase.
-    initial_observation_id: the first observation recorded in this task.
-    current_observation_id: the live environment observation, updated after actions/resets.
-    controller_start_observation_id: where the next RunController starts: current
-      in single_instance, original initial observation in multi_instance.
-    episode_id: the current real episode; controller calls can share it.
-    reset_actions: explicit reset requests completed (each consumes one task action).
-    n_unique_observations: distinct complete observation dictionaries.
-    n_total_observations: recorded occurrences, including repetitions: one initial
-      observation per episode plus one successor per real step. Reading data does
-      not increase this count; simulations are excluded.
-    n_unique_transitions: distinct (observation, action, next observation) triples.
-    n_total_transitions: real steps recorded, including repeated transitions.
-    n_started_episodes: real episodes begun, including those with no steps.
-    milestones (only when nonempty): first occurrences across this task, with
-      name, kind (progress/failure/event), observation_id, transition_id,
-      episode_id and event_id. These refer to real experience, never simulations.
-    Example: print(summary()); use its current_observation_id rather than guessing.
+
+def _fetch(op: str, ids: list[int]) -> list[Any]:
+    try:
+        return _query(op, ids=ids)
+    except ValueError as error:
+        if len(ids) == 1 or "exceeds" not in str(error):
+            raise
+        half = len(ids) // 2  # over the byte cap: split until it fits (one record always fits)
+        return _fetch(op, ids[:half]) + _fetch(op, ids[half:])
+
+
+def _load(op: str, ids: int | str | Iterable[int]) -> list[Any]:
+    ids = _ids(ids)
+    size = _BATCH or max(1, len(ids))
+    return [item for i in range(0, len(ids), size) for item in _fetch(op, ids[i : i + size])]
+
+
+def _all(op: str) -> list[int]:
+    ids: list[int] = []
+    while page := _query(op, after_id=ids[-1] if ids else 0, limit=_BATCH):
+        ids += page
+        if not _BATCH:
+            break
+    return ids
+
+
+def summary() -> dict[str, Any]:
+    """The dataset summary, a dictionary with these keys:
+
+    phase; initial_observation_id; current_observation_id (the live environment);
+    controller_start_observation_id (where the next RunController starts);
+    episode_id (the live episode); reset_actions;
+    n_unique_observations, n_unique_transitions (number of IDs);
+    n_total_observations, n_total_transitions (occurrences, repeats included);
+    n_started_episodes; milestones (first occurrences of game events, when any).
     """
     return _query("summary")
 
 
-def list_observation_ids(after_id=0, limit=__DEFAULT_LIMIT__):
-    """Return one page of unique observation IDs, ascending and greater than after_id.
+def list_observation_ids() -> list[int]:
+    """All observation IDs, ascending."""
+    return _all("list_observation_ids")
 
-    limit defaults to __MAX_ITEMS__, the maximum page size. Empty list means no
-    more IDs at present. Example: page=list_observation_ids(limit=10); then request
-    list_observation_ids(after_id=page[-1], limit=10) if page is nonempty.
-    Fetch the selected full dictionaries with load_observations(page).
-    None requests all remaining IDs, allowed only when the page cap is unlimited.
-    Invalid page bounds raise ValueError.
+
+def list_transition_ids() -> list[int]:
+    """All transition IDs, ascending."""
+    return _all("list_transition_ids")
+
+
+def load_observations(ids: int | str | Iterable[int]) -> list[dict[str, Any]]:
+    """Observation dictionaries, in the same order as ids.
+
+    ids: a list of IDs, one ID, or a range string from command feedback: "[1:4, 8]" = 1, 2, 3, 4, 8.
+    The dictionaries do not contain their ID: zip(ids, load_observations(ids)) pairs them.
     """
-    return _query("list_observation_ids", after_id=after_id, limit=limit)
+    return _load("observations", ids)
 
 
-def list_transition_ids(after_id=0, limit=__DEFAULT_LIMIT__):
-    """Return one page of unique transition IDs, ascending, without observation grids.
+def load_transitions(ids: int | str | Iterable[int]) -> list[dict[str, Any]]:
+    """Transition dictionaries, in the same order as ids (same ids formats as load_observations).
 
-    after_id is exclusive; limit defaults to __MAX_ITEMS__ (the maximum).
-    Example: ids=list_transition_ids(limit=5); edges=load_transitions(ids).
-    Repeat with after_id=ids[-1] to paginate. IDs identify distinct edges, not
-    chronological steps; repeated occurrences do not produce new IDs.
-    None requests all remaining IDs, allowed only when the page cap is unlimited.
-    Invalid page bounds raise ValueError; no matching edges returns [].
+    Keys: transition_id, observation_id, action, next_observation_id,
+    observation (full dictionary before the action), next_observation (full dictionary after).
     """
-    return _query("list_transition_ids", after_id=after_id, limit=limit)
+    return _load("transitions", ids)
 
 
-def load_observations(ids):
-    """Return full observation dictionaries in the same order as the requested IDs.
-
-    ids accepts a list or an inclusive range string from exploration feedback:
-    load_observations("[1:4, 8]") loads IDs 1, 2, 3, 4, 8 (not a Python slice).
-    Each dictionary has frame, reward, is_done, available_actions and info.
-    IDs are not embedded in the dictionaries: keep your input IDs alongside them.
-    Example: obs=load_observations([summary()["initial_observation_id"]])[0].
-    Maximum __MAX_ITEMS__ IDs; unknown/invalid IDs or oversized responses raise
-    ValueError. Reduce the batch size if the response is too large; a single
-    observation is always readable, even above the bulk byte cap.
-    """
-    return _query("observations", ids=ids if isinstance(ids, str) else list(ids))
+def list_episodes() -> list[dict[str, Any]]:
+    """Every episode in start order. Keys: episode_id; started_by ("initial_collection",
+    "exploration", "reset_level", "reset_environment"); chain_id and continues_episode (an
+    explicit reset continues the chain of the episode it interrupted); start_observation_id;
+    n_steps; live (True for the episode the environment is in now)."""
+    return _query("episodes")
 
 
-def load_transitions(ids):
-    """Return recorded transitions in request order, including both full observations.
+def load_history(episode_id: int, step: int | None = None) -> tuple[list[dict[str, Any]], list[Any]]:
+    """(observations, actions) of one episode in time order, up to `step` actions (default: all).
+    observations[0] is the episode's first observation and observations[t] the one after
+    actions[t - 1]. Feed them to your model to reproduce a counterexample: parse(observations[0]),
+    then step through the actions."""
+    history = _query("history", episode_id=episode_id, step=step)
+    ids = history["observation_ids"]
+    distinct = sorted(set(ids))
+    by_id = dict(zip(distinct, load_observations(distinct)))
+    return [by_id[i] for i in ids], history["actions"]
 
-    ids accepts a list or an inclusive range string, e.g. "[1:4, 8]".
-    Each entry: transition_id; before_obs_id; after_obs_id; action (problem format);
-    o (complete before observation); o_next (complete successor observation).
-    Example: t=load_transitions(list_transition_ids(limit=1))[0]; print(t["action"]).
-    These are unique edges, not episodes. Maximum __MAX_ITEMS__ IDs; invalid IDs
-    or oversized responses raise ValueError. Fetch smaller batches when needed.
-    """
-    return _query("transitions", ids=ids if isinstance(ids, str) else list(ids))
 
-
-def load_diagnostic(diagnostic_id):
-    """Read one diagnostic ID returned by a framework command.
-
-    kind describes the failed check; available evidence IDs identify real data.
-    Observation comparisons contain predicted and observed dictionaries plus
-    bounded differences. Repeatability diagnostics instead contain callback,
-    first_output and second_output. Simulation errors can include predicted state,
-    action and actions_from_start; these are predictions, not real experience.
-    Example: d=load_diagnostic(3); print(d["kind"]). Use an actually returned ID.
-    Not every diagnostic has images; a size failure may have only numerical data.
-    Unknown IDs raise ValueError. Complete diagnostics remain readable regardless
-    of the bulk byte cap.
-    """
+def load_diagnostic(diagnostic_id: int) -> dict[str, Any]:
+    """One diagnostic returned by a framework command. kind names the failed check; observation
+    comparisons hold predicted and observed dictionaries plus their differences."""
     return _query("diagnostic", id=diagnostic_id)
 '''
 SAVE_IMAGE = '''
@@ -238,7 +258,7 @@ if __name__ == "__main__":
 
 
 IMAGE_EXAMPLE = """
-    data_api.save_image("observation.png", observation_id=ids[0])
+    data_api.save_image("observation.png", observation_id=data_api.list_observation_ids()[0])
 
 Open observation.png with your image-reading tool. Saving a PNG prints its path and returns None; it does not display the image to you automatically. The function docstrings also cover transition and diagnostic images."""
 
@@ -255,18 +275,6 @@ def templates(ctx, options, commands, *, vision):
                 "__COMMAND_HELP__", "\n".join(f"{name}: {text}" for name, text in commands.items())
             )
             .replace("__COMMAND_NAMES__", repr(tuple(commands)))
-            .replace("__DEFAULT_LIMIT__", repr(options.data_api.max_items))
-            .replace(
-                "__MAX_ITEMS__",
-                str(options.data_api.max_items)
-                if options.data_api.max_items is not None
-                else "unlimited",
-            )
-            .replace(
-                "__MAX_BYTES__",
-                str(options.data_api.max_response_bytes)
-                if options.data_api.max_response_bytes is not None
-                else "unlimited",
-            ),
+            .replace("__BATCH__", repr(options.data_api.max_items)),
         )
     yield TemplateFile("framework/action_list_controller.py", HELPER)
