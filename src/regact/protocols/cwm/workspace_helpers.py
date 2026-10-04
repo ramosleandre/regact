@@ -86,7 +86,8 @@ def replay_episode(episode_id, quiet=False):
     reset(state, kind) hook (or parse the reset observation). Returns a dict: diverged (bool),
     episode_id, step (actions applied in that episode; 0 = its first observation), state (the
     State there; on divergence, the State that rendered wrong) and, on divergence, state_before,
-    predicted, observed and differences (up to 20). Prints a short report unless quiet."""
+    predicted, observed and differences (up to 20). Prints a short report unless quiet (the
+    printed State is cut at 1,000 characters; the returned one is complete)."""
     from framework import data_api
     from world_model import model_parser, model_render, model_transition
     episodes = data_api.list_episodes()
@@ -135,7 +136,8 @@ def _compare(episode_id, step, before, state, observed, quiet):
     visit(predicted, observed, "")
     if not quiet:
         print(f"Episode {episode_id}, step {step}: first divergence ({len(diffs)} differences shown).")
-        print(f"State before: {before!r}")
+        text = repr(before)
+        print(f"State before: {text if len(text) <= 1000 else text[:1000] + ' ...'}")
         for d in diffs:
             print(f"  {d['path']}: predicted {d['predicted']!r}, observed {d['observed']!r}")
     return {
