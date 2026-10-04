@@ -1,4 +1,4 @@
-"""Contracts found in the walkthrough: usable feedback, safe notices, real evidence."""
+"""Contracts found in the walkthrough: usable feedback, safe phase changes, real evidence."""
 
 import base64
 import json
@@ -23,16 +23,16 @@ async def call(c, name, token=None):
     json_text = output.data[output.data.index("{") :]
     value = json.loads(json_text)
     assert json_text == json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)
-    return value, output.messages
+    return value, value.get("phase_change")
 
 
 async def test_acceptance_notice_and_retry_are_separate_and_not_duplicated(rig):
     c, _ = rig
     collect(c)
     model(c.workdir)
-    result, notices = await call(c, "UpdateCodeWorldModel", "stable-request")
+    result, change = await call(c, "UpdateCodeWorldModel", "stable-request")
     assert result["status"] == "Accepted"
-    assert len(notices) == 1 and "CWM Modeling --> Active Exploration" in notices[0]
+    assert (change["from"], change["to"]) == ("CWM Modeling", "Active Exploration")
     assert (
         not {
             "phase",
@@ -46,16 +46,16 @@ async def test_acceptance_notice_and_retry_are_separate_and_not_duplicated(rig):
         & result.keys()
     )
     before = c.store.db.execute("select count(*) from records").fetchone()[0]
-    replay, notices = await call(c, "UpdateCodeWorldModel", "stable-request")
-    assert replay == result and notices == []
+    replay, _ = await call(c, "UpdateCodeWorldModel", "stable-request")
+    assert replay == result  # a replay returns the stored result, phase change included
     assert c.store.db.execute("select count(*) from records").fetchone()[0] == before
     (c.workdir / "world_model/model_transition.py").write_text(
         "from world_model.model_state import State\ndef step(s,a): return State(s.n+2)\n"
     )
-    refused, notices = await call(c, "UpdateCodeWorldModel")
+    refused, change = await call(c, "UpdateCodeWorldModel")
     assert refused["status"] == "Refused"
     assert refused["previously_accepted_cwm_version"] == result["cwm_version"]
-    assert notices == []
+    assert change is None
     assert c.phase == "Active Exploration"
 
 
@@ -72,9 +72,10 @@ async def test_http_notice_and_retry_id_are_transport_metadata(rig):
         second = http.post(
             "/control/counter/tool", json=body, headers={"X-Regact-Request-ID": "repeat"}
         ).json()
-    assert json.loads(first["output"])["status"] == "Accepted" and len(first["messages"]) == 1
+    output = json.loads(first["output"])  # one JSON document, nothing printed after it
+    assert output["status"] == "Accepted" and "messages" not in first
     assert first["output"].startswith('{\n  "status": "Accepted",')
-    assert first["messages"][0].endswith(c.phase_description())
+    assert output["phase_change"]["next_step"] == c.phase_description()
     session = CwmSession(coordinator=c, tools=[])
     for reminder_count in (0, 1, 10):
         assert session.reminder(reminder_count) == (
@@ -142,16 +143,15 @@ def test_generic_summary_and_image_sources(rig, monkeypatch):
 async def test_milestone_survives_contradiction_and_is_not_announced_again(rig):
     c, _ = rig
     accept(c)
-    c.drain_messages()
     c.env._milestone_detector = lambda env: ["checkpoint"] if env.last_obs.frame[0] >= 3 else []
     c.problem.milestone_kind = lambda _: "progress"
     exploration(c)
-    result, notices = await call(c, "RunController")
+    result, change = await call(c, "RunController")
     assert result["stop_reason"] == "prediction_mismatch"
     assert result["new_milestones"][0]["name"] == "checkpoint"
     assert result["new_milestones"][0]["kind"] == "progress"
-    assert "New real milestones" in result["message"] and len(notices) == 1
-    assert notices[0].endswith(c.phase_description())
+    assert "New real milestones" in result["message"]
+    assert change["next_step"] == c.phase_description()
     assert CwmSession(coordinator=c, tools=[]).reminder(2).endswith(c.phase_description())
     render = c.workdir / "world_model/model_render.py"
     render.write_text(
@@ -159,11 +159,11 @@ async def test_milestone_survives_contradiction_and_is_not_announced_again(rig):
             '"milestones":[]', '"milestones":(["checkpoint"] if s.n>=3 else [])'
         )
     )
-    accepted, notices = await call(c, "UpdateCodeWorldModel")
-    assert accepted["status"] == "Accepted" and len(notices) == 1
-    again, notices = await call(c, "RunController")
+    accepted, change = await call(c, "UpdateCodeWorldModel")
+    assert accepted["status"] == "Accepted" and change is not None
+    again, change = await call(c, "RunController")
     assert again["real_actions"] == 4 and "new_milestones" not in again
-    assert notices == []
+    assert change is None
 
 
 async def test_callback_budget_names_the_effective_limit(rig):
@@ -173,10 +173,10 @@ async def test_callback_budget_names_the_effective_limit(rig):
     c.options.execution.max_seconds_per_call = 0.2
     parser = c.workdir / "world_model/model_parser.py"
     parser.write_text("import time\ndef parse(obs):\n time.sleep(1)\n")
-    result, notices = await call(c, "UpdateCodeWorldModel")
+    result, change = await call(c, "UpdateCodeWorldModel")
     assert result["status"] == "Incomplete"
     assert result["error"]["budget"]["value"] == 0.2
-    assert result["error"]["callback"] == "parse" and notices == []
+    assert result["error"]["callback"] == "parse" and change is None
 
 
 def test_planner_budget_counts_parse_step_and_render(rig):
@@ -225,7 +225,6 @@ async def test_limit_between_prediction_and_real_step_preserves_complete_history
 
     c, _ = rig
     accept(c)
-    c.drain_messages()
     exploration(c)
     original = c._step
 

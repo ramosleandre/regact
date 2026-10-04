@@ -85,7 +85,7 @@ class ManagedCoordinator:
         self.store = ExperienceStore(self.root / "experience.sqlite3")
         self.lock = threading.RLock()
         self.phase = self.initial_phase
-        self._messages: list[str] = []
+        self.phase_changes: list[dict[str, str]] = []  # this command's, reported in its result
         self._seen_milestones: set[str] = set()
         self.milestones: list[dict[str, Any]] = []
         self.terminal: str | None = None
@@ -133,26 +133,13 @@ class ManagedCoordinator:
         return text
 
     def change_phase(self, phase: str, reason: str, **evidence: Any) -> None:
-        """Record transitions centrally; the dispatch layer delivers queued notices in order."""
         if phase == self.phase:
             return
         before, self.phase = self.phase, phase
         self.event("phase_changed", before=before, after=phase, reason=reason, **evidence)
-        self._messages.append(
-            f"Phase transition: {before} --> {phase}.\n{self.phase_description(phase)}"
+        self.phase_changes.append(
+            {"from": before, "to": phase, "next_step": self.phase_description(phase)}
         )
-
-    def drain_messages(self) -> list[str]:
-        with self.lock:
-            messages, self._messages = self._messages, []
-            return messages
-
-    def execute_request(self, name: str, args: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-        # Pair notices with their completed operation under the same lock. Concurrent
-        # HTTP callers cannot consume each other's transitions; replay creates none.
-        with self.lock:
-            result = self.tool(name, args)
-            return result, self.drain_messages()
 
     def persist(self) -> None:
         atomic_json(
@@ -848,6 +835,7 @@ class ManagedCoordinator:
                     return {**previous, "replayed": True}
             previews = False
             preview_error = None
+            self.phase_changes = []
             try:
                 if set(args) - {"request_id"}:
                     raise ValueError(
@@ -927,6 +915,11 @@ class ManagedCoordinator:
             response.update(
                 phase=self.phase, exit_reason=self.terminal, dataset_version=self.store.version
             )
+            if self.phase_changes:
+                response["phase_change"] = {
+                    **self.phase_changes[-1],
+                    "from": self.phase_changes[0]["from"],
+                }
             self.event(name, result=response)
             if rid:
                 self.store.remember_request(str(rid), request, response)
@@ -1011,10 +1004,10 @@ class ManagedTool(Tool):
         if context.detail.get("request_id"):
             internal_args["request_id"] = context.detail["request_id"]
         job = asyncio.create_task(
-            asyncio.to_thread(self.coordinator.execute_request, self.name, internal_args)
+            asyncio.to_thread(self.coordinator.tool, self.name, internal_args)
         )
         try:
-            result, notices = await asyncio.shield(job)
+            result = await asyncio.shield(job)
         except asyncio.CancelledError:
             # Never release ownership while its real execution is still running.
             self.coordinator.deadline = min(self.coordinator.deadline, time.monotonic())
@@ -1029,7 +1022,6 @@ class ManagedTool(Tool):
                 self.name, result, self.coordinator.options, self.coordinator.config.limits
             ),
             is_error=bool(result.get("error")),
-            messages=notices,
         )
 
 

@@ -8,10 +8,11 @@ from fastapi.testclient import TestClient
 
 from regact.features.base import FeatureContext
 from regact.protocols.cwm.config import CwmConfig
+from regact.protocols.cwm.feedback import present
 from regact.protocols.cwm.protocol import CwmProtocol
 from regact.protocols.cwm.session import CwmSession
 from regact.protocols.cwm.templates import templates
-from test_cwm_protocol import accept, collect, exploration
+from test_cwm_protocol import accept, collect, exploration, model
 from test_cwm_protocol import rig as rig
 
 
@@ -45,10 +46,15 @@ def test_planner_registration_refusal_and_shared_notices(rig):
         assert c.tool("PlanInCWM", {})["error_type"] == "command_unavailable"
         assert c.store.summary() == before
         assert not (c.workdir / "goal.py").exists()
-    accept(c)
-    notice = c.drain_messages()[0]
+    collect(c)
+    model(c.workdir)
+    accepted = c.tool("UpdateCodeWorldModel", {})
+    change = accepted["phase_change"]
+    assert (change["from"], change["to"]) == ("CWM Modeling", "Active Exploration")
+    notice = change["next_step"]
+    assert present("UpdateCodeWorldModel", accepted, c.options, c.config.limits)["phase_change"] == change
     reminder = CwmSession(coordinator=c, tools=[]).reminder(1)
-    assert notice.endswith(c.phase_description())
+    assert notice == c.phase_description()
     assert reminder.endswith(c.phase_description())
     assert ("PlanInCWM" in notice) == enabled
     assert ("PlanInCWM" in reminder) == enabled

@@ -86,7 +86,7 @@ Single-instance controller completion, errors and CWM contradictions do not impl
 
 ### 5. Inspect feedback, then continue or reset
 
-Command results are indented JSON, with separate phase notices when relevant. They identify why the call stopped, actions taken, game metrics, evidence IDs, and any error/diagnostic. `goal_achieved` refers to the controller's optional subgoal; the problem's success predicate determines full-game completion.
+Command results are one indented JSON document; a command that changes the phase adds a `phase_change` field (`from`, `to`, `next_step`). They identify why the call stopped, actions taken, game metrics, evidence IDs, and any error/diagnostic. `goal_achieved` refers to the controller's optional subgoal; the problem's success predicate determines full-game completion.
 
 `observation_ids` and `transition_ids` identify the distinct records encountered by the call, including reused records and its starting observation. Ranges such as `[4:9]` are **inclusive** and can be passed directly to the data API. They are not a chronological path; logs retain ordered occurrences separately for playback.
 

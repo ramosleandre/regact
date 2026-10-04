@@ -298,6 +298,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             out["task_stop"]["budget"] = limit
         if reason == "interrupted":
             out["message"] = "Operation interrupted; partial results are not an acceptance verdict."
+    if r.get("phase_change"):
+        out["phase_change"] = r["phase_change"]
     if r.get("error_type") == "request_conflict":
         # Retry identifiers and conflicts belong to transport logs, not agent work.
         out = {

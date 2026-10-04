@@ -33,7 +33,7 @@ Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It re
 
 | `status` | Meaning | Next action |
 |---|---|---|
-| `Accepted` | All checks finished and passed. | Follow the phase notice into Active Exploration. |
+| `Accepted` | All checks finished and passed. | Its `phase_change` field moves you to Active Exploration. |
 | `Refused` | Checks finished but some failed. | Inspect evidence, revise the CWM, submit again. |
 | `Incomplete` | Validation could not finish, e.g. a code error or timeout. | Fix the reported error or expensive computation, then retry. |
 
@@ -59,6 +59,6 @@ The framework saves the submitted Python files and their static local imports. E
 
 One callback request has a __CALL_SECONDS__ second limit, including communication and serialization. This applies to imports/startup, CWM `parse`/`render`/`step`, controller creation and `act`/`is_done`__GOAL_CALLBACK_LIMIT__. It is not a timeout on your Bash commands. Each submitted-code process has a __MEMORY_MB__ MiB memory limit. An `unlimited` value disables that particular cap; whole-task limits still apply.
 
-Budget errors name the effective limit and value. They usually stop one operation, not the whole task. A separate phase notice tells you when to change phase. `task_stop` means the task ended. `history_complete=false` indicates an environment or recording failure: stored counts may omit actions that actually happened.
+Budget errors name the effective limit and value. They usually stop one operation, not the whole task. When a command changes the phase, its result has a `phase_change` field: `from`, `to`, and `next_step`. `task_stop` means the task ended. `history_complete=false` indicates an environment or recording failure: stored counts may omit actions that actually happened.
 
 __LOCAL_HELPERS__

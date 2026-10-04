@@ -149,7 +149,7 @@ Vanilla and CWM assemble their briefs through [managed/prompting.py](../src/rega
 
 Managed commands take no arguments and read fixed workspace files. Transport retry IDs and source hashes are retained for bookkeeping rather than presented as ordinary agent tasks. CWM validation returns Accepted / Refused / Incomplete; `cwm_version` and `dataset_version` identify accepted code and evidence, not quality scores.
 
-The coordinator creates phase notices centrally. CLI-backed agents see them after the JSON result, while native dispatch injects them separately. A replay repeats no work or phase notice. Keep-alive reminders use the same phase description as transitions.
+A command that changes the phase reports it in its own result, as a `phase_change` field (`from`, `to`, `next_step`), so every agent reads one JSON document. A replay repeats no work and returns the stored result, phase change included. Keep-alive reminders use the same phase description as transitions.
 
 First-time real milestones and evidence IDs appear in controller feedback. See [the data API](managed_protocols.md#dataset-api) for counters, pagination and images, and [CWM validation](cwm.md#interpret-validation-feedback) for counterexamples and error meanings.
 

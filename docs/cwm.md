@@ -118,7 +118,7 @@ There is **no preliminary simulated episode and no novelty requirement** for rea
 
 A prediction computation error prevents that action from being taken. A wrong prediction is detected **after** the real action, so its consequence remains in the live environment and the evidence is retained.
 
-The first CWM contradiction stops the call and returns the agent to CWM Modeling. Ordinary completion leaves it in Active Exploration. Code/resource errors are reported separately from evidence that a game rule is wrong; follow the phase notice for whether revalidation is needed. Controller failures receive worst performance metrics while preserving already recorded experience.
+The first CWM contradiction stops the call and returns the agent to CWM Modeling. Ordinary completion leaves it in Active Exploration. Code/resource errors are reported separately from evidence that a game rule is wrong; follow the result's `phase_change` field for whether revalidation is needed. Controller failures receive worst performance metrics while preserving already recorded experience.
 
 New observations can reveal a contradiction, but a familiar predicted observation can also be useful evidence. Neither `actual_novel_observations` nor the controller's `goal_achieved` is an external measure of game success. The problem supplies performance metrics and the full-game completion predicate.
 
