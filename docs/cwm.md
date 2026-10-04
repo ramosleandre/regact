@@ -168,7 +168,7 @@ For shared collection, execution, data, feedback and task settings, see the [com
 | `protocol.threshold_max_state_obs_size_ratio` | `0.5` | Strict upper bound on aggregate serialized State/observation size ratio |
 | `protocol.cwm_validation_policy` | `required` | Only implemented policy; validation cannot currently be disabled |
 | `protocol.workspace_helpers_enabled` | `true` | Supply local environment helpers and `simulate.py` |
-| `protocol.execution.max_seconds_per_UpdateCodeWorldModel` | `90` | Whole validation operation, including isolated-code startup; below the agents' 120 s shell timeout |
+| `protocol.execution.max_seconds_per_UpdateCodeWorldModel` | `90` | Time spent in submitted code during one validation: world-model callbacks plus their module imports. Store reads and comparisons are not charged |
 | `protocol.planner.enabled` | `false` | Expose planner command, goal template and guide |
 | `protocol.planner.algorithm` | `bfs` | Only implemented search algorithm |
 | `protocol.planner.max_seconds_per_planner_call` | `30` | Whole planner operation, including startup and goal evaluation |

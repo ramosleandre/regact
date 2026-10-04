@@ -255,6 +255,15 @@ def test_incremental_state_index_matches_a_full_recompute(rig):
     assert c.state_owner == {canonical(state): oid for oid, state in c.states.items()}
 
 
+def test_cwm_versions_count_accepted_models_without_gaps(rig):
+    c, _ = rig
+    accept(c)
+    assert c.accepted["cwm_version"] == 1
+    exploration(c, (1,))
+    c.tool("RunController", {})  # its record sits between the two validations
+    assert c.tool("UpdateCodeWorldModel", {})["cwm_version"] == 2
+
+
 def test_first_mismatch_recorded_then_requires_repair(rig):
     c, _ = rig
     accept(c, bad=True)

@@ -37,7 +37,7 @@ Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It re
 | `Refused` | Checks finished but some failed. | Inspect evidence, revise the CWM, submit again. |
 | `Incomplete` | Validation could not finish, e.g. a code error or timeout. | Fix the reported error or expensive computation, then retry. |
 
-`checked` counts processed observations/transitions, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores; version numbers may have gaps. A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
+`checked` counts processed observations/transitions, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores: cwm_version counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
 
 Counterexamples include evidence IDs and one of these failure types:
 

@@ -90,14 +90,18 @@ class Coordinator(ManagedCoordinator):
             bundle,
             self.options.execution.max_seconds_per_UpdateCodeWorldModel,
             "protocol.execution.max_seconds_per_UpdateCodeWorldModel",
+            clock=budgets.AgentClock(self.options.execution.max_seconds_per_UpdateCodeWorldModel),
         ) as worker:
             summary, states = validate(worker, self.store, self.options)
         record = {"bundle": bundle.name, "manifest": manifest, "validation": summary}
+        version = (self.accepted["cwm_version"] if self.accepted else 0) + 1  # 1, 2, 3, ...
+        if summary["accepted"]:
+            record["cwm_version"] = version
         self.store.update_record(rid, "accepted" if summary["accepted"] else "rejected", record)
         self.active_request = None
         if summary["accepted"]:
             self.accepted = {
-                "cwm_version": rid,
+                "cwm_version": version,
                 "bundle": bundle.name,
                 "dataset_version": self.store.version,
                 "validation": summary,
@@ -105,7 +109,7 @@ class Coordinator(ManagedCoordinator):
             self.states = states
             self._index_states()
             self.change_phase(EXPLORATION, "model_accepted")
-            self.event("cwm_accepted", cwm_version=rid)
+            self.event("cwm_accepted", cwm_version=version)
         return {**summary, "cwm_version": self.accepted["cwm_version"] if self.accepted else None}
 
     def plan(self) -> dict[str, Any]:

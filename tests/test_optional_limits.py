@@ -1,6 +1,7 @@
 """Nullable budget behavior, including genuine isolated CWM execution."""
 
 import math
+import time
 from dataclasses import asdict
 
 import pytest
@@ -175,3 +176,19 @@ def test_long_worker_error_keeps_its_cause_and_can_be_unlimited(rig):
     c.options.feedback.max_error_chars = None
     result = c.tool("UpdateCodeWorldModel", {})
     assert len(result["error"]) > 6000 and result["error"].endswith("END: cause")
+
+
+def test_validation_budget_charges_submitted_code_not_store_reads(rig, monkeypatch):
+    c, _ = rig
+    c.collect_initial()
+    model(c.workdir)
+    c.options.execution.max_seconds_per_UpdateCodeWorldModel = 0.5
+    read = c.store.observation
+
+    def slow_read(oid):  # a slow store, i.e. framework time
+        time.sleep(0.3)
+        return read(oid)
+
+    monkeypatch.setattr(c.store, "observation", slow_read)
+    result = c.tool("UpdateCodeWorldModel", {})
+    assert result.get("accepted"), result

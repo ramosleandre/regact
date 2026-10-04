@@ -20,9 +20,9 @@ class PlannerConfig:
 
 @dataclass
 class ExecutionConfig:
-    max_seconds_per_call: float | None = 5
-    # Below the 120 s the agents' shells (Claude Code, Alan) give one command: a call at its full
-    # budget plus cleanup must still return before the shell kills the command that started it.
+    max_seconds_per_call: float | None = 5  # wall time of one callback
+    # The two command budgets count only time in submitted code (see limits.AgentClock). The
+    # command's wall time adds framework work, so the agent's shell timeout must cover both.
     max_seconds_per_UpdateCodeWorldModel: float | None = 90
     max_seconds_per_RunController: float | None = 90
     max_memory_mb: int | None = 512  # MiB
