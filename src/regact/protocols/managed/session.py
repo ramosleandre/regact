@@ -696,7 +696,7 @@ class ManagedCoordinator:
                             result["actual_novel_observations"] += 1
                         if self.terminal == "observation_determinism_violation":
                             reason = self.terminal or "interrupted"
-                            result["counterexample"] = evidence
+                            result["counterexample"] = public_evidence(evidence)
                             result["diagnostic_id"] = self.store.diagnostic(
                                 {"kind": reason, "observed": obs, **evidence}
                             )
@@ -988,6 +988,21 @@ class ManagedCoordinator:
                 finally:
                     self.store.close()
                     self.closed = True
+
+
+def public_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
+    """A recorded step as counterexamples name it, the same way validation does."""
+    return {
+        "episode_id": evidence["episode_id"],
+        "step": evidence["step_index"] + 1,  # actions applied in that episode
+        "observation_id": evidence["after_obs_id"],
+        "transition_id": evidence["transition_id"],
+        **(
+            {"conflicting_witnesses": evidence["conflicting_witnesses"]}
+            if evidence.get("conflicting_witnesses")
+            else {}
+        ),
+    }
 
 
 def _public_transition(t: dict[str, Any]) -> dict[str, Any]:

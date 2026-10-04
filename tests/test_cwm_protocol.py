@@ -259,6 +259,9 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     assert c.phase == "CWM Modeling"
     diagnostic = c.store.get_diagnostic(result["diagnostic_id"])
     assert diagnostic["predicted"]["frame"][0] == 4 and diagnostic["observed"]["frame"][0] == 3
+    # Named like validation counterexamples; internal store fields stay hidden.
+    assert {"episode_id", "step", "observation_id", "transition_id"} <= set(result["counterexample"])
+    assert result["counterexample"]["step"] == 3 and "chain_hash" not in result["counterexample"]
     assert "error" in c.tool("PlanInCWM", {})
     model(c.workdir)
     repaired = c.tool("UpdateCodeWorldModel", {})

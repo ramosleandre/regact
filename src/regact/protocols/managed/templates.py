@@ -178,8 +178,10 @@ def list_episodes() -> list[dict[str, Any]]:
 def load_history(episode_id: int, step: int | None = None) -> tuple[list[dict[str, Any]], list[Any]]:
     """(observations, actions) of one episode in time order, up to `step` actions (default: all).
     observations[0] is the episode's first observation and observations[t] the one after
-    actions[t - 1]. Feed them to your model to reproduce a counterexample: parse(observations[0]),
-    then step through the actions."""
+    actions[t - 1]. To reproduce a counterexample, start from parse(observations[0]) (or, for an
+    episode started by a reset when your CWM defines reset(state, kind), from that hook applied to
+    the previous episode's last State), then step through the actions. replay_episode in
+    framework/cwm_env.py does this for the whole chain."""
     history = _query("history", episode_id=episode_id, step=step)
     ids = history["observation_ids"]
     distinct = sorted(set(ids))

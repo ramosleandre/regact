@@ -21,7 +21,7 @@ The complete observation contains `frame`, `reward`, `is_done`, `available_actio
 
 **parse is called on the first observation only; step must carry everything else, including what the screen does not show.** A *chain* starts at a fresh environment start: the run start in single-instance mode, each RunController in multi-instance mode. From there, the State only evolves through `step`. Explicit resets (ResetLevel, ResetEnvironment) are part of the chain: if `model_transition.py` defines the optional `reset(state, kind) -> State` (`kind` is `"level"` or `"environment"`), the State continues through the reset; otherwise the reset observation is parsed again.
 
-Example of hidden state: a budget bar with 64 cells for a budget of 75 clicks, where a click blocked by a wall still spends budget. One frame cannot tell how many clicks are left, so `parse` cannot know it. Keep a `clicks` field in the State: `parse` sets it at the start of a level (full bar), `step` adds 1 on every click (blocked ones included), and `render` draws the bar from it.
+Example of hidden state: a budget bar with 64 cells for a budget of 75 clicks, where a click blocked by a wall still spends budget. One frame cannot tell how many clicks are left, so `parse` cannot know it. Keep a `clicks` field in the State: `parse` sets it at a chain start (from the full bar), `step` adds 1 on every click (blocked ones included) and resets it when a level completes, and `render` draws the bar from it.
 
 Your controller receives the State carried this way: the model's belief, not something read from the screen. A hidden field that is wrong but has not yet shown up on screen misleads the controller until a contradiction reveals it.
 

@@ -20,6 +20,7 @@ from regact.protocols.cwm.validation import (
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.prompting import reset_commands
 from regact.protocols.managed.session import (
+    public_evidence,
     EXPLORATION,
     MODEL_FILES,
     MODELING,
@@ -78,7 +79,7 @@ class Coordinator(ManagedCoordinator):
     def check_prediction(self, predicted, obs, evidence):
         if canonical(predicted) != canonical(obs):
             self.running = self.current_state = None
-            raise ModelMismatch("prediction_mismatch", predicted, obs, evidence)
+            raise ModelMismatch("prediction_mismatch", predicted, obs, public_evidence(evidence))
         self.current_state = self.next_state
         self._check_size(self.current_state, obs, evidence["after_obs_id"])
         if self.single_instance:
