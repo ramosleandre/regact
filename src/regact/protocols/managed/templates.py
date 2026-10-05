@@ -169,19 +169,15 @@ def load_transitions(ids: int | str | Iterable[int]) -> list[dict[str, Any]]:
 
 def list_episodes() -> list[dict[str, Any]]:
     """Every episode in start order. Keys: episode_id; started_by ("initial_collection",
-    "exploration", "reset_level", "reset_environment"); chain_id and continues_episode (an
-    explicit reset continues the chain of the episode it interrupted); start_observation_id;
-    n_steps; live (True for the episode the environment is in now)."""
+    "exploration", "reset_level", "reset_environment"); start_observation_id; n_steps; live
+    (True for the episode the environment is in now)."""
     return _query("episodes")
 
 
 def load_history(episode_id: int, step: int | None = None) -> tuple[list[dict[str, Any]], list[Any]]:
     """(observations, actions) of one episode in time order, up to `step` actions (default: all).
     observations[0] is the episode's first observation and observations[t] the one after
-    actions[t - 1]. To reproduce a counterexample, start from parse(observations[0]) (or, for an
-    episode started by a reset when your CWM defines reset(state, kind), from that hook applied to
-    the previous episode's last State), then step through the actions. replay_episode in
-    framework/cwm_env.py does this for the whole chain."""
+    actions[t - 1]."""
     history = _query("history", episode_id=episode_id, step=step)
     ids = history["observation_ids"]
     distinct = sorted(set(ids))

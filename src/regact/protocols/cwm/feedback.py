@@ -10,7 +10,7 @@ from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.ids import format_id_ranges
 
 FAILURES = {
-    "reconstruction_mismatch": "render does not reproduce the first observation of a chain",
+    "reconstruction_mismatch": "render does not reproduce the first observation of an episode",
     "prediction_mismatch": "the State carried by step stopped matching a recorded observation",
     "compression_ratio": "the serialized states are too large, on average or for one state",
     "non_deterministic_model": "a callback returned different outputs for identical input",
@@ -19,9 +19,8 @@ ENDINGS = {
     "solved": "The full game is solved; the task has ended.",
     "interrupted": "The task was interrupted; no further work will run.",
     "observation_determinism_violation": (
-        "The same recorded observation and action produced different real "
-        "outcomes. This protocol requires observation-deterministic dynamics; the"
-        " task has stopped."
+        "The same episode start and the same actions produced different real outcomes. This "
+        "protocol requires a deterministic game; the task has stopped."
     ),
     "initial_observation_mismatch": (
         "A fresh reset did not reproduce the fixed starting observation; the task has stopped."
@@ -149,7 +148,7 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             "status": status,
             "message": message,
             "checked": {
-                "chains": r.get("chains_checked", 0),
+                "episodes": r.get("episodes_checked", 0),
                 "steps": r.get("steps_checked", 0),
             },
         }
@@ -268,7 +267,7 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 "Invalid action from the exploration controller. The real environment rejected it: "
                 + error
             )
-        elif callback in ("parse", "render", "step"):
+        elif callback in ("get_initial_state", "render", "step"):
             error = f"CWM {callback} failed: {error}"
         elif callback in ("act", "is_done", "controller_init"):
             error = f"Exploration controller {callback} failed: {error}"

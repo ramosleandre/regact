@@ -39,7 +39,7 @@ MODELING = "CWM Modeling"
 EXPLORATION = "Active Exploration"
 
 MODEL_FILES = [
-    f"world_model/model_{part}.py" for part in ("state", "parser", "render", "transition")
+    f"world_model/model_{part}.py" for part in ("state", "initial_state", "render", "transition")
 ]
 
 
@@ -439,8 +439,6 @@ class ManagedCoordinator:
                     {
                         "episode_id": e["episode_id"],
                         "started_by": e["purpose"],
-                        "chain_id": e["chain_id"],
-                        "continues_episode": e["continues"],
                         "start_observation_id": e["initial_obs_id"],
                         "n_steps": e["n_steps"],
                         "live": e["episode_id"] == self.episode,
@@ -542,7 +540,7 @@ class ManagedCoordinator:
             if previous is not None:
                 self.store.finish_episode(previous, "reset_" + kind, {})
             self.episode, self.current_id = self.store.start_episode(
-                obs, "reset_" + kind, {"previous_observation_id": before}, continues=previous
+                obs, "reset_" + kind, {"previous_observation_id": before}
             )
         except Exception:
             self.terminal = "environment_or_storage_failure"

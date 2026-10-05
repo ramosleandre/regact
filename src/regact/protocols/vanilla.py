@@ -115,4 +115,5 @@ class VanillaProtocol(ManagedProtocol):
             tool_names=tool_names,
             verbalize_variant=verbalize_variant,
             command_script=self.command_script,
+            commands=self.commands(problem),
         )

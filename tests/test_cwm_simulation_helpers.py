@@ -55,15 +55,14 @@ def test_new_settings_and_optional_workspace_helpers():
             CwmConfig.from_mapping(options)
     context = FeatureContext("fake", "counter", "/tmp/cwm-test")
     files = {x.relpath: x.content for x in templates(context, cfg)}
-    for name in ("framework/cwm_env.py", "simulate.py"):
-        compile(files[name], name, "exec")
+    compile(files["framework/cwm_env.py"], "framework/cwm_env.py", "exec")
+    assert "simulate.py" not in files
     assert "def make_cwm_env" in files["framework/cwm_env.py"]
     disabled = {
         x.relpath: x.content
         for x in templates(context, CwmConfig.from_mapping({"workspace_helpers_enabled": False}))
     }
     assert "world_model/model_env.py" not in disabled and "framework/cwm_env.py" not in disabled
-    assert "simulate.py" not in disabled
     assert "Local simulation helpers" not in disabled["docs/CWM_modeling_phase.md"]
 
 
@@ -146,7 +145,7 @@ async def test_partial_real_error_retains_ids_and_identifies_invalid_action(rig,
 
 
 @pytest.mark.integration
-def test_local_env_reset_modes_and_controller_runner(rig):
+def test_local_env_reset_modes(rig):
     c, _ = rig
     accept(c)
     exploration(c)
@@ -154,7 +153,6 @@ def test_local_env_reset_modes_and_controller_runner(rig):
 import json
 from framework import data_api
 from framework.cwm_env import make_cwm_env
-from simulate import run_controller
 from framework.cwm_env import EnvCWM
 calls=[]
 data_api.summary=lambda: {"lifecycle": "multi_instance", "initial_observation_id": 1}
@@ -175,26 +173,13 @@ assert len(calls) == before
 try: EnvCWM()
 except ValueError as e: assert "initial_state" in str(e)
 else: raise AssertionError("implicit data access")
-from controller import get_controller
-result=run_controller(get_controller(),env,max_actions=3)
-assert result == {"actions":3,"stop_reason":"max_actions"}
-# The starter terminates on a full game, controller completion, or an action cap.
-result=run_controller(get_controller(),env,max_actions=None)
-assert result == {"actions":4,"stop_reason":"controller_done"}
-from framework.action_list_controller import ExplorationControllerFromListActions
-result=run_controller(ExplorationControllerFromListActions([1]*10),env,max_actions=None)
-assert result == {"actions":6,"stop_reason":"environment_done"}
-# The executable entry point runs the same editable loop.
-import runpy, sys
-sys.argv=["simulate.py", "--max-actions", "2"]
-runpy.run_path("simulate.py", run_name="__main__")
 print("HELPERS_OK")
 """.replace("INITIAL", repr(c.initial))
     done = subprocess.run(
         [sys.executable, "-c", script], cwd=c.workdir, text=True, capture_output=True, timeout=15
     )
     assert done.returncode == 0, done.stderr
-    assert "Action 3:" in done.stdout and "HELPERS_OK" in done.stdout
+    assert "HELPERS_OK" in done.stdout
 
 
 @pytest.mark.integration
@@ -224,15 +209,15 @@ def get_controller(): return ExplorationController()
 def test_workspace_package_imports_from_a_subdirectory_and_relative_imports(rig):
     c, _ = rig
     accept(c)
-    parser = c.workdir / "world_model/model_parser.py"
+    parser = c.workdir / "world_model/model_initial_state.py"
     parser.write_text(parser.read_text().replace("from world_model.model_state", "from .model_state"))
     assert c.tool("UpdateCodeWorldModel", {})["accepted"]
     probe = c.workdir / "scratch/probe.py"
     probe.parent.mkdir()
-    probe.write_text('''from world_model.model_parser import parse
+    probe.write_text('''from world_model.model_initial_state import get_initial_state
 from world_model.model_state import State
 from framework.cwm_env import EnvCWM
-s = parse({"frame": [0]})
+s = get_initial_state({"frame": [0]})
 assert isinstance(s, State)
 assert isinstance(EnvCWM(initial_state=s).step(1), State)
 print("PACKAGE_IMPORTS_OK")

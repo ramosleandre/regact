@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from regact.features.base import FeatureContext
 from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.config import CwmConfig
-from regact.protocols.cwm.workspace_helpers import CWM_ENV, SIMULATE
+from regact.protocols.cwm.workspace_helpers import CWM_ENV
 from regact.protocols.managed.templates import templates as common_templates
 from regact.workspace.templates import TemplateFile
 
@@ -18,7 +18,6 @@ def templates(
     yield from common_templates(ctx, options, commands, vision=vision)
     if options.workspace_helpers_enabled:
         yield TemplateFile("framework/cwm_env.py", CWM_ENV)
-        yield TemplateFile("simulate.py", SIMULATE)
     from regact.protocols.cwm.prompting import workspace_docs
 
     yield from workspace_docs(options, vision=vision)
@@ -36,9 +35,9 @@ class State:
     )
     for name, signature, doc in [
         (
-            "parser",
-            "parse(obs)",
-            "Build the State from the FIRST observation of a chain (the run start, each multi-instance RunController, a reset without a reset hook). Later States come from step. Do not mutate obs.",
+            "initial_state",
+            "get_initial_state(obs)",
+            "Build the State from the first observation of an episode: the game's start, or the start of any level after a reset. Do not mutate obs.",
         ),
         (
             "render",
@@ -48,7 +47,7 @@ class State:
         (
             "transition",
             "step(state, action)",
-            "Predict the State after one problem-format action, without real interaction. Carry everything later observations depend on, including what the screen does not show. Do not mutate either input. Optional: define reset(state, kind) for explicit resets (kind is level or environment) to keep hidden state through them; without it the reset observation is parsed.",
+            "Predict the State after one problem-format action, without real interaction. Carry everything later observations depend on, including what the screen does not show. Do not mutate either input.",
         ),
     ]:
         yield TemplateFile(

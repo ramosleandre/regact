@@ -120,7 +120,6 @@ class Worker:
             reply = self._receive(self._next_limit())
             if not reply.get("ready"):
                 raise WorkerError(str(reply.get("error", "worker initialization failed")))
-            self.reset_hook = bool(reply.get("reset_hook"))  # the CWM defines reset(state, kind)
             self._charge(reply, spawned)
         except BaseException:
             self.close()

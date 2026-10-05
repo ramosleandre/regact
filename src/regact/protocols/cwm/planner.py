@@ -35,7 +35,9 @@ def plan(
         calls += 1
         return worker.call(op, **args)
 
-    state = initial_state if initial_state is not None else model_call("parse", obs=initial)
+    state = initial_state
+    if state is None:
+        state = model_call("get_initial_state", obs=initial)
     nodes = [
         {"state": state, "obs": initial, "parent": None, "action": None, "depth": 0, "novel": False}
     ]

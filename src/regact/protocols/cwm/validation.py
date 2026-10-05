@@ -90,7 +90,7 @@ def add_state_size(summary: dict[str, Any], oid: int, state: Any, obs: Any) -> N
 
 def compactness_failure(sizes: dict[str, Any], threshold: float) -> dict[str, Any] | None:
     """Both the aggregate ratio and the largest single state must stay under the threshold, so a
-    State that grows along a chain (visited sets, logs) is caught even when the average is low."""
+    State that grows along an episode (visited sets, logs) fails even when the average is low."""
     ratio = sizes.get("state_bytes", 0) / max(1, sizes.get("observation_bytes", 0))
     largest = sizes.get("largest_ratio_state")
     if ratio >= threshold:
@@ -100,23 +100,23 @@ def compactness_failure(sizes: dict[str, Any], threshold: float) -> dict[str, An
     return None
 
 
-_REPEAT_EVERY = 10  # repeatability is checked on chain starts and every 10th step
+_REPEAT_EVERY = 10  # repeatability is checked on episode starts and every 10th step
 
 
 def validate(
     worker: Worker, store: ExperienceStore, config: CwmConfig, *, live_episode: int | None = None
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Replay every recorded chain in time order: parse its first observation, then let step (and
-    an optional reset hook) carry the State, checking render against every recorded observation.
+    """Replay every recorded episode in time order: get_initial_state on its first observation,
+    then step carries the State, and render is checked against every recorded observation.
 
-    Returns the summary and, when the live episode's chain was predicted to its end, the running
-    state there (``{"state", "hash"}``) for single_instance exploration to continue from.
+    Returns the summary and, when the live episode was predicted to its end, the running state
+    there (``{"state", "hash"}``) for single_instance exploration to continue from.
     """
     summary: dict[str, Any] = {
         "accepted": False,
         "complete": False,
         "dataset_version": store.version,
-        "chains_checked": 0,
+        "episodes_checked": 0,
         "steps_checked": 0,
         "failures": {},
         "counterexamples": [],
@@ -124,7 +124,9 @@ def validate(
         "observation_bytes": 0,
     }
     sizes: dict[str, Any] = {}
-    validated: dict[str, Any] = {}  # chain hash -> State there; identical histories share it
+    repeated = store.repeated_histories()
+    validated: dict[str, Any] = {}  # repeated history hash -> State there, validated once
+    diverged: set[str] = set()  # repeated history hashes where a failure is already reported
 
     def failure(
         kind: str,
@@ -161,7 +163,9 @@ def validate(
         if repeat:
             again = worker.call(op, **args)
             if canonical(again) != canonical(value):
-                failure("non_deterministic_model", {**where, "callback": op}, outputs=(value, again))
+                failure(
+                    "non_deterministic_model", {**where, "callback": op}, outputs=(value, again)
+                )
         return value
 
     def explains(state: Any, obs: Any, kind: str, where: dict[str, Any], repeat: bool) -> bool:
@@ -172,62 +176,60 @@ def validate(
         add_state_size(sizes, where["observation_id"], state, obs)
         return True
 
-    chains: dict[int, list[dict[str, Any]]] = {}
-    for episode in store.episodes():
-        chains.setdefault(episode["chain_id"], []).append(episode)
+    def reached(history: str, state: Any, ok: bool = True) -> bool:
+        if history in repeated:
+            if ok:
+                validated[history] = state
+            else:
+                diverged.add(history)
+        return ok
+
     live: dict[str, Any] | None = None
     try:
-        for segments in chains.values():
-            state: Any = None
-            alive = False
-            for segment in segments:
-                episode_id = segment["episode_id"]
-                start = store.observation(segment["initial_obs_id"])
+        for episode in store.episodes():
+            episode_id = episode["episode_id"]
+            where = {
+                "episode_id": episode_id,
+                "step": 0,
+                "observation_id": episode["initial_obs_id"],
+            }
+            if episode["start_hash"] in validated:
+                state, alive = validated[episode["start_hash"]], True
+            elif episode["start_hash"] in diverged:
+                state, alive = None, False
+            else:
+                start = store.observation(episode["initial_obs_id"])
+                state = call("get_initial_state", True, where, obs=start)
+                alive = reached(
+                    episode["start_hash"],
+                    state,
+                    explains(state, start, "reconstruction_mismatch", where, True),
+                )
+            for item in store.episode_steps(episode_id) if alive else []:
+                summary["steps_checked"] += 1
+                if item["history_hash"] in validated:
+                    state = validated[item["history_hash"]]
+                    continue
+                if item["history_hash"] in diverged:
+                    alive = False
+                    break
                 where = {
-                    "chain_id": segment["chain_id"],
                     "episode_id": episode_id,
-                    "step": 0,
-                    "observation_id": segment["initial_obs_id"],
+                    "step": item["step_index"] + 1,
+                    "observation_id": item["after_obs_id"],
+                    "transition_id": item["transition_id"],
                 }
-                resumed = segment["continues"] is not None and worker.reset_hook
-                if resumed and not alive:
-                    break  # the hook continues a state that is already wrong
-                if segment["start_hash"] in validated:
-                    state, alive = validated[segment["start_hash"]], True
-                else:
-                    if resumed:
-                        kind = segment["purpose"].removeprefix("reset_")
-                        state = call("reset", True, where, state=state, kind=kind)
-                    else:
-                        state = call("parse", True, where, obs=start)
-                    alive = explains(state, start, "reconstruction_mismatch", where, True)
-                    if alive:
-                        validated[segment["start_hash"]] = state
-                for item in store.episode_steps(episode_id) if alive else []:
-                    summary["steps_checked"] += 1
-                    if item["chain_hash"] in validated:
-                        state = validated[item["chain_hash"]]
-                        continue
-                    where = {
-                        "chain_id": segment["chain_id"],
-                        "episode_id": episode_id,
-                        "step": item["step_index"] + 1,
-                        "observation_id": item["after_obs_id"],
-                        "transition_id": item["transition_id"],
-                    }
-                    repeat = item["step_index"] % _REPEAT_EVERY == 0
-                    state = call("step", repeat, where, state=state, action=item["action"])
-                    observed = store.observation(item["after_obs_id"])
-                    if not explains(state, observed, "prediction_mismatch", where, repeat):
-                        alive = False  # the rest of this chain cannot be predicted from here
-                        break
-                    validated[item["chain_hash"]] = state
-                if episode_id == live_episode and alive:
-                    live = {"state": state, "hash": store.last_hash(episode_id)}
-            summary["chains_checked"] += 1
-        summary.update(
-            {k: sizes[k] for k in ("state_bytes", "observation_bytes") if k in sizes}
-        )
+                repeat = item["step_index"] % _REPEAT_EVERY == 0
+                state = call("step", repeat, where, state=state, action=item["action"])
+                observed = store.observation(item["after_obs_id"])
+                ok = explains(state, observed, "prediction_mismatch", where, repeat)
+                if not reached(item["history_hash"], state, ok):
+                    alive = False  # the rest of this episode cannot be predicted from here
+                    break
+            if episode_id == live_episode and alive:
+                live = {"state": state, "hash": store.last_hash(episode_id)}
+            summary["episodes_checked"] += 1
+        summary.update({k: sizes[k] for k in ("state_bytes", "observation_bytes") if k in sizes})
         for key in ("smallest_state", "largest_state", "largest_ratio_state"):
             if key in sizes:
                 summary[key] = sizes[key]

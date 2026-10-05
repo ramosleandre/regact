@@ -72,8 +72,8 @@ def model(root, bad=False):
     (d / "model_state.py").write_text(
         "from dataclasses import dataclass\n@dataclass(frozen=True)\nclass State:\n n:int\n"
     )
-    (d / "model_parser.py").write_text(
-        'from world_model.model_state import State\ndef parse(o): return State(o["frame"][0])\n'
+    (d / "model_initial_state.py").write_text(
+        'from world_model.model_state import State\ndef get_initial_state(o): return State(o["frame"][0])\n'
     )
     (d / "model_render.py").write_text(
         'def render(s): return {"frame":[s.n]*30, "reward":float(s.n>=6),'
@@ -261,13 +261,13 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     assert diagnostic["predicted"]["frame"][0] == 4 and diagnostic["observed"]["frame"][0] == 3
     # Named like validation counterexamples; internal store fields stay hidden.
     assert {"episode_id", "step", "observation_id", "transition_id"} <= set(result["counterexample"])
-    assert result["counterexample"]["step"] == 3 and "chain_hash" not in result["counterexample"]
+    assert result["counterexample"]["step"] == 3 and "history_hash" not in result["counterexample"]
     assert "error" in c.tool("PlanInCWM", {})
     model(c.workdir)
     repaired = c.tool("UpdateCodeWorldModel", {})
-    # Two chains: the initial collection (2 steps) and the exploration (3 steps, the first two
+    # Two episodes: the initial collection (2 steps) and the exploration (3 steps, the first two
     # shared with the collection and reused).
-    assert repaired["accepted"] and repaired["chains_checked"] == 2
+    assert repaired["accepted"] and repaired["episodes_checked"] == 2
     assert repaired["steps_checked"] == 5
 
 
@@ -352,7 +352,7 @@ def test_bad_reconstruction_and_compression_are_rejected(rig):
     p.write_text(p.read_text().replace("[s.n]*30", "[s.n+1]*30"))
     result = c.tool("UpdateCodeWorldModel", {})
     assert not result["accepted"] and result["complete"]
-    # The chain's first screen is not reproduced, so the chain stops there.
+    # The episode's first screen is not reproduced, so the episode stops there.
     assert result["failures"] == {"reconstruction_mismatch": 1}
     assert result["counterexamples"][0]["diagnostic_id"]
     model(c.workdir)
@@ -381,11 +381,11 @@ def test_observation_determinism_preserves_both_witnesses(tmp_path):
     try:
         first, _ = store.start_episode({"x": 0}, "test", {})
         a = store.record_step(first, {"x": 0}, 1, {"x": 1})
-        # Same screen and action again, but later in the chain: hidden state may differ.
+        # Same screen and action again, but later in the episode: hidden state may differ.
         later = store.record_step(first, {"x": 1}, 0, {"x": 0})
         hidden = store.record_step(first, {"x": 0}, 1, {"x": 2})
         assert later["conflicting_witnesses"] == hidden["conflicting_witnesses"] == []
-        # Same start and same action from a fresh chain, a different result: genuine randomness.
+        # Same start and same action from a fresh episode, a different result: genuine randomness.
         second, _ = store.start_episode({"x": 0}, "test", {})
         b = store.record_step(second, {"x": 0}, 1, {"x": 3})
         assert b["conflicting_witnesses"][0]["event_id"] == a["event_id"]
@@ -398,7 +398,7 @@ def test_worker_cannot_read_database_or_network(rig):
     c, _ = rig
     collect(c)
     model(c.workdir)
-    parser = c.workdir / "world_model/model_parser.py"
+    parser = c.workdir / "world_model/model_initial_state.py"
     parser.write_text(
         "from pathlib import Path\nimport socket\n"
         + parser.read_text()
@@ -439,7 +439,7 @@ def test_submitted_symlinks_and_plan_output_symlinks_are_rejected(rig, tmp_path)
     model(c.workdir)
     target = tmp_path / "outside.py"
     target.write_text("SECRET")
-    source = c.workdir / "world_model/model_parser.py"
+    source = c.workdir / "world_model/model_initial_state.py"
     source.unlink()
     source.symlink_to(target)
     result = c.tool("UpdateCodeWorldModel", {})

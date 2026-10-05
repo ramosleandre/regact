@@ -49,7 +49,6 @@ class CwmConfig:
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
     threshold_max_state_obs_size_ratio: float = 0.5
-    cwm_validation_policy: str = "required"
     max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
@@ -69,8 +68,6 @@ class CwmConfig:
         ):
             values[key] = typ(**dict(values.get(key) or {}))
         config = cls(**values)
-        if config.cwm_validation_policy != "required":
-            raise ValueError("protocol.cwm_validation_policy supports only 'required'")
         if config.planner.algorithm != "bfs":
             raise ValueError("protocol.planner.algorithm supports only 'bfs'")
 
@@ -86,7 +83,7 @@ class CwmConfig:
                 elif key == "n_tmp_images_saved_per_exploration":
                     if type(value) is not int or value < 0:
                         raise ValueError(f"{prefix}{key} must be a nonnegative integer")
-                elif key not in ("algorithm", "cwm_validation_policy"):
+                elif key != "algorithm":
                     if (
                         isinstance(value, bool)
                         or not isinstance(value, (int, float))

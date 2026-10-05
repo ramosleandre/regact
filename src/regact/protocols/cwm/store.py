@@ -55,11 +55,10 @@ class ExperienceStore:
                 INTEGER REFERENCES observations(id), UNIQUE(before_id,action_id,after_id));
             CREATE TABLE IF NOT EXISTS episodes(id INTEGER PRIMARY KEY, initial_obs_id INTEGER
                 REFERENCES observations(id), purpose TEXT, metadata TEXT, status TEXT,
-                stop_reason TEXT, result TEXT, chain_id INTEGER, continues INTEGER,
-                start_hash TEXT);
+                stop_reason TEXT, result TEXT, start_hash TEXT);
             CREATE TABLE IF NOT EXISTS step_events(id INTEGER PRIMARY KEY, episode_id INTEGER
                 REFERENCES episodes(id), step_index INTEGER, transition_id INTEGER REFERENCES
-                transitions(id), prev_hash TEXT, chain_hash TEXT,
+                transitions(id), prev_hash TEXT, history_hash TEXT,
                 UNIQUE(episode_id,step_index));
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, timestamp REAL, kind TEXT,
                 phase TEXT, payload TEXT);
@@ -99,9 +98,11 @@ class ExperienceStore:
         return str(self.db.execute(f"SELECT hash FROM {table} WHERE id=?", (row_id,)).fetchone()[0])
 
     def last_hash(self, episode: int) -> str:
-        """The chain hash after the episode's latest step: what happened since the chain began."""
+        """The history hash after the episode's latest step: its first observation and every
+        action and observation since."""
         row = self.db.execute(
-            "SELECT chain_hash FROM step_events WHERE episode_id=? ORDER BY step_index DESC LIMIT 1",
+            "SELECT history_hash FROM step_events WHERE episode_id=? "
+            "ORDER BY step_index DESC LIMIT 1",
             (episode,),
         ).fetchone()
         if row is not None:
@@ -111,37 +112,19 @@ class ExperienceStore:
         )
 
     def start_episode(
-        self,
-        obs: dict[str, Any],
-        purpose: str,
-        metadata: dict[str, Any],
-        *,
-        continues: int | None = None,
+        self, obs: dict[str, Any], purpose: str, metadata: dict[str, Any]
     ) -> tuple[int, int]:
-        """Start an episode: a fresh chain, or with ``continues`` (an explicit reset) the next
-        segment of that episode's chain, so the chain hash keeps covering what came before."""
         with self.db:
             oid = self._intern("observations", obs)
-            obs_hash = self._hash_of("observations", oid)
-            if continues is None:
-                chain, start = None, _link("start", obs_hash)
-            else:
-                chain = int(
-                    self.db.execute(
-                        "SELECT chain_id FROM episodes WHERE id=?", (continues,)
-                    ).fetchone()[0]
-                )
-                start = _link(self.last_hash(continues), purpose, obs_hash)
+            start = _link("start", self._hash_of("observations", oid))
             cursor = self.db.execute(
                 (
-                    "INSERT INTO episodes(initial_obs_id,purpose,metadata,status,chain_id,"
-                    "continues,start_hash) VALUES(?,?,?,'running',?,?,?)"
+                    "INSERT INTO episodes(initial_obs_id,purpose,metadata,status,start_hash) "
+                    "VALUES(?,?,?,'running',?)"
                 ),
-                (oid, purpose, canonical(metadata), chain, continues, start),
+                (oid, purpose, canonical(metadata), start),
             )
             episode = int(cursor.lastrowid or 0)
-            if chain is None:
-                self.db.execute("UPDATE episodes SET chain_id=? WHERE id=?", (episode, episode))
             self._bump()  # resets, including repeated ones, are part of the evidence boundary
             return episode, oid
 
@@ -166,15 +149,17 @@ class ExperienceStore:
             )
             step = int(
                 self.db.execute(
-                    "SELECT COUNT(*) FROM step_events WHERE episode_id=?", (episode,)
+                    "SELECT COALESCE(MAX(step_index)+1,0) FROM step_events WHERE episode_id=?",
+                    (episode,),
                 ).fetchone()[0]
             )
             prev = self.last_hash(episode)
-            chain_hash = _link(
+            history_hash = _link(
                 prev, self._hash_of("actions", a), self._hash_of("observations", n)
             )
-            # The same chain history and action that once led elsewhere: genuine randomness.
-            # (The same screen leading elsewhere is expected when the game has hidden state.)
+            # The same episode history and action that once led elsewhere: the game is random,
+            # or kept something a reset does not show. (The same screen leading elsewhere is
+            # expected when the game has hidden state.)
             witnesses = [
                 dict(row)
                 for row in self.db.execute(
@@ -185,9 +170,9 @@ class ExperienceStore:
                 )
             ]
             cur = self.db.execute(
-                "INSERT INTO step_events(episode_id,step_index,transition_id,prev_hash,chain_hash) "
-                "VALUES(?,?,?,?,?)",
-                (episode, step, tid, prev, chain_hash),
+                "INSERT INTO step_events"
+                "(episode_id,step_index,transition_id,prev_hash,history_hash) VALUES(?,?,?,?,?)",
+                (episode, step, tid, prev, history_hash),
             )
             self._bump()
             return {
@@ -197,7 +182,7 @@ class ExperienceStore:
                 "transition_id": tid,
                 "before_obs_id": b,
                 "after_obs_id": n,
-                "chain_hash": chain_hash,
+                "history_hash": history_hash,
                 "conflicting_witnesses": witnesses,
             }
 
@@ -283,11 +268,11 @@ class ExperienceStore:
         return [int(row[0]), *[int(item[1]) for item in rows]], [int(item[0]) for item in rows]
 
     def episodes(self) -> list[dict[str, Any]]:
-        """Every episode in start order, with its chain and its number of recorded steps."""
+        """Every episode in start order, with its number of recorded steps."""
         return [
             dict(row)
             for row in self.db.execute(
-                "SELECT e.id episode_id,e.purpose,e.chain_id,e.continues,e.initial_obs_id,"
+                "SELECT e.id episode_id,e.purpose,e.initial_obs_id,"
                 "e.start_hash,(SELECT COUNT(*) FROM step_events s WHERE s.episode_id=e.id) n_steps "
                 "FROM episodes e ORDER BY e.id"
             )
@@ -298,12 +283,22 @@ class ExperienceStore:
         return [
             {**dict(row), "action": json.loads(row["action"])}
             for row in self.db.execute(
-                "SELECT s.step_index,s.transition_id,t.after_id after_obs_id,s.chain_hash,"
+                "SELECT s.step_index,s.transition_id,t.after_id after_obs_id,s.history_hash,"
                 "a.payload action FROM step_events s JOIN transitions t ON t.id=s.transition_id "
                 "JOIN actions a ON a.id=t.action_id WHERE s.episode_id=? ORDER BY s.step_index",
                 (episode_id,),
             )
         ]
+
+    def repeated_histories(self) -> set[str]:
+        """History hashes reached more than once: the only points where a replay can reuse work."""
+        return {
+            str(row[0])
+            for row in self.db.execute(
+                "SELECT h FROM (SELECT history_hash h FROM step_events UNION ALL "
+                "SELECT start_hash FROM episodes) GROUP BY h HAVING COUNT(*)>1"
+            )
+        }
 
     def event(self, kind: str, phase: str, payload: dict[str, Any]) -> int:
         with self.db:

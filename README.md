@@ -18,12 +18,12 @@
 | Protocol | Workflow |
 |---|---|
 | **`vanilla`** | Read recorded experience, write a controller, and run it in the real environment. |
-| **`cwm`** | Build and validate a **Code World Model**, then run State-based controllers with per-action prediction checks. Current design: **v5**. |
+| **`cwm`** | Build and validate a **Code World Model**, then run State-based controllers with per-action prediction checks. Current design: **v6**. |
 | **`policy_search`** (default) | Explore directly, write `solution.py`, and evaluate the policy on fresh episodes. |
 
 Vanilla and CWM share dataset access, execution, resets and logging. Both support continuing one live environment across controller calls (`single_instance`) or starting fresh per call (`multi_instance`). Each call constructs a fresh controller; it may retain private memory within that call.
 
-The **agent**, **problem** and **protocol** have separate extension interfaces. Framework operations cross a localhost HTTP boundary. With sandboxing enabled, the game source is hidden from the agent. Submitted vanilla/CWM code is also isolated from the live environment and experience database. See [Protocols](docs/protocols.md) for the design and [CWM v5](docs/cwm.md) for its requirements and limitations.
+The **agent**, **problem** and **protocol** have separate extension interfaces. Framework operations cross a localhost HTTP boundary. With sandboxing enabled, the game source is hidden from the agent. Submitted vanilla/CWM code is also isolated from the live environment and experience database. See [Protocols](docs/protocols.md) for the design and [CWM v6](docs/cwm.md) for its requirements and limitations.
 
 ## Demo
 
@@ -94,7 +94,7 @@ make run ARGS="experiment=dev"
 # MiniGrid with Claude, continuing a live environment:
 make run ARGS="agent=claude problem=minigrid protocol=vanilla features=none problem.lifecycle=single_instance limits.max_tool_calls=100 limits.max_seconds_per_task=3600"
 
-# ARC-AGI-3 with Codex and CWM v5:
+# ARC-AGI-3 with Codex and CWM v6:
 make run ARGS="agent=codex problem=arc_agi 'problem.tasks=[ls20]' protocol=cwm features=none problem.lifecycle=single_instance limits.max_tool_calls=100 limits.max_seconds_per_task=3600"
 
 # Policy search with independent controller evaluations:
@@ -136,7 +136,7 @@ If you performed your experiments in `experiments/<benchmark_name>/`, you can al
 | **[Overview](docs/overview.md)** | Architecture, extension points and code map |
 | **[Protocols](docs/protocols.md)** | Choose a workflow · lifecycle versus protocol · add a protocol |
 | **[Managed execution](docs/managed_protocols.md)** | Vanilla and shared CWM behavior · controllers, resets, dataset API and parameters |
-| **[CWM v5](docs/cwm.md)** | Modeling, validation, exploration, simulation, optional planning and limitations |
+| **[CWM v6](docs/cwm.md)** | Modeling, validation, exploration, simulation, optional planning and limitations |
 | **[Agents](docs/agents.md)** | Use an agent backend · add a new one |
 | **[Environments](docs/environments.md)** | Use a problem · add a new one |
 | **[Features](docs/features.md)** | Policy-search evaluation settings and optional extensions |

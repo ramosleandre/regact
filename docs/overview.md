@@ -12,7 +12,7 @@ Regact gives a **code-writing agent** an unknown **game**, a workspace and a con
 
 Vanilla and CWM share environment management, the dataset, controller execution, resets and logging. Their scores describe observed interaction, without a separate final evaluation. Policy search evaluates submitted policies and re-evaluates the current policy at teardown.
 
-Start with [Protocols](protocols.md) to choose a workflow, [Managed execution](managed_protocols.md) for vanilla and the common CWM behavior, and [CWM v5](cwm.md) for modeling and validation.
+Start with [Protocols](protocols.md) to choose a workflow, [Managed execution](managed_protocols.md) for vanilla and the common CWM behavior, and [CWM v6](cwm.md) for modeling and validation.
 
 ## Extension points
 

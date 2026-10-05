@@ -86,7 +86,7 @@ def test_generated_data_api_hides_the_query_cap(rig, cap):
     assert transition["observation_id"] == 3 and transition["next_observation_id"] == 4
     assert transition["next_observation"]["frame"][0] == 3 and transition["action"] == 1
     [episode] = api.list_episodes()
-    assert episode["live"] and episode["n_steps"] == 3 and episode["continues_episode"] is None
+    assert episode["live"] and episode["n_steps"] == 3
     observations, actions = api.load_history(episode["episode_id"])
     assert [o["frame"][0] for o in observations] == [0, 1, 2, 3] and actions == [1, 1, 1]
     observations, actions = api.load_history(episode["episode_id"], step=1)

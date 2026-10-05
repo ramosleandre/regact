@@ -11,6 +11,7 @@ carries only the dynamic first observation. To change wording, edit the markdown
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -138,6 +139,7 @@ class PromptBuilder:
         terminal_examples: dict[str, str] | None = None,
         commands_in_workflow: bool = False,
         command_script: str = "framework/control.py",
+        command_descriptions: Mapping[str, str] | None = None,
     ) -> str:
         """Shared protocol assembly: role, terminal dialect, content, commands, hints.
 
@@ -155,6 +157,7 @@ class PromptBuilder:
                 tool_names,
                 include_terminal=not commands_in_workflow,
                 command_script=command_script,
+                descriptions=command_descriptions,
             ),
             *(after_tools or []),
         ]
@@ -220,6 +223,7 @@ def _framework_tools_block(
     *,
     include_terminal: bool = False,
     command_script: str = "framework/control.py",
+    descriptions: Mapping[str, str] | None = None,
 ) -> str:
     """How a NON-terminal agent invokes the framework tools - selected by ``tool_protocol``,
     never by a feature or a concrete agent name.
@@ -237,11 +241,13 @@ def _framework_tools_block(
     if tool_protocol in _TERMINAL_MD and not include_terminal:
         return ""
     if include_terminal:
-        lines = "\n".join(f"- `python {command_script} {name}`" for name in tool_names)
-        return (
-            "# Framework commands\n\nRun these from your working directory (no arguments):\n\n"
-            + lines
+        described = descriptions or {}
+        lines = "\n".join(
+            f"- `python {command_script} {name}`"
+            + (f": {described[name]}" if name in described else "")
+            for name in tool_names
         )
+        return "# Framework commands\n\nRun these from your working directory:\n\n" + lines
     # client_cli (Claude/codex): a plain list of the control commands
     lines = "\n".join(f"- `python {command_script} {name}`" for name in tool_names)
     return (

@@ -2,7 +2,7 @@
 
 In `vanilla` and `cwm`, Regact owns the live environment. The agent reads recorded experience and submits Python controllers through `RunController`. It cannot step or reset the environment through a separate client.
 
-This guide covers their shared behavior and all shared protocol parameters. [CWM v5](cwm.md) explains the additional modeling requirements. [Protocols](protocols.md) compares these workflows with policy search.
+This guide covers their shared behavior and all shared protocol parameters. [CWM v6](cwm.md) explains the additional modeling requirements. [Protocols](protocols.md) compares these workflows with policy search.
 
 ## Run, call and episode
 
@@ -132,7 +132,7 @@ The generated `framework/data_api.py` contains full docstrings and examples. No 
 | `list_transition_ids()` | All unique transition IDs, ascending |
 | `load_observations(ids)` | Complete observation dictionaries in the requested order; any number of IDs, one ID, or a range string `"[1:4, 8]"` |
 | `load_transitions(ids)` | `transition_id`, `observation_id`, `action`, `next_observation_id`, `observation`, `next_observation` |
-| `list_episodes()` | Every episode in start order: how it started, its chain, its number of steps, whether it is live |
+| `list_episodes()` | Every episode in start order: how it started, its number of steps, whether it is live |
 | `load_history(episode_id, step=None)` | `(observations, actions)` of one episode in time order |
 | `load_diagnostic(diagnostic_id)` | Complete evidence for a reported failed check; content depends on the diagnostic |
 | `save_image(path, ...)` | Write a PNG, print its source/path, return `None` |
@@ -181,7 +181,7 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 | `protocol.data_api.max_items` | `100` | Page/batch item cap |
 | `protocol.data_api.max_response_bytes` | `2097152` | Serialized bulk response cap (2 MiB); single-record exceptions described above |
 
-The callback cap applies to imports/startup, controller construction, `act`/`is_done`, optional controller callbacks, and, in CWM, `parse`/`render`/`step` and planner goal callbacks. It is separate from shell-tool timeouts.
+The callback cap applies to imports/startup, controller construction, `act`/`is_done`, optional controller callbacks, and, in CWM, `get_initial_state`/`render`/`step` and planner goal callbacks. It is separate from shell-tool timeouts.
 
 Each `RunController` gets a fresh time allowance. **There is no accumulated time cap per physical episode.** `protocol.execution.max_seconds_per_episode` was removed. Initial collection, validation and planning have their own limits. Budget errors identify the effective parameter and its value.
 

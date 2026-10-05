@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import ExitStack
 from typing import Any
 
@@ -38,7 +39,7 @@ class Coordinator(ManagedCoordinator):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # single_instance: the accepted CWM's State at a point of the live chain, carried across
+        # single_instance: the accepted CWM's State at a point of the live episode, carried across
         # RunController calls. None until a CWM is accepted, and after a contradiction.
         self.running: dict[str, Any] | None = None  # {"state", "hash"}
         self.state_sizes: dict[str, Any] = {}  # compactness totals, validation + exploration
@@ -68,7 +69,9 @@ class Coordinator(ManagedCoordinator):
             self.current_state = (
                 self.live_state(worker)
                 if self.single_instance
-                else self._explained(worker, worker.call("parse", obs=obs), obs, self.current_id)
+                else self._explained(
+                    worker, worker.call("get_initial_state", obs=obs), obs, self.current_id
+                )
             )
         return self.current_state
 
@@ -83,43 +86,35 @@ class Coordinator(ManagedCoordinator):
         self.current_state = self.next_state
         self._check_size(self.current_state, obs, evidence["after_obs_id"])
         if self.single_instance:
-            self.running = {"state": self.current_state, "hash": evidence["chain_hash"]}
+            self.running = {"state": self.current_state, "hash": evidence["history_hash"]}
 
     def after_valid_run(self):
         self.accepted["dataset_version"] = self.store.version
 
     def live_state(self, worker: Worker) -> Any:
-        """The accepted CWM's State at the live chain's current point: the running state, caught
-        up through anything recorded since (explicit resets), each screen checked on the way."""
+        """The accepted CWM's State at the live episode's current point: the running state, caught
+        up through anything recorded since (a reset, steps), each screen checked on the way."""
         position = self.store.last_hash(self.episode)
         if self.running is not None and self.running["hash"] == position:
             return self.running["state"]
-        episodes = self.store.episodes()
-        chain = next(e["chain_id"] for e in episodes if e["episode_id"] == self.episode)
+        episode = next(e for e in self.store.episodes() if e["episode_id"] == self.episode)
+        steps = self.store.episode_steps(self.episode)
         anchor = self.running["hash"] if self.running is not None else None
-        state = self.running["state"] if self.running is not None else None
-        replaying = anchor is None  # without a running state, replay the chain from its start
-        for segment in (e for e in episodes if e["chain_id"] == chain):
-            if replaying:
-                start = self.store.observation(segment["initial_obs_id"])
-                if segment["continues"] is not None and worker.reset_hook:
-                    kind = segment["purpose"].removeprefix("reset_")
-                    state = worker.call("reset", state=state, kind=kind)
-                else:
-                    state = worker.call("parse", obs=start)
-                state = self._explained(worker, state, start, segment["initial_obs_id"])
-            elif segment["start_hash"] == anchor:
-                replaying = True
-            for item in self.store.episode_steps(segment["episode_id"]):
-                if replaying:
-                    state = worker.call("step", state=state, action=item["action"])
-                    after = self.store.observation(item["after_obs_id"])
-                    state = self._explained(worker, state, after, item["after_obs_id"])
-                elif item["chain_hash"] == anchor:
-                    replaying = True
-        if not replaying:  # the running state is not on the live chain: rebuild from its start
-            self.running = None
-            return self.live_state(worker)
+        hashes = [item["history_hash"] for item in steps]
+        done = hashes.index(anchor) + 1 if anchor in hashes else None
+        if done is None and anchor != episode["start_hash"]:
+            oid = episode["initial_obs_id"]
+            start = self.store.observation(oid)
+            state = self._explained(
+                worker, worker.call("get_initial_state", obs=start), start, oid
+            )
+        else:
+            assert self.running is not None
+            state = self.running["state"]
+        for item in steps[done or 0 :]:
+            state = worker.call("step", state=state, action=item["action"])
+            after = self.store.observation(item["after_obs_id"])
+            state = self._explained(worker, state, after, item["after_obs_id"])
         self.running = {"state": state, "hash": position}
         return state
 
@@ -150,11 +145,10 @@ class Coordinator(ManagedCoordinator):
             {"bundle": bundle.name, "manifest": manifest, "dataset_version": self.store.version},
         )
         seconds = self.validation_budget()
+        clock = budgets.AgentClock(seconds)
+        started = time.monotonic()
         with self.worker(
-            bundle,
-            seconds,
-            "protocol.execution.max_seconds_per_UpdateCodeWorldModel",
-            clock=budgets.AgentClock(seconds),
+            bundle, seconds, "protocol.execution.max_seconds_per_UpdateCodeWorldModel", clock=clock
         ) as worker:
             summary, live = validate(
                 worker,
@@ -162,7 +156,13 @@ class Coordinator(ManagedCoordinator):
                 self.options,
                 live_episode=self.episode if self.single_instance else None,
             )
-        record = {"bundle": bundle.name, "manifest": manifest, "validation": summary}
+        record = {
+            "bundle": bundle.name,
+            "manifest": manifest,
+            "validation": summary,
+            "seconds": time.monotonic() - started,
+            "model_seconds": clock.used,
+        }
         version = (self.accepted["cwm_version"] if self.accepted else 0) + 1  # 1, 2, 3, ...
         if summary["accepted"]:
             record["cwm_version"] = version
@@ -186,13 +186,15 @@ class Coordinator(ManagedCoordinator):
         return {**summary, "cwm_version": self.accepted["cwm_version"] if self.accepted else None}
 
     def planning_start(self, worker: Worker, start: dict[str, Any]) -> Any:
-        """Where a plan starts: the live state in single_instance, the parsed initial observation
+        """Where a plan starts: the live state in single_instance, the initial observation's State
         in multi_instance. A screen the accepted CWM cannot explain sends the agent back to
         modelling, as in exploration."""
         try:
             if self.single_instance:
                 return self.live_state(worker)
-            return self._explained(worker, worker.call("parse", obs=start), start, self.initial_id)
+            return self._explained(
+                worker, worker.call("get_initial_state", obs=start), start, self.initial_id
+            )
         except ModelMismatch as exc:
             error = WorkerError(
                 f"The accepted CWM does not explain the planning start ({exc.kind}). "
@@ -261,7 +263,9 @@ class Coordinator(ManagedCoordinator):
                 )
             )
             worker.deadline = goal_worker.deadline = deadline
-            start = self.store.observation(self.current_id) if self.single_instance else self.initial
+            start = (
+                self.store.observation(self.current_id) if self.single_instance else self.initial
+            )
             start_state = self.planning_start(worker, start)
             result = plan(
                 worker,

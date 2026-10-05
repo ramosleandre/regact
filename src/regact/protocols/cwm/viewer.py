@@ -253,10 +253,9 @@ class Playback:
             budget_key="viewer reconstruction time limit",
             budget_seconds=120,
         ) as worker:
-            # v6 plans record the State they started from; v5 plans started from parse(initial).
             state = record.get("initial_state")
             if state is None:
-                state = worker.call("parse", obs=initial)
+                state = worker.call("get_initial_state", obs=initial)
             for action, expected in zip(actions, hashes, strict=True):
                 state = worker.call("step", state=state, action=action)
                 obs = check_observation(worker.call("render", state=state))
