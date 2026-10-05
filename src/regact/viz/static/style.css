@@ -76,6 +76,8 @@ details.think pre { color: var(--think); opacity: .85; }
 .tool .t b { color: var(--accent); }
 /* Long call args scroll in place, same as a long result body (no "…" truncation). */
 .tool .t pre.args { font-size: 12px; color: var(--muted); max-height: 220px; overflow: auto; margin: 6px 0 0; }
+.tool .t .argnotes { font-size: 11px; margin-top: 4px; white-space: pre-wrap; }
+.tool .t .args-path { font-size: 12px; }
 .tool .res { padding: 6px 10px; border-top: 1px dashed var(--line); }
 .tool .res.err { color: var(--bad); }
 .tool .res pre { font-size: 12px; color: var(--muted); max-height: 220px; overflow: auto; }

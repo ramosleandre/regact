@@ -34,8 +34,10 @@ class ToolCallView:
     tag: str | None = None  # policy submissions, CWM commands, or flagged calls
     framework_tool: str | None = None
     succeeded: bool | None = None
-    controller_playback_id: int | None = None
+    controller_playback_ids: list[int] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)  # why a call was tagged "cheat" (the reasons)
+    started: float | None = None  # UNIX seconds of the call and of its result, when recorded
+    ended: float | None = None
 
 
 @dataclass
@@ -217,6 +219,7 @@ def load_game(experiment_dir: str, game: str) -> GameView:
     config = _load_json(base / "config.json") or {}
     _enrich_derived_metrics(task_name(game, state), submissions, config)
     _tag_tool_calls(turns, submissions)
+    _link_store_records(turns, base / "cwm" / "experience.sqlite3")
     return GameView(name=game, state=state, turns=turns, submissions=submissions, config=config)
 
 
@@ -350,6 +353,7 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
                 id=str(event.get("id", "")),
                 name=str(event.get("name", "")),
                 input=event.get("input") or {},
+                started=_epoch(event.get("ts")),
             )
             current.items.append(TurnItem("tool", tool=call))
             by_id[call.id] = call
@@ -358,6 +362,7 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
             if target is not None:
                 target.result = str(event.get("output", ""))
                 target.is_error = bool(event.get("is_error", False))
+                target.ended = _epoch(event.get("ts"))
                 target.images = event.get("images") or []
         elif kind in ("IterationComplete", "TurnComplete"):  # "TurnComplete" = pre-rename bench 01
             current.usage = event.get("usage")
@@ -421,7 +426,7 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
                     and not call.is_error
                 ) if feedback else None
                 if type(feedback.get("exploration_id")) is int and type(feedback.get("current_observation_id")) is int:
-                    call.controller_playback_id = feedback["exploration_id"]
+                    call.controller_playback_ids = [feedback["exploration_id"]]
             elif _is_submit_call(call):
                 won = wins[submit_index] if submit_index < len(wins) else False
                 call.tag = "submit_win" if won else "submit"
@@ -433,6 +438,94 @@ def _tag_tool_calls(turns: list[TurnView], submissions: list[SubmissionView]) ->
                 if not call.framework_tool and call.tag not in ("submit", "submit_win"):
                     call.tag = "cheat"
                 call.flags = [*kw, *(["OS/proxy denial in result"] if denied else []), *(["Direct CWM environment access denied"] if cwm_denied else [])]
+
+
+# Every framework command logs an event with its full result in the run's store. Matching calls to
+# those events by time does not depend on what the agent printed: a RunController piped through
+# grep or head still gets its outcome and its playback.
+_COMMAND_EVENTS = (
+    "RunController",
+    "SubmitExplorationController",  # the CWM v4 name of RunController
+    "UpdateCodeWorldModel",
+    "PlanInCWM",
+    "ResetLevel",
+    "ResetEnvironment",
+)
+_CLOCK_SLACK_SECONDS = 1.0
+
+
+def _command_succeeded(command: str, result: dict[str, Any]) -> bool:
+    if result.get("error"):
+        return False
+    if command == "UpdateCodeWorldModel":
+        return result.get("accepted") is True
+    if command == "PlanInCWM":
+        return bool(result.get("candidate_found"))
+    return True
+
+
+def _link_store_records(turns: list[TurnView], store: Path) -> None:
+    """Give each framework command the outcome and playback of the commands that ran during it.
+
+    An event belongs to the first call whose [start, end] contains its time. A call can run
+    several commands (a script chaining them): it succeeds when all of its own kind did, and gets
+    a playback for every controller run. Calls without timestamps (older transcripts) or without
+    events (the result came back before the command finished) keep what was parsed from output.
+    """
+    calls = [
+        call
+        for turn in turns
+        for call in turn.tools
+        if call.framework_tool and call.started is not None and call.ended is not None
+    ]
+    if not calls or not store.is_file():
+        return
+    import sqlite3
+
+    marks = ",".join("?" * len(_COMMAND_EVENTS))
+    try:
+        with sqlite3.connect(f"file:{store}?mode=ro", uri=True) as db:
+            rows = db.execute(
+                f"SELECT id, timestamp, kind, payload FROM events WHERE kind IN ({marks}) ORDER BY id",
+                _COMMAND_EVENTS,
+            ).fetchall()
+    except sqlite3.Error:
+        return
+    events = [(eid, at, kind, json.loads(payload).get("result") or {}) for eid, at, kind, payload in rows]
+    claimed: set[int] = set()
+    for call in calls:
+        mine = [
+            (eid, kind, result)
+            for eid, at, kind, result in events
+            if eid not in claimed
+            and call.started - _CLOCK_SLACK_SECONDS <= at <= call.ended + _CLOCK_SLACK_SECONDS
+        ]
+        claimed.update(eid for eid, _, _ in mine)
+        if own := [result for _, kind, result in mine if kind == call.framework_tool]:
+            call.succeeded = all(_command_succeeded(call.framework_tool, r) for r in own)
+        if runs := [
+            result["exploration_id"]
+            for _, kind, result in mine
+            if kind in ("RunController", "SubmitExplorationController")
+            and type(result.get("exploration_id")) is int
+            and "observation_sequence" in result
+        ]:
+            call.controller_playback_ids = runs
+
+
+def _epoch(value: Any) -> float | None:
+    """UNIX seconds of an ISO-8601 transcript timestamp, or None when absent or unreadable."""
+    if not isinstance(value, str):
+        return None
+    from datetime import UTC, datetime
+
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:  # regact writes UTC; read a zone-less stamp the same way
+        moment = moment.replace(tzinfo=UTC)
+    return moment.timestamp()
 
 
 def _cwm_command(call: ToolCallView, _depth: int = 0) -> str | None:
