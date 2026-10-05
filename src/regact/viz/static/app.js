@@ -1079,27 +1079,8 @@ function toolBlock(tool, gameName) {
     t.append(h("span", "tag tag-cheat", "flagged"), " ");
   }
   t.append(h("b", null, tool.name), " ");
-  // A shell command: show the command (heredocs pulled out) + each written file as a collapsed
-  // block, so a `cat > file <<EOF ... EOF` payload is readable instead of a JSON-escaped wall.
-  const cmd = tool.input && typeof tool.input.command === "string" ? tool.input.command : null;
-  const parsed = cmd ? parseHeredocs(cmd) : null;
-  if (parsed && parsed.files.length) {
-    t.append(h("pre", "args", parsed.text.slice(0, _TOOL_TEXT_MAX)));
-    box.append(t);
-    for (const f of parsed.files) {
-      const drop = h("details", "filedrop");
-      const body = f.body.length > _FILE_TEXT_MAX ? f.body.slice(0, _FILE_TEXT_MAX) + "\n... (truncated)" : f.body;
-      drop.append(h("summary", null, f.name ? "file: " + f.name : "standard input"), h("pre", "filebody", body));
-      box.append(drop);
-    }
-    box.append(h("details", "filedrop", h("summary", null, "Original command"), h("pre", "filebody", cmd)));
-  } else {
-    // No heredoc files -> unchanged original behavior (the args JSON, inline if short).
-    const inp = JSON.stringify(tool.input);
-    if (inp.length > _INLINE_ARG_MAX) t.append(h("pre", "args", inp.slice(0, _TOOL_TEXT_MAX)));
-    else t.append(h("span", "muted", inp));
-    box.append(t);
-  }
+  box.append(t);
+  renderToolArgs(tool, t, box);
   if (tool.result != null) {
     const res = h("div", "res" + (tool.is_error ? " err" : ""));
     const fullResult = String(tool.result);
@@ -1119,13 +1100,65 @@ function toolBlock(tool, gameName) {
     }
     box.append(res);
     const replayIds = new Set(controllerResultIds(fullResult));
-    if (Number.isInteger(tool.controller_playback_id)) replayIds.add(tool.controller_playback_id);
+    for (const id of tool.controller_playback_ids || []) replayIds.add(id);
     for (const id of replayIds) {
       box.append(controllerReplay(gameName, id));
     }
   }
   if (tool.flags?.length) box.append(h('p', 'err', 'Flagged: ' + tool.flags.join('; ')));
   return box;
+}
+
+// Shell tools (Claude Code's Bash, Codex's shell, Alan's Bash) carry the command as a string, or
+// Codex as an argv list. Plain text reads far better than the escaped JSON of the raw arguments.
+function shellCommand(input) {
+  const cmd = input && (input.command ?? input.cmd);
+  if (typeof cmd === "string") return cmd;
+  if (Array.isArray(cmd) && cmd.every((part) => typeof part === "string")) return cmd.join(" ");
+  return null;
+}
+
+// The arguments a renderer did not show (Claude Code's `description`, `timeout`, ...), as notes.
+function argNotes(input, shown) {
+  const rest = Object.entries(input || {}).filter(([key]) => !shown.includes(key));
+  if (!rest.length) return null;
+  const text = rest.map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  return h("div", "argnotes muted", text.join("  ·  ").slice(0, _TOOL_TEXT_MAX));
+}
+
+function fileDrop(label, body) {
+  const text = body.length > _FILE_TEXT_MAX ? body.slice(0, _FILE_TEXT_MAX) + "\n... (truncated)" : body;
+  return h("details", "filedrop", h("summary", null, label), h("pre", "filebody", text));
+}
+
+function renderToolArgs(tool, header, box) {
+  const input = tool.input || {};
+  const cmd = shellCommand(input);
+  if (cmd !== null) {
+    // Heredocs that write files are pulled out into collapsed "file:" blocks.
+    const parsed = parseHeredocs(cmd);
+    header.append(h("pre", "args", parsed.text.slice(0, _TOOL_TEXT_MAX)));
+    const notes = argNotes(input, ["command", "cmd"]);
+    if (notes) header.append(notes);
+    for (const f of parsed.files) box.append(fileDrop(f.name ? "file: " + f.name : "standard input", f.body));
+    if (parsed.files.length) box.append(fileDrop("Original command", cmd));
+    return;
+  }
+  if (typeof input.file_path === "string") {  // Read / Write / Edit and their kin
+    header.append(h("span", "args-path", input.file_path));
+    const shown = ["file_path"];
+    if (typeof input.content === "string") { box.append(fileDrop("content", input.content)); shown.push("content"); }
+    if (typeof input.old_string === "string" && typeof input.new_string === "string") {
+      box.append(fileDrop("replace", input.old_string), fileDrop("with", input.new_string));
+      shown.push("old_string", "new_string");
+    }
+    const notes = argNotes(input, shown);
+    if (notes) header.append(notes);
+    return;
+  }
+  // Any other tool: its raw arguments, inline when short.
+  const raw = JSON.stringify(input);
+  header.append(raw.length > _INLINE_ARG_MAX ? h("pre", "args", raw.slice(0, _TOOL_TEXT_MAX)) : h("span", "muted", raw));
 }
 
 function controllerResultIds(text) {

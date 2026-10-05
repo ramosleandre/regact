@@ -74,3 +74,29 @@ vm.runInContext(String.raw`
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
+
+
+def test_shell_commands_render_as_text_with_their_extra_arguments():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = Path(__file__).parents[1] / "src/regact/viz/static/app.js"
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sandbox = {document: {getElementById: () => ({})}, window: {addEventListener: () => {}},
+  AbortController, DOMException, Intl, URL, fetch: async () => ({ok: true, json: async () => ({})})};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$/, ''), sandbox);
+vm.runInContext(String.raw`
+  if (shellCommand({command: 'ls -la'}) !== 'ls -la') throw Error('string command');
+  if (shellCommand({command: ['bash', '-lc', 'ls']}) !== 'bash -lc ls') throw Error('argv command');
+  if (shellCommand({file_path: 'x'}) !== null) throw Error('not a shell call');
+  globalThis.h = (tag, cls, ...kids) => ({tag, cls, kids});
+  const notes = argNotes({command: 'ls', description: 'List files', timeout: 1800000}, ['command']);
+  if (!notes.kids[0].includes('description: List files') || !notes.kids[0].includes('timeout: 1800000'))
+    throw Error('extra arguments are shown as notes');
+  if (argNotes({command: 'ls'}, ['command']) !== null) throw Error('no notes when nothing else');
+`, sandbox);
+"""
+    subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
