@@ -68,9 +68,13 @@ _LIMIT_RESET = re.compile(
 )
 
 
+_RESET_JUST_PASSED = timedelta(minutes=30)  # an error seen this soon after its own reset time
+
+
 def limit_reset_unix(message: str, now: float) -> float | None:
     """When the usage limit in a Claude Code error message resets, as UNIX time: the next
-    occurrence of the stated local time after ``now``. ``None`` for any other message."""
+    occurrence of the stated local time after ``now``, or that time today when it has only just
+    passed (the error arrived as the limit reset). ``None`` for any other message."""
     match = _LIMIT_RESET.search(message)
     if match is None:
         return None
@@ -85,7 +89,7 @@ def limit_reset_unix(message: str, now: float) -> float | None:
             reset = reset.replace(month=dated.month, day=dated.day)
             if reset <= current:
                 reset = reset.replace(year=reset.year + 1)
-        elif reset <= current:
+        elif reset <= current - _RESET_JUST_PASSED:
             reset += timedelta(days=1)
     except (ValueError, KeyError):
         return None

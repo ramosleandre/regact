@@ -70,6 +70,7 @@ _MAX_CONSECUTIVE_ERROR_TURNS = 3
 # A backend usage limit (a subscription window) is waited out instead of ending the run, when it
 # resets within this long. The margin covers a reset that lands slightly late.
 _MAX_USAGE_LIMIT_WAIT_S = 6 * 3600
+_MAX_USAGE_LIMIT_TOTAL_WAIT_S = 24 * 3600  # over the whole task
 _USAGE_LIMIT_MARGIN_S = 60
 _ERROR_RETRY_MESSAGE = (
     "Your previous turn was interrupted by a backend error. "
@@ -194,10 +195,15 @@ async def run_session(
                 break
             if outcome.error_category is not None:
                 experiment.last_error_category = outcome.error_category.value
-                wait = _usage_limit_wait(agent.usage_limit_reset(outcome.error_message), limits)
+                wait = _usage_limit_wait(
+                    agent.usage_limit_reset(outcome.error_message),
+                    limits,
+                    experiment.usage_limit_waited_s,
+                )
                 if wait is not None:
                     if watchdog is not None:
                         watchdog.cancel()
+                    protocol.on_start(start, None)  # no deadline while the clock is paused
                     waited = await _sleep_through_usage_limit(wait, ctx)
                     if waited is None:
                         reason = "interrupted"
@@ -265,17 +271,24 @@ async def run_session(
     return reason
 
 
-def _usage_limit_wait(reset_unix: float | None, limits: LimitsConfig) -> float | None:
+def _usage_limit_wait(
+    reset_unix: float | None, limits: LimitsConfig, already_waited: float
+) -> float | None:
     """Seconds to sleep until a backend usage limit resets, or None when the error is not such a
-    limit, or waiting is pointless (too long, or past the experiment's own deadline)."""
+    limit, or waiting is refused (too long, in one go or over the task, or past the experiment's
+    own deadline)."""
     if reset_unix is None:
         return None
     resume_unix = reset_unix + _USAGE_LIMIT_MARGIN_S
-    wait = resume_unix - time.time()
+    wait = max(resume_unix - time.time(), 0.0)
     deadline = limits.experiment_deadline_unix
-    if wait > _MAX_USAGE_LIMIT_WAIT_S or (deadline is not None and resume_unix >= deadline):
+    if (
+        wait > _MAX_USAGE_LIMIT_WAIT_S
+        or already_waited + wait > _MAX_USAGE_LIMIT_TOTAL_WAIT_S
+        or (deadline is not None and resume_unix >= deadline)
+    ):
         return None
-    return max(wait, 0.0)
+    return wait
 
 
 async def _sleep_through_usage_limit(seconds: float, ctx: _LoopContext) -> float | None:

@@ -271,6 +271,23 @@ async def test_a_usage_limit_that_resets_too_late_ends_the_run(tmp_path: Path) -
     assert reason == "agent_api" and stack.experiment.usage_limit_waits == 0
 
 
+async def test_waits_for_usage_limits_are_capped_over_the_task(tmp_path: Path, monkeypatch) -> None:
+    from regact.orchestration import loop
+
+    monkeypatch.setattr(loop, "_USAGE_LIMIT_MARGIN_S", 0)
+    monkeypatch.setattr(loop, "_MAX_USAGE_LIMIT_TOTAL_WAIT_S", 1.0)
+
+    class LimitedAgent(ScriptedAgent):
+        def usage_limit_reset(self, message: str) -> float | None:
+            return time.time() + 0.6
+
+    stack = _Stack(tmp_path)
+    limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
+    reason = await stack.run(LimitedAgent([[limit, IterationComplete()] for _ in range(8)]))
+
+    assert reason == "agent_api" and stack.experiment.usage_limit_waits == 1
+
+
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(max_turns_per_task=2)
