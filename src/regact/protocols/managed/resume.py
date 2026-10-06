@@ -39,19 +39,16 @@ def rebuild_environment(
     for an empty store.
 
     Episodes are replayed as the coordinator ran them: an explicit reset acts on the live
-    instance; any other start (the initial collection, a multi_instance exploration) makes the
-    environment through its lifecycle policy and resets it. Replaying everything, not only what
-    follows the last environment start, also restores the wrapper's action counters.
+    instance, in either lifecycle; any other start (the initial collection, a multi_instance
+    exploration) makes the environment through its lifecycle policy and resets it. Replaying
+    everything, not only what follows the last environment start, also restores the wrapper's
+    action counters.
     """
     if env.live is not None:
         raise ValueError("rebuild_environment needs an environment session that was never made")
     obs: dict[str, Any] | None = None
     for episode in store.episodes():
         kind = _RESETS.get(episode["purpose"])
-        if kind is not None and not single_instance:
-            raise ValueError(
-                f"episode {episode['episode_id']}: an explicit reset in multi_instance"
-            )
         if kind is None:
             live = env.live if single_instance and env.live is not None else env.make()
             obs = live.reset_explicit("environment", seed=seed).to_json()
