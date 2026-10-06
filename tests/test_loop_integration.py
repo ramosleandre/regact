@@ -283,6 +283,23 @@ async def test_a_resumed_task_gets_what_the_new_deadline_leaves(tmp_path: Path) 
     assert 1000.0 <= stack.experiment.duration_s < 1010.0
 
 
+@pytest.mark.parametrize(
+    "limits,detail",
+    [
+        (LimitsConfig(max_seconds_per_task=0), "task_budget"),
+        (LimitsConfig(experiment_deadline_unix=1), "experiment_deadline"),
+    ],
+)
+async def test_a_walltime_end_records_which_limit_caused_it(
+    tmp_path: Path, limits: LimitsConfig, detail: str
+) -> None:
+    stack = _Stack(tmp_path)
+    stack.limits = limits
+    reason = await stack.run(ScriptedAgent([]))
+
+    assert reason == "walltime_limit" and stack.experiment.exit_detail == detail
+
+
 async def test_waits_for_usage_limits_are_capped_over_the_task(tmp_path: Path, monkeypatch) -> None:
     from regact.orchestration import loop
 

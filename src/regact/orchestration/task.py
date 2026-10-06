@@ -183,8 +183,21 @@ def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
 
 _RESUME_MESSAGE = (
     "This task was interrupted and has now been resumed. Your working directory, the recorded "
-    "data and the game's position are as you left them; a command that was running when the "
-    "interruption happened did not complete. Continue your work."
+    "data and the game's position are as you left them. A command that was running when the "
+    "interruption happened did not complete, and scripts you had left running were stopped."
+)
+# Launch settings a resume may change; anything else must equal the task's config.json.
+_RESUME_MAY_CHANGE = frozenset(
+    {
+        "limits",
+        "launch",
+        "resume",
+        "resume_any_version",
+        "output_root",
+        "experiment_name",
+        "parallel_workers",
+        "n_attempts_per_task",
+    }
 )
 
 
@@ -297,8 +310,25 @@ async def run_task(
             )
     # Before config.json is written, so the artifact records the inner cap the run used.
     _seed_alan_iteration_budget(config.agent, config.limits)
-    with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
-        json.dump(redacted_config_dict(config), handle, indent=2, default=str)
+    recorded = json.loads(json.dumps(redacted_config_dict(config), default=str))
+    config_name = "config.json"
+    if previous is not None:
+        # config.json stays the record of what the task started with.
+        with open(os.path.join(output_dir, "config.json"), encoding="utf-8") as handle:
+            original = json.load(handle)
+        changed = [
+            key
+            for key in sorted(set(original) | set(recorded))
+            if key not in _RESUME_MAY_CHANGE and original.get(key) != recorded.get(key)
+        ]
+        if changed:
+            raise RuntimeError(
+                f"{output_dir}: resume with a different experiment ({', '.join(changed)} "
+                "differ from the task's config.json)"
+            )
+        config_name = f"config.resume{len(previous.resumed_at) + 1}.json"
+    with open(os.path.join(output_dir, config_name), "w", encoding="utf-8") as handle:
+        json.dump(recorded, handle, indent=2)
 
     server = _build_server(
         config, problem, task_name, protocol=protocol, workdir=workdir, output_dir=output_dir
@@ -334,7 +364,8 @@ async def run_task(
                 ),
             )
             if resuming:
-                experiment.exit_reason = experiment.last_error_category = None
+                experiment.exit_reason = experiment.exit_detail = None
+                experiment.last_error_category = None
                 experiment.exit_requested = False
                 experiment.resumed_at.append(time.time())
             src_dir = _regact_src_dir()
@@ -569,7 +600,7 @@ async def run_task(
                 if config.first_obs_in_prompt:
                     rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
                 first_message = (
-                    _RESUME_MESSAGE
+                    f"{_RESUME_MESSAGE} {session.resume_notice()}".strip()
                     if resuming
                     else builder.build_first_message(rendered_first_obs)
                 )

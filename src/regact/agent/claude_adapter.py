@@ -68,6 +68,7 @@ _LIMIT_RESET = re.compile(
 )
 
 
+_KEPT_HOME_MAX_AGE_S = 14 * 24 * 3600  # a conversation kept for a resume, then never resumed
 _RESET_JUST_PASSED = timedelta(minutes=30)  # an error seen this soon after its own reset time
 
 
@@ -132,8 +133,13 @@ class ClaudeAgent(_CliAgent):
         """A FRESH per-task config dir seeded with ONLY the (freshest) auth credential - no
         projects/memory, sessions, or history from any prior task or run (which a shared home would
         accumulate). The root persists the login; each task gets its own empty dir under it."""
-        home = os.path.join(self._home_root, "session", uuid.uuid4().hex)
+        sessions = os.path.join(self._home_root, "session")
+        home = os.path.join(sessions, uuid.uuid4().hex)
         os.makedirs(home, exist_ok=True)
+        for name in os.listdir(sessions):  # homes kept for a resume that never came
+            kept = os.path.join(sessions, name)
+            if time.time() - os.path.getmtime(kept) > _KEPT_HOME_MAX_AGE_S:
+                shutil.rmtree(kept, ignore_errors=True)
         src = self._freshest_creds()
         if src is not None:
             shutil.copyfile(src, os.path.join(home, ".credentials.json"))

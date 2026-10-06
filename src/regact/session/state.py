@@ -16,7 +16,7 @@ from typing import Any
 
 
 # None: the process died before recording a reason.
-_RESUMABLE_EXITS = (None, "interrupted", "walltime_limit", "agent_api", "loop_crash")
+_RESUMABLE_EXITS = (None, "interrupted", "agent_api", "loop_crash")
 
 
 @dataclass
@@ -37,6 +37,7 @@ class ExperimentState:
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
     exit_reason: str | None = None  # set at teardown; None while the run is still going
+    exit_detail: str | None = None  # walltime_limit: "task_budget" or "experiment_deadline"
     flagged_tool_calls: int = 0
     tool_calls_total: int = 0  # tool calls emitted this run; << turn => agent spinning
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
@@ -59,7 +60,10 @@ class ExperimentState:
 
     def resumable(self) -> bool:
         """Whether the task stopped for a reason a later process can continue from: its process
-        died, it was interrupted, its job ran out of time, or the backend or framework failed."""
+        died, it was interrupted, its job reached the experiment deadline, or the backend or
+        framework failed."""
+        if self.exit_reason == "walltime_limit":  # the task's own budget is a final end
+            return self.exit_detail == "experiment_deadline"
         return self.exit_reason in _RESUMABLE_EXITS
 
     @classmethod

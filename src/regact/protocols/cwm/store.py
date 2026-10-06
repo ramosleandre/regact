@@ -39,15 +39,20 @@ def info_trace(db: sqlite3.Connection) -> list[tuple[int, dict[str, Any]]]:
 
 
 def regact_commit() -> str:
-    """The commit of the regact checkout that is running, or "unknown" outside a git checkout."""
-    try:
+    """The commit of the regact checkout that is running, with ``+dirty`` when it has uncommitted
+    changes, or "unknown" outside a git checkout."""
+
+    def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(Path(__file__).parent), "rev-parse", "HEAD"],
+            ["git", "-C", str(Path(__file__).parent), *args],
             capture_output=True,
             text=True,
             timeout=10,
             check=True,
         ).stdout.strip()
+
+    try:
+        return git("rev-parse", "HEAD") + ("+dirty" if git("status", "--porcelain") else "")
     except (OSError, subprocess.SubprocessError):
         return "unknown"
 
@@ -118,15 +123,13 @@ class ExperienceStore:
             self.db.execute("SELECT value FROM meta WHERE key='dataset_version'").fetchone()[0]
         )
 
+    def record_commit(self) -> None:
+        with self.db:
+            self.db.execute("UPDATE meta SET value=? WHERE key='regact_commit'", (regact_commit(),))
+
     def recorded_commit(self) -> str:
-        """The regact commit that created this store (set on first use)."""
+        """The regact commit that created this store; empty for a store older than this record."""
         row = self.db.execute("SELECT value FROM meta WHERE key='regact_commit'").fetchone()
-        if not row[0]:
-            with self.db:
-                self.db.execute(
-                    "UPDATE meta SET value=? WHERE key='regact_commit'", (regact_commit(),)
-                )
-            return self.recorded_commit()
         return str(row[0])
 
     def reopen(self, episode: int | None) -> None:

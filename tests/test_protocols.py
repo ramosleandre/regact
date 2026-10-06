@@ -393,6 +393,12 @@ async def test_an_interrupted_task_is_resumed_in_place_and_a_finished_one_is_ski
     (tmp_path / "workdir/toy.py").write_text("# the agent's edit\n")
 
     resumed = dataclasses.replace(config, resume=out)
+    original = (tmp_path / "config.json").read_text()
+    other_seed = dataclasses.replace(
+        resumed, problem=dataclasses.replace(config.problem, seed=(config.problem.seed or 0) + 1)
+    )
+    with pytest.raises(RuntimeError, match="different experiment .problem"):
+        await run_task(other_seed, _Problem(), "corridor", output_dir=out, agent=Resumable([]))
     second = Resumable([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
     assert (
         await run_task(resumed, _Problem(), "corridor", output_dir=out, agent=second)
@@ -402,6 +408,8 @@ async def test_an_interrupted_task_is_resumed_in_place_and_a_finished_one_is_ski
     assert "interrupted and has now been resumed" in second.sent[0]
     state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
     assert state["tool_calls_total"] == 3 and len(state["resumed_at"]) == 1
+    assert (tmp_path / "config.json").read_text() == original  # what the task started with
+    assert json.loads((tmp_path / "config.resume1.json").read_text())["resume"] == out
     assert (tmp_path / "workdir/toy.py").read_text() == "# the agent's edit\n"
     transcript = (tmp_path / "logs/transcript.jsonl").read_text()
     assert transcript.count("Toy workflow") == 1  # the system prompt is recorded once

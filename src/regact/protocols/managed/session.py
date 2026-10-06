@@ -116,7 +116,7 @@ class ManagedCoordinator:
             if resuming:
                 self._restore()
             else:
-                self.store.recorded_commit()
+                self.store.record_commit()
                 self.initial = self._reset("initial_collection")
                 self.initial_id = self.current_id
         except BaseException:
@@ -159,8 +159,8 @@ class ManagedCoordinator:
         recorded, running = self.store.recorded_commit(), regact_commit()
         if recorded != running and not self.config.resume_any_version:
             raise RuntimeError(
-                f"this task was recorded by regact {recorded[:7]}, not {running[:7]}; check that "
-                "commit out, or pass resume_any_version=true"
+                f"this task was recorded by regact {recorded[:14] or 'of an unknown commit'}, not "
+                f"{running[:14]}; check that commit out, or pass resume_any_version=true"
             )
         rebuild_environment(
             self.store,
@@ -1156,6 +1156,13 @@ class ManagedSession(ProtocolSession):
 
     def stop_reason(self) -> str | None:
         return self.coordinator.terminal
+
+    def resume_notice(self) -> str:
+        phase = self.coordinator.phase
+        return (
+            f"Current phase is {phase}: {self.coordinator.phase_description(phase)} "
+            "`data_api.summary()` gives the current position."
+        )
 
     def task_metrics(self) -> dict[str, Any] | None:
         return self.coordinator.task_metrics()

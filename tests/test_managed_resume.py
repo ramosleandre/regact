@@ -202,3 +202,31 @@ def test_a_recorded_task_is_not_reopened_without_resume_or_by_another_commit(
     with pytest.raises(RuntimeError, match="recorded by regact"):
         reopened(c, Lifecycle.SINGLE_INSTANCE)
     reopened(c, Lifecycle.SINGLE_INSTANCE, resume_any_version=True).close("test_finished")
+
+
+def test_a_store_without_a_recorded_commit_needs_the_explicit_override(hidden_rig):
+    import sqlite3
+
+    c = played(hidden_rig, Lifecycle.SINGLE_INSTANCE)
+    killed(c)
+    with sqlite3.connect(c.root / "experience.sqlite3") as db:  # as stores older than the record
+        db.execute("UPDATE meta SET value='' WHERE key='regact_commit'")
+    with pytest.raises(RuntimeError, match="unknown commit"):
+        reopened(c, Lifecycle.SINGLE_INSTANCE)
+    reopened(c, Lifecycle.SINGLE_INSTANCE, resume_any_version=True).close("test_finished")
+
+
+def test_only_an_experiment_deadline_makes_a_walltime_end_resumable():
+    from regact.session.state import ExperimentState
+
+    state = ExperimentState(problem_name="fake", task_name="counter")
+    assert state.resumable()  # no exit reason: the process died
+    for reason, detail, expected in (
+        ("walltime_limit", "task_budget", False),
+        ("walltime_limit", "experiment_deadline", True),
+        ("agent_api", None, True),
+        ("solved", None, False),
+        ("tool_call_limit", None, False),
+    ):
+        state.exit_reason, state.exit_detail = reason, detail
+        assert state.resumable() is expected, reason

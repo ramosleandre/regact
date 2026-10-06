@@ -91,6 +91,10 @@ class ProtocolSession(ABC):
         """Release protocol resources on every exit, including dry runs."""
         return None
 
+    def resume_notice(self) -> str:
+        """Where the task stands, added to the message a resumed agent receives."""
+        return ""
+
     def task_metrics(self) -> dict[str, Any] | None:
         """The problem's main metrics for the task so far, or None when nothing is scored yet."""
         return None

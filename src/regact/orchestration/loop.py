@@ -137,6 +137,7 @@ async def run_session(
 ) -> str:
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic() - experiment.duration_s  # a resumed task keeps its elapsed time
+    initial_limits = limits
     budget = limits.seconds_left()
     if budget is not None and experiment.duration_s:  # counted from the task's first start
         cap = limits.max_seconds_per_task
@@ -262,6 +263,12 @@ async def run_session(
     # read as "still running" forever - bench-04 job 5418021 was SIGKILLed two minutes into its
     # final re-score, having correctly decided walltime_limit.
     experiment.exit_reason = reason  # "running" until set; the viewer shows it as the status
+    if reason == "walltime_limit":
+        own = initial_limits.max_seconds_per_task
+        spent = time.monotonic() - start
+        experiment.exit_detail = (
+            "task_budget" if own is not None and spent >= own else "experiment_deadline"
+        )
     _save_state(ctx)
     await _run_teardown_hooks(protocol.hooks, reason, ctx)
     protocol.after_teardown(reason, logger)
