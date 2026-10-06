@@ -242,7 +242,8 @@ async def test_a_usage_limit_is_waited_out_with_the_task_clock_paused(
             return time.time() + 1.2 if "session limit" in message else None
 
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(max_seconds_per_task=1)  # shorter than the wait itself
+    # A task budget shorter than the wait itself.
+    stack.limits = LimitsConfig(max_seconds_per_task=1, wait_for_usage_limit=True)
     limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
     limited = [[limit, IterationComplete()] for _ in range(4)]
     agent = LimitedAgent([*limited, [ToolCall("c1", "ExitTask", {}), IterationComplete()]])
@@ -258,13 +259,30 @@ async def test_a_usage_limit_is_waited_out_with_the_task_clock_paused(
     assert events.count('"usage_limit_wait"') == 4 and "usage_limit_resumed" in events
 
 
+async def test_a_usage_limit_ends_the_task_at_once_by_default(tmp_path: Path) -> None:
+    class LimitedAgent(ScriptedAgent):
+        def usage_limit_reset(self, message: str) -> float | None:
+            return 1_800_000_000.0 if "session limit" in message else None
+
+    stack = _Stack(tmp_path)
+    limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
+    agent = LimitedAgent([[limit, IterationComplete()] for _ in range(3)])
+    reason = await stack.run(agent)
+
+    assert reason == "usage_limit" and len(agent.sent) == 1  # no retry against a closed window
+    assert stack.experiment.exit_detail == "resets 1800000000"
+    assert stack.experiment.resumable() and stack.experiment.usage_limit_waits == 0
+
+
 async def test_a_usage_limit_that_resets_too_late_ends_the_run(tmp_path: Path) -> None:
     class LimitedAgent(ScriptedAgent):
         def usage_limit_reset(self, message: str) -> float | None:
             return time.time() + 3600
 
     stack = _Stack(tmp_path)
-    stack.limits = LimitsConfig(experiment_deadline_unix=int(time.time()) + 600)
+    stack.limits = LimitsConfig(
+        experiment_deadline_unix=int(time.time()) + 600, wait_for_usage_limit=True
+    )
     limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
     reason = await stack.run(LimitedAgent([[limit, IterationComplete()]] * 5))
 
@@ -311,6 +329,7 @@ async def test_waits_for_usage_limits_are_capped_over_the_task(tmp_path: Path, m
             return time.time() + 0.6
 
     stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(wait_for_usage_limit=True)
     limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
     reason = await stack.run(LimitedAgent([[limit, IterationComplete()] for _ in range(8)]))
 

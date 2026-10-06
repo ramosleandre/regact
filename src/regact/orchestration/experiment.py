@@ -20,7 +20,7 @@ from regact.config.schema import RunConfig
 from regact.obs.console import configure_console_logging, console
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.orchestration.scheduler import Scheduler
-from regact.orchestration.signals import install_stop_signal
+from regact.orchestration.signals import FileStop, clear_stop, install_stop_signal
 from regact.orchestration.task import run_task
 from regact.problems.base import build_problem
 
@@ -173,12 +173,21 @@ async def run_experiment(config: RunConfig, *, output_root: str | None = None) -
     rel = quote(os.path.relpath(root, os.path.abspath(config.output_root)), safe="")
     console(f"viz: http://localhost:8030/#run/{rel}")
     console(f"folder: {root}")  # the on-disk run dir, so the raw artifacts are one copy-paste away
+    clear_stop(root)
     with install_stop_signal() as stop:
 
         async def unit(item: tuple[str, int]) -> str:
             task, attempt = item
             out_dir = os.path.join(root, _run_label(task, attempt, n_attempts))
-            return await run_task(config, problem, task, output_dir=out_dir, stop=stop)
+            task_stop = FileStop(stop, [root, out_dir])
+            if os.path.isdir(out_dir):
+                clear_stop(out_dir)
+            if task_stop.is_set():
+                return "not_started"  # its directory is untouched: a resume runs it normally
+            reason = await run_task(config, problem, task, output_dir=out_dir, stop=task_stop)
+            if reason == "usage_limit":
+                stop.set()  # the other tasks share the exhausted backend
+            return reason
 
         reasons = await Scheduler(config).run(unit, plan, task_of=lambda it: it[0])
     result = {

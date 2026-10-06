@@ -83,6 +83,10 @@ run-kaggle:  ## run ── Competition run (flags via ARGS=..., e.g. ARGS="--gam
 prompt-run:  ## run ── Prompt-only run: write the prompt to a run dir, no agent/cost; view via make viz
 	$(RUN) -m $(PKG).run_exp dry_run=true $(ARGS)
 
+.PHONY: stop
+stop:  ## run ── Stop a running launch: make stop RUN_DIR=<run dir> [ARGS="--task ls20"]; continue with resume=<run dir>
+	$(RUN) -m $(PKG).stop $(RUN_DIR) $(ARGS)
+
 .PHONY: viz
 viz:  ## run ── Visualizer: make viz EXP=experiments [PORT=8030] (EXP = any run, experiment, or top folder to browse)
 	$(RUN) -m $(PKG).viz.app --experiment $(EXP) --port $(or $(PORT),8030)

@@ -237,3 +237,38 @@ def test_preflight_passes_on_a_normal_dir_and_leaves_nothing_behind(tmp_path):
 
     _preflight_writable(str(tmp_path))
     assert list(tmp_path.iterdir()) == []
+
+
+async def test_a_stop_request_ends_the_launch_and_leaves_unstarted_tasks_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from regact.orchestration import experiment
+    from regact.orchestration.signals import request_stop
+
+    monkeypatch.setattr("regact.orchestration.signals._FILE_CHECK_S", 0.0)
+    started: list[str] = []
+
+    async def run_then_ask_to_stop(config, problem, task, *, output_dir, stop):
+        started.append(task)
+        request_stop(str(tmp_path))  # someone runs `python -m regact.stop <run dir>`
+        return "interrupted" if stop.is_set() else "solved"
+
+    monkeypatch.setattr(experiment, "run_task", run_then_ask_to_stop)
+    config = RunConfig(
+        agent=AgentConfig(name=AgentName.SCRIPTED), problem=ProblemConfig(name="fake_exp")
+    )
+    reasons = await run_experiment(config, output_root=str(tmp_path))
+
+    assert started == ["g1"] and reasons == {"g1": "interrupted", "g2": "not_started"}
+    assert not (tmp_path / "g2").exists()
+
+    # A later launch in the same directory does not inherit the request.
+    started.clear()
+    monkeypatch.setattr(experiment, "run_task", lambda *a, **k: _solved(started, a))
+    reasons = await run_experiment(config, output_root=str(tmp_path))
+    assert reasons == {"g1": "solved", "g2": "solved"}
+
+
+async def _solved(started: list[str], args: tuple) -> str:
+    started.append(args[2])
+    return "solved"

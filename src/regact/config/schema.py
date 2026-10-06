@@ -78,6 +78,9 @@ class LimitsConfig:
     # agent's own inner cap is set from it so a single query returns near the budget (see task.py).
     max_tool_calls: int | None = None
     max_seconds_per_task: int | None = None  # wall-clock per task, from session start
+    # A backend usage limit (a subscription window) ends the task with usage_limit, resumable;
+    # true sleeps until the limit resets instead, with the task clock paused.
+    wait_for_usage_limit: bool = False
     max_actions_per_episode: int | None = None  # env.step cap per episode (reset renews it)
     # Doom-loop breaker: end the loop after N consecutive REGACT TURNS with no tool call (a
     # degenerate model spinning garbage); 0 disables. Any tool call (framework/bash/native)

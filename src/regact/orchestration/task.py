@@ -303,7 +303,7 @@ async def run_task(
             return str(previous.exit_reason)  # finished in the earlier launch
         if not protocol.resumable:
             raise RuntimeError(f"protocol {protocol.name} cannot resume a task")
-        if previous.agent_resume is None:
+        if previous.agent_resume is None and previous.turn > 0:
             raise RuntimeError(
                 f"{output_dir}: the agent's conversation was not kept, so this task cannot be "
                 "resumed; run it again from scratch"
@@ -442,11 +442,13 @@ async def run_task(
             tools: list[Tool] = [LoggingTool(tool, logger) for tool in session.tools]
 
             agent = agent or build_agent(config.agent)
-            if resuming:
+            # A task stopped before its agent ever ran has no conversation: its agent starts anew.
+            token = experiment.agent_resume if resuming else None
+            continued = token is not None
+            if token is not None:
                 # Before anything asks the agent for its paths: the sandbox binds the home the
                 # conversation lives in, not a fresh one.
-                assert experiment.agent_resume is not None
-                agent.resume_from(experiment.agent_resume)
+                agent.resume_from(token)
             caps = agent.capabilities()
             # Every non-native protocol reaches the framework tools over the workdir control CLI, so
             # the channel MUST be bound for it (uses_control_cli is the shared predicate the prompt
@@ -603,7 +605,7 @@ async def run_task(
                     rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
                 first_message = (
                     f"{_RESUME_MESSAGE} {session.resume_notice()}".strip()
-                    if resuming
+                    if continued
                     else builder.build_first_message(rendered_first_obs)
                 )
 

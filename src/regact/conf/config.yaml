@@ -27,6 +27,7 @@ limits:  # every max_* accepts null to disable its cap
   max_turns_per_task: 350                # agent turns per task before the loop gives up
   max_tool_calls: null          # total tool calls across the run (the primary budget); null = off
   max_seconds_per_task: null    # wall-clock per task, from session start; null = no limit
+  wait_for_usage_limit: false   # false: a backend usage limit ends the task (resumable); true: sleep until it resets
   experiment_deadline_unix: null  # absolute end (UNIX s), e.g. job end - margin; caps the above
   max_actions_per_task: null # vanilla/CWM only: total real steps across collection and calls
   max_actions_per_episode: null     # env.step cap per episode; reset renews this budget;

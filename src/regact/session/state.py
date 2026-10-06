@@ -16,7 +16,7 @@ from typing import Any
 
 
 # None: the process died before recording a reason.
-_RESUMABLE_EXITS = (None, "interrupted", "agent_api", "loop_crash")
+_RESUMABLE_EXITS = (None, "interrupted", "usage_limit", "agent_api", "loop_crash")
 
 
 @dataclass
@@ -37,7 +37,8 @@ class ExperimentState:
     last_submission_results: dict[str, Any] | None = None
     last_error_category: str | None = None
     exit_reason: str | None = None  # set at teardown; None while the run is still going
-    exit_detail: str | None = None  # walltime_limit: "task_budget" or "experiment_deadline"
+    # walltime_limit: "task_budget" or "experiment_deadline"; usage_limit: "resets <UNIX time>"
+    exit_detail: str | None = None
     flagged_tool_calls: int = 0
     tool_calls_total: int = 0  # tool calls emitted this run; << turn => agent spinning
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far

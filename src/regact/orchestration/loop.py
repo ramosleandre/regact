@@ -67,8 +67,8 @@ _FLAGGING_WARNING = (
 # A single backend error (one 500/timeout from a slow local server) must not end the
 # session; only a wall of them means the backend is really gone.
 _MAX_CONSECUTIVE_ERROR_TURNS = 3
-# A backend usage limit (a subscription window) is waited out instead of ending the run, when it
-# resets within this long. The margin covers a reset that lands slightly late.
+# With limits.wait_for_usage_limit, a backend usage limit (a subscription window) is waited out
+# when it resets within this long. The margin covers a reset that lands slightly late.
 _MAX_USAGE_LIMIT_WAIT_S = 6 * 3600
 _MAX_USAGE_LIMIT_TOTAL_WAIT_S = 24 * 3600  # over the whole task
 _USAGE_LIMIT_MARGIN_S = 60
@@ -164,8 +164,8 @@ async def run_session(
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
     # Record the inputs so the viewer shows the whole session, not just replies (a resumed task
-    # already has them).
-    if system_prompt and not experiment.resumed_at:
+    # whose agent already ran has them).
+    if system_prompt and experiment.turn == 0:
         transcript.write(SystemPrompt(agent.prompt_for_transcript(system_prompt)))
 
     message = first_message
@@ -203,11 +203,12 @@ async def run_session(
                 break
             if outcome.error_category is not None:
                 experiment.last_error_category = outcome.error_category.value
-                wait = _usage_limit_wait(
-                    agent.usage_limit_reset(outcome.error_message),
-                    limits,
-                    experiment.usage_limit_waited_s,
-                )
+                reset_unix = agent.usage_limit_reset(outcome.error_message)
+                if reset_unix is not None and not limits.wait_for_usage_limit:
+                    experiment.exit_detail = f"resets {int(reset_unix)}"
+                    reason = "usage_limit"
+                    break
+                wait = _usage_limit_wait(reset_unix, limits, experiment.usage_limit_waited_s)
                 if wait is not None:
                     if watchdog is not None:
                         watchdog.cancel()
