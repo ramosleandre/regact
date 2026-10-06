@@ -28,7 +28,13 @@ from regact.protocols.cwm.bundle import description, snapshot
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.ids import expand_id_ranges
 from regact.protocols.cwm.images import clear_images, save_preview, select_preview_ids
-from regact.protocols.cwm.store import ExperienceStore, atomic_json, canonical, digest
+from regact.protocols.cwm.store import (
+    ExperienceStore,
+    atomic_json,
+    canonical,
+    digest,
+    info_trace,
+)
 from regact.protocols.cwm.validation import differences
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.prompting import reset_commands
@@ -140,7 +146,19 @@ class ManagedCoordinator:
             {"from": before, "to": phase, "next_step": self.phase_description(phase)}
         )
 
+    def task_metrics(self) -> dict[str, Any]:
+        """The problem's main metrics over all the task's real actions so far."""
+        return self.problem.main_scores(
+            {
+                **(self.latest or {}).get("aggregate", {}),
+                **self.problem.derived_trace_metrics(self.task, info_trace(self.store.db)),
+            }
+        )
+
     def persist(self) -> None:
+        metrics = self.task_metrics()
+        if self.context is not None:
+            self.context.experiment.main_metrics = metrics
         atomic_json(
             self.root / "status.json",
             {
@@ -155,6 +173,7 @@ class ManagedCoordinator:
                 "milestones": self.milestones,
                 **self.store.summary(),
                 "accepted_cwm": self.accepted,
+                "main_metrics": metrics,
                 "latest_exploration": self.latest,
                 "best_exploration": self.best,
                 "config": dataclasses.asdict(self.options),
@@ -1089,6 +1108,9 @@ class ManagedSession(ProtocolSession):
 
     def stop_reason(self) -> str | None:
         return self.coordinator.terminal
+
+    def task_metrics(self) -> dict[str, Any] | None:
+        return self.coordinator.task_metrics()
 
     def reminder(self, reminders: int) -> str:
         phase = self.coordinator.phase

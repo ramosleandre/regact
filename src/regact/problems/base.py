@@ -29,6 +29,10 @@ class BaseProblem(ABC):
     # The score metrics the viewer shows as Main and graphs by default (aggregate or derived keys).
     main_metrics: tuple[str, ...] = ("success_rate",)
 
+    def main_scores(self, values: dict[str, Any]) -> dict[str, Any]:
+        """The entries of ``values`` (aggregate and derived metrics) named in ``main_metrics``."""
+        return {key: values[key] for key in self.main_metrics if key in values}
+
     def reset_commands(self) -> dict[str, str]:
         """Explicit reset capabilities for externally managed controller protocols."""
         return {"ResetEnvironment": "Reset the whole environment from its initial state."}

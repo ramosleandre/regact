@@ -82,7 +82,7 @@ class SubmissionView:
     features: dict[str, Any] = field(default_factory=dict)  # per-feature metrics, {"cwm": {...}}
     derived: dict[str, Any] = field(
         default_factory=dict
-    )  # problem-derived metrics (ARC rhae/lrhae)
+    )  # problem-derived metrics (ARC rhae/rhae_uncapped)
 
 
 @dataclass
@@ -250,7 +250,7 @@ def problem_of(config: dict[str, Any]) -> Any:
 def _enrich_derived_metrics(
     game: str, submissions: list[SubmissionView], config: dict[str, Any]
 ) -> None:
-    """Recompute a game's offline derived metrics (e.g. ARC's RHAE/LRHAE) into ``sub.derived``.
+    """Recompute a game's offline derived metrics (e.g. ARC's RHAE/RHAE-Uncapped) into ``sub.derived``.
 
     Delegates to the problem named in the resolved config, so the viewer stays agnostic of a game's
     metric keys. Best-effort: a missing game library or benchmark leaves ``derived`` empty.

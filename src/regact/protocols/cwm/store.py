@@ -24,6 +24,19 @@ def _link(*parts: str) -> str:
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
+def info_trace(db: sqlite3.Connection) -> list[tuple[int, dict[str, Any]]]:
+    """``(real actions so far, observation info)`` after every real step of the task, in order.
+    Explicit resets count as one action each, as in the task's action budget."""
+    rows = db.execute(
+        """SELECT json_extract(o.payload,'$.info') info,
+            (SELECT COUNT(*) FROM episodes e WHERE e.id<=s.episode_id
+                AND e.purpose LIKE 'reset\\_%' ESCAPE '\\') resets
+        FROM step_events s JOIN transitions t ON t.id=s.transition_id
+        JOIN observations o ON o.id=t.after_id ORDER BY s.id"""
+    ).fetchall()
+    return [(index + 1 + row[1], json.loads(row[0] or "{}")) for index, row in enumerate(rows)]
+
+
 def atomic_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")

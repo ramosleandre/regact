@@ -19,6 +19,7 @@ from regact.problems.base import BaseProblem, build_problem
 from regact.protocols.cwm.bundle import verify_bundle
 from regact.protocols.cwm.config import ExecutionConfig
 from regact.protocols.cwm.store import canonical, digest
+from regact.protocols.cwm.store import info_trace as store_info_trace
 from regact.protocols.cwm.validation import check_observation
 from regact.protocols.cwm.worker import Worker
 
@@ -49,20 +50,8 @@ def database(task: Path) -> Iterator[sqlite3.Connection]:
 
 
 def info_trace(task: Path) -> list[tuple[int, dict[str, Any]]]:
-    """``(real actions so far, observation info)`` after every real step of the task, in order.
-    Explicit resets count as one action each, as in the task's action budget."""
     with database(task) as db:
-        rows = db.execute(
-            """SELECT json_extract(o.payload,'$.info') info,
-                (SELECT COUNT(*) FROM episodes e WHERE e.id<=s.episode_id
-                    AND e.purpose LIKE 'reset\\_%' ESCAPE '\\') resets
-            FROM step_events s JOIN transitions t ON t.id=s.transition_id
-            JOIN observations o ON o.id=t.after_id ORDER BY s.id"""
-        ).fetchall()
-    return [
-        (index + 1 + row["resets"], json.loads(row["info"] or "{}"))
-        for index, row in enumerate(rows)
-    ]
+        return store_info_trace(db)
 
 
 def _obs(db: sqlite3.Connection, oid: int) -> dict[str, Any]:

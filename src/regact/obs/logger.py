@@ -107,5 +107,6 @@ def _console_message(record: LogRecord) -> str | None:
         # The re-score is the one teardown step worth announcing (it used to look frozen).
         return "final evaluation..." if detail.get("hook") == "FinalizeControllerHook" else None
     if event == "session_end":
-        return f"done: {detail.get('reason', '?')}"
+        scores = "".join(f"  {k}={v:g}" for k, v in (detail.get("main_metrics") or {}).items())
+        return f"done: {detail.get('reason', '?')}{scores}"
     return None

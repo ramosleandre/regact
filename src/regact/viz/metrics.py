@@ -43,7 +43,7 @@ def game_metrics(game: GameView) -> dict[str, Any]:
         # The reported submission's per-feature metrics, opaque + game/feature-agnostic (each
         # feature owns its keys), e.g. {"cwm": {"n_conflicting_transitions": 0, ...}}.
         "feature_metrics": _final_features(game),
-        # The reported submission's problem-derived metrics (ARC rhae/lrhae), opaque.
+        # The reported submission's problem-derived metrics (ARC rhae/rhae_uncapped), opaque.
         "derived_metrics": _final_derived(game),
         # Which score keys (aggregate or derived) the viz shows as Main: the problem decides.
         "main_metrics": list(_main_metrics(game)),
@@ -154,7 +154,7 @@ def _final_features(game: GameView) -> dict[str, Any]:
 
 
 def _final_derived(game: GameView) -> dict[str, Any]:
-    """The reported submission's problem-derived metrics (ARC rhae/lrhae), opaque."""
+    """The reported submission's problem-derived metrics (ARC rhae/rhae_uncapped), opaque."""
     sub = _scored_submission(game)
     return dict(sub.derived) if sub and sub.derived else {}
 

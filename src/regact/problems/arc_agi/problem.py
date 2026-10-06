@@ -338,13 +338,7 @@ class ArcAgiProblem(BaseProblem):
     """ARC-AGI-3 as a regact problem (offline, local game data)."""
 
     name = "arc_agi"
-    main_metrics = (
-        "mean_levels_completed",
-        "mean_levels_completion_rate",
-        "win_rate",
-        "rhae",
-        "lrhae",
-    )
+    main_metrics = ("rhae", "rhae_uncapped")
 
     def __init__(
         self,
@@ -563,7 +557,7 @@ class ArcAgiProblem(BaseProblem):
     def derived_submission_metrics(
         self, task_name: str, raw_episodes: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """RHAE (the competition's own efficiency metric) and its linear variant LRHAE, from a
+        """RHAE (the competition's own efficiency metric) and RHAE-Uncapped, from a
         submission's episodes + the game's per-level human baseline. Absent baseline (or no usable
         episode) yields no key, so a game without a benchmark simply shows none."""
         from regact.problems.arc_agi.scoring import rhae_from_results
@@ -574,12 +568,12 @@ class ArcAgiProblem(BaseProblem):
         rhae = rhae_from_results({"episodes": raw_episodes}, baseline_actions=baseline)
         if rhae is None:
             return {}
-        return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
+        return {"rhae": round(rhae.rhae, 3), "rhae_uncapped": round(rhae.rhae_uncapped, 3)}
 
     def derived_trace_metrics(
         self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
     ) -> dict[str, Any]:
-        """RHAE/LRHAE over all the task's real actions, exploration included."""
+        """RHAE/RHAE-Uncapped over all the task's real actions, exploration included."""
         from regact.problems.arc_agi.scoring import actions_per_level_from_trace, rhae_score
 
         baseline = self._task(task_name).baseline_actions
@@ -594,7 +588,7 @@ class ArcAgiProblem(BaseProblem):
             total_levels=max([int(info.get("win_levels", 0) or 0) for _, info in trace] or [0])
             or None,
         )
-        return {"rhae": round(rhae.rhae, 3), "lrhae": round(rhae.lrhae, 3)}
+        return {"rhae": round(rhae.rhae, 3), "rhae_uncapped": round(rhae.rhae_uncapped, 3)}
 
     def build_prompt(
         self,
