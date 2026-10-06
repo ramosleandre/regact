@@ -90,3 +90,90 @@ def test_an_empty_store_rebuilds_nothing(tmp_path):
         assert env.live is None
     finally:
         store.close()
+
+
+def killed(c):
+    """The task's process died: nothing is closed properly and no final status is written."""
+    c.env.close()
+    c.store.close()
+    c.closed = True
+    return c
+
+
+def reopened(c, lifecycle, **config):
+    """A new coordinator on the task directory of ``c``, as a later process would build it."""
+    import dataclasses
+
+    cfg = dataclasses.replace(c.config, resume=str(c.output), **config)
+    return type(c)(
+        cfg, c.options, fresh_session(lifecycle), c.problem, c.task, c.output, c.workdir
+    )
+
+
+@pytest.mark.parametrize("lifecycle", list(Lifecycle))
+def test_a_task_resumes_where_its_store_ends(hidden_rig, lifecycle):
+    c = played(hidden_rig, lifecycle)
+    c.persist()
+    before = c.store.summary()
+    expected_next = c.env.live.step(1).to_json() if lifecycle is Lifecycle.SINGLE_INSTANCE else None
+    killed(c)
+
+    r = reopened(c, lifecycle)
+    try:
+        assert r.store.summary() == before
+        assert (r.current_id, r.initial_id, r.reset_actions) == (
+            c.current_id,
+            c.initial_id,
+            c.reset_actions,
+        )
+        assert r.milestones == c.milestones and r.initial_collection == c.initial_collection
+        # Nothing was recorded after the accepted CWM was last checked: exploration continues.
+        assert r.phase == "Active Exploration" and r.accepted == c.accepted
+        exploration(r, (1,))
+        result = r.tool("RunController", {})
+        assert result["real_actions"] == 1 and "error" not in result, result
+        if expected_next is not None:
+            # c's game took one unrecorded step above; the rebuilt one is at the recorded position.
+            assert r.store.observation(r.current_id) == expected_next
+    finally:
+        r.close("test_finished")
+
+
+def test_evidence_newer_than_the_accepted_cwm_forces_a_revalidation(hidden_rig):
+    c = played(hidden_rig, Lifecycle.SINGLE_INSTANCE)
+    c.persist()
+    c.tool("ResetEnvironment", {})  # recorded, but the process dies before the next persist
+    stale = c.root / "status.json"
+    saved = stale.read_text()
+    c.persist()
+    stale.write_text(saved)
+    killed(c)
+
+    r = reopened(c, Lifecycle.SINGLE_INSTANCE)
+    try:
+        assert r.reset_actions == c.reset_actions and r.current_id == c.current_id
+        assert r.phase == "CWM Modeling"
+        assert r.tool("UpdateCodeWorldModel", {})["accepted"]
+        exploration(r, (1, 1))
+        assert r.tool("RunController", {})["real_actions"] == 2
+    finally:
+        r.close("test_finished")
+
+
+def test_a_recorded_task_is_not_reopened_without_resume_or_by_another_commit(
+    hidden_rig, monkeypatch
+):
+    import dataclasses
+
+    c = played(hidden_rig, Lifecycle.SINGLE_INSTANCE)
+    killed(c)
+    fresh = dataclasses.replace(c.config, resume=None)
+    with pytest.raises(RuntimeError, match="resume="):
+        type(c)(fresh, c.options, fresh_session(Lifecycle.SINGLE_INSTANCE), c.problem, c.task,
+                c.output, c.workdir)
+    from regact.protocols.managed import session
+
+    monkeypatch.setattr(session, "regact_commit", lambda: "f" * 40)
+    with pytest.raises(RuntimeError, match="recorded by regact"):
+        reopened(c, Lifecycle.SINGLE_INSTANCE)
+    reopened(c, Lifecycle.SINGLE_INSTANCE, resume_any_version=True).close("test_finished")

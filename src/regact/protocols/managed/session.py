@@ -34,10 +34,12 @@ from regact.protocols.cwm.store import (
     canonical,
     digest,
     info_trace,
+    regact_commit,
 )
 from regact.protocols.cwm.validation import differences
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.prompting import reset_commands
+from regact.protocols.managed.resume import rebuild_environment
 from regact.security.runtime import SandboxRuntime
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -84,9 +86,10 @@ class ManagedCoordinator:
         self.output, self.workdir = output, workdir
         self.root = output / "cwm"
         self.root.mkdir(parents=True, exist_ok=True)
-        if (self.root / "experience.sqlite3").exists():
+        resuming = (self.root / "experience.sqlite3").exists()
+        if resuming and config.resume is None:
             raise RuntimeError(
-                "CWM task directory already has experience; automatic resume is not supported"
+                "this task directory already has recorded experience; continue it with resume=<run dir>"
             )
         self.store = ExperienceStore(self.root / "experience.sqlite3")
         self.lock = threading.RLock()
@@ -109,14 +112,16 @@ class ManagedCoordinator:
         self.initial_collection: dict[str, Any] | None = None
         self.reset_actions = 0
         try:
-            self._reset("initial_collection")
+            if resuming:
+                self._restore()
+            else:
+                self.store.recorded_commit()
+                self.initial = self._reset("initial_collection")
+                self.initial_id = self.current_id
         except BaseException:
             self.env.close()
             self.store.close()
             raise
-        assert self.env.live is not None and self.env.live.last_obs is not None
-        self.initial = self.env.live.last_obs.to_json()
-        self.initial_id = self.current_id
         self.persist()
 
     def event(self, kind: str, **payload: Any) -> None:
@@ -145,6 +150,47 @@ class ManagedCoordinator:
         self.phase_changes.append(
             {"from": before, "to": phase, "next_step": self.phase_description(phase)}
         )
+
+    def _restore(self) -> None:
+        """Continue an interrupted task: replay its store to rebuild the game, then recompute
+        this object's position from the store. status.json can be one command behind after a
+        process death, so it only supplies what the store does not hold."""
+        recorded, running = self.store.recorded_commit(), regact_commit()
+        if recorded != running and not self.config.resume_any_version:
+            raise RuntimeError(
+                f"this task was recorded by regact {recorded[:7]}, not {running[:7]}; check that "
+                "commit out, or pass resume_any_version=true"
+            )
+        rebuild_environment(
+            self.store,
+            self.env,
+            seed=self.config.problem.seed,
+            single_instance=self.single_instance,
+        )
+        episodes = self.store.episodes()
+        self.initial_id = episodes[0]["initial_obs_id"]
+        self.initial = self.store.observation(self.initial_id)
+        self.reset_actions = sum(e["purpose"].startswith("reset_") for e in episodes)
+        last = episodes[-1]["episode_id"]
+        self.current_id = self.store.episode_ids(last)[0][-1]
+        self.episode = last if self.single_instance else None
+        self.store.reopen(self.episode)
+        for step in self.store.milestone_steps():
+            for name in step.pop("milestones"):
+                if name not in self._seen_milestones:
+                    self._seen_milestones.add(name)
+                    kind = self.problem.milestone_kind(name)
+                    self.milestones.append({"name": name, "kind": kind, **step})
+        status = self.root / "status.json"
+        saved = json.loads(status.read_text()) if status.exists() else {}
+        self.initial_collection = saved.get("initial_collection")
+        self.accepted = saved.get("accepted_cwm")
+        self.latest, self.best = saved.get("latest_exploration"), saved.get("best_exploration")
+        self.after_restore()
+        self.event("task_resumed", episode_id=last, current_observation_id=self.current_id)
+
+    def after_restore(self) -> None:
+        """Protocol state that depends on what was restored (the CWM phase)."""
 
     def task_metrics(self) -> dict[str, Any]:
         """The problem's main metrics over all the task's real actions so far."""

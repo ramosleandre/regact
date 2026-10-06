@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -35,6 +36,20 @@ def info_trace(db: sqlite3.Connection) -> list[tuple[int, dict[str, Any]]]:
         JOIN observations o ON o.id=t.after_id ORDER BY s.id"""
     ).fetchall()
     return [(index + 1 + row[1], json.loads(row[0] or "{}")) for index, row in enumerate(rows)]
+
+
+def regact_commit() -> str:
+    """The commit of the regact checkout that is running, or "unknown" outside a git checkout."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(Path(__file__).parent), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -83,6 +98,7 @@ class ExperienceStore:
                 result TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT OR IGNORE INTO meta VALUES('dataset_version','0');
+            INSERT OR IGNORE INTO meta VALUES('regact_commit','');
             CREATE INDEX IF NOT EXISTS event_episode ON step_events(episode_id,step_index);
             CREATE INDEX IF NOT EXISTS event_history ON step_events(prev_hash);
         """)
@@ -101,6 +117,41 @@ class ExperienceStore:
         return int(
             self.db.execute("SELECT value FROM meta WHERE key='dataset_version'").fetchone()[0]
         )
+
+    def recorded_commit(self) -> str:
+        """The regact commit that created this store (set on first use)."""
+        row = self.db.execute("SELECT value FROM meta WHERE key='regact_commit'").fetchone()
+        if not row[0]:
+            with self.db:
+                self.db.execute(
+                    "UPDATE meta SET value=? WHERE key='regact_commit'", (regact_commit(),)
+                )
+            return self.recorded_commit()
+        return str(row[0])
+
+    def reopen(self, episode: int | None) -> None:
+        """Resume: nothing is in flight any more, and ``episode`` (the one the live environment
+        is in, if it persists between commands) is running again."""
+        with self.db:
+            self.db.execute("UPDATE records SET status='interrupted' WHERE status='running'")
+            if episode is not None:
+                self.db.execute(
+                    "UPDATE episodes SET status='running',stop_reason=NULL,result=NULL WHERE id=?",
+                    (episode,),
+                )
+
+    def milestone_steps(self) -> list[dict[str, Any]]:
+        """Every recorded step whose observation reports milestones, in order."""
+        return [
+            {**dict(row), "milestones": json.loads(row["milestones"])}
+            for row in self.db.execute(
+                """SELECT s.id event_id,s.episode_id,t.id transition_id,t.after_id observation_id,
+                    json_extract(o.payload,'$.info.milestones') milestones
+                FROM step_events s JOIN transitions t ON t.id=s.transition_id
+                JOIN observations o ON o.id=t.after_id
+                WHERE json_array_length(o.payload,'$.info.milestones')>0 ORDER BY s.id"""
+            )
+        ]
 
     def _bump(self) -> None:
         self.db.execute(

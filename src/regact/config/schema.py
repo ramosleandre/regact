@@ -154,6 +154,10 @@ class RunConfig:
     # run's transcript, and exit WITHOUT running the agent (no LLM cost). For previewing the prompt
     # in `make viz`. See `make prompt-run`.
     dry_run: bool = False
+    # Continue the interrupted tasks of an earlier launch: its stamped run directory. Same command
+    # plus this; finished tasks are skipped. resume_any_version lifts the same-commit requirement.
+    resume: str | None = None
+    resume_any_version: bool = False
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap

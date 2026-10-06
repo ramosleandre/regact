@@ -61,6 +61,19 @@ class Coordinator(ManagedCoordinator):
             self.worker(model, self.options.execution.max_seconds_per_RunController, clock=clock)
         )
 
+    def after_restore(self):
+        # Evidence recorded after the accepted CWM was last checked may contradict it.
+        checked = self.accepted is not None and (
+            self.accepted["dataset_version"] == self.store.version
+        )
+        self.phase = EXPLORATION if checked else MODELING
+        if checked:
+            self.state_sizes = {
+                k: self.accepted["validation"][k]
+                for k in ("state_bytes", "observation_bytes", "largest_ratio_state")
+                if k in self.accepted["validation"]
+            }
+
     def begin_exploration(self):
         self.current_state = self.next_state = None
 

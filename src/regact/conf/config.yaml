@@ -21,6 +21,8 @@ n_attempts_per_task: 1  # repeat each task N times (interleaved) to aggregate ov
 first_obs_in_prompt: false  # true = render the first observation into the first message
 flagging_warning_cap: 3  # after completed tools (CLI: next outer turn); 0 disables messages
 dry_run: false  # prompt-only: write the prompt + first message to the run and exit (no agent, no cost)
+resume: null  # an earlier launch's stamped run directory: continue its interrupted tasks
+resume_any_version: false  # allow resuming a task recorded by another regact commit
 limits:  # every max_* accepts null to disable its cap
   max_turns_per_task: 350                # agent turns per task before the loop gives up
   max_tool_calls: null          # total tool calls across the run (the primary budget); null = off
