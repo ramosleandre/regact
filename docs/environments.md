@@ -78,9 +78,9 @@ Optional hooks (each has a default): `milestone_detector`, `helper_templates`,
 `secret_modules` (the packages that ARE the game — hidden from the sandbox),
 `render_frame` (obs → RGB frame for the video), `render_obs_text`,
 `derived_submission_metrics` and `derived_trace_metrics` (scores a game derives from its own
-data, like ARC's RHAE and RHAE-Uncapped), `main_metrics` (which score keys are the game's main
+data, like ARC's RHAE and LRHAE-Uncapped), `main_metrics` (which score keys are the game's main
 ones: each run records them in `logs/experiment_state.json` and its end-of-run log line, and the
-viewer shows them first; ARC uses `rhae` and `rhae_uncapped`),
+viewer shows them first; ARC uses `rhae` and `lrhae_uncapped`),
 `failure_metrics(*, steps)` (zero credit for controller errors), and
 `is_perfect(aggregate)` (whether a submission should end the run early). The default
 perfect predicate checks `success_rate >= 1.0`; override it if your problem uses a

@@ -1,4 +1,4 @@
-"""ARC-AGI-3 efficiency metrics (RHAE / RHAE-Uncapped), computed offline from our own recorded data.
+"""ARC-AGI-3 efficiency metrics (RHAE, LRHAE-Uncapped), computed offline from our recorded data.
 
 Implemented directly from the metric's definition (not derived from the arc library's scorecard),
 so we own the formula and its variants:
@@ -13,10 +13,11 @@ one level never pays for another::
 
     RHAE = min( sum_{l solved}(l) / sum_l(l) ,  sum_l(min(1.15, r_l**2) * l) / sum_l(l) )
 
-RHAE-Uncapped drops both caps, so it keeps separating runs that beat the human baseline and can
-exceed 1::
+LRHAE-Uncapped drops both caps and the squaring, so it keeps separating runs that beat the human
+baseline and can exceed 1. It is the weighted mean of how many times more efficient than the
+human the agent was::
 
-    RHAE-Uncapped = sum_l(r_l**2 * l) / sum_l(l)
+    LRHAE-Uncapped = sum_l(r_l * l) / sum_l(l)
 
 A dataset's score is the mean of its games' scores.
 
@@ -42,7 +43,7 @@ class RhaeResult:
     """One game's efficiency breakdown (both metric variants)."""
 
     rhae: float  # 0-1, the competition metric
-    rhae_uncapped: float  # >= 0, RHAE without the per-level and per-game caps
+    lrhae_uncapped: float  # >= 0, linear ratio, without the per-level and per-game caps
     levels_completed: int
     total_levels: int
     actions_per_level: tuple[int, ...]  # actions on each COMPLETED level (index 0 = level 1)
@@ -94,7 +95,7 @@ def _efficiency_score(
     n_levels: int,
     capped: bool,
 ) -> float:
-    """The game score: RHAE when ``capped``, else RHAE-Uncapped."""
+    """The game score: RHAE when ``capped`` (squared ratio), else LRHAE-Uncapped (linear)."""
     if not baselines or n_levels == 0:
         return 0.0
     total_weight = 0
@@ -107,7 +108,7 @@ def _efficiency_score(
         baseline = baselines[idx] if idx < len(baselines) else 0
         if idx < levels_completed and actions > 0 and baseline > 0:
             ratio = baseline / actions
-            level_score = min(_LEVEL_CAP, ratio * ratio) if capped else ratio * ratio
+            level_score = min(_LEVEL_CAP, ratio * ratio) if capped else ratio
             solved_weight += weight
         else:
             level_score = 0.0
@@ -124,7 +125,7 @@ def rhae_score(
     levels_completed: int,
     total_levels: int | None = None,
 ) -> RhaeResult:
-    """RHAE and RHAE-Uncapped for one game. Zero when there is no baseline."""
+    """RHAE and LRHAE-Uncapped for one game. Zero when there is no baseline."""
     baselines = tuple(int(x) for x in (baseline_actions or ()))
     n_levels = total_levels if total_levels is not None else len(baselines)
     shared = {
@@ -135,7 +136,7 @@ def rhae_score(
     }
     return RhaeResult(
         rhae=_efficiency_score(**shared, capped=True),
-        rhae_uncapped=_efficiency_score(**shared, capped=False),
+        lrhae_uncapped=_efficiency_score(**shared, capped=False),
         levels_completed=levels_completed,
         total_levels=n_levels,
         actions_per_level=tuple(actions_per_level),
@@ -174,7 +175,7 @@ def _latest_results_json(game_output_dir: str) -> dict[str, object] | None:
 def rhae_from_results(
     results: dict[str, object], *, baseline_actions: Sequence[int] | None
 ) -> RhaeResult | None:
-    """Compute a game's RHAE/RHAE-Uncapped from its serialized ``results.json`` + human baseline.
+    """Compute a game's RHAE/LRHAE-Uncapped from its serialized ``results.json`` + human baseline.
 
     Reads the first non-errored episode's ``milestones`` (to derive per-level actions)
     and ``metrics`` (levels_completed / steps). Returns ``None`` if there is no usable
@@ -233,7 +234,7 @@ def summarize_run(
     tasks: Sequence[str],
     baselines: Mapping[str, Sequence[int] | None],
 ) -> str:
-    """A human-readable RHAE/RHAE-Uncapped recap of an offline run: a line per game + an aggregate.
+    """A human-readable RHAE/LRHAE-Uncapped recap of an offline run: a line per game + an aggregate.
 
     ``run_dir`` is the directory that run owns (each run is timestamped, so the path
     cannot be rebuilt from the config alone). ``baselines`` maps game key -> per-level
@@ -243,7 +244,7 @@ def summarize_run(
     it) so this stays testable.
     """
     lines = [
-        f"=== ARC-AGI-3 run summary ({len(tasks)} games) - RHAE/RHAE-Uncapped (offline) ===",
+        f"=== ARC-AGI-3 run summary ({len(tasks)} games) - RHAE/LRHAE-Uncapped (offline) ===",
         f"  {'game':<8} {'levels':>8}  {'actions/baseline':>18}  {'RHAE':>6}  {'uncapped':>8}"
         "  status",
     ]
@@ -267,11 +268,11 @@ def summarize_run(
         lvl = f"{rhae.levels_completed}/{rhae.total_levels}"
         ab = f"{acts} / {base}" if base else f"{acts} / -"
         lines.append(
-            f"  {task:<8} {lvl:>8}  {ab:>18}  {rhae.rhae:>6.3f}  {rhae.rhae_uncapped:>8.3f}"
+            f"  {task:<8} {lvl:>8}  {ab:>18}  {rhae.rhae:>6.3f}  {rhae.lrhae_uncapped:>8.3f}"
             f"  {status}"
         )
         rhaes.append(rhae.rhae)
-        uncapped.append(rhae.rhae_uncapped)
+        uncapped.append(rhae.lrhae_uncapped)
         status_counts[status] = status_counts.get(status, 0) + 1
         if rhae.total_levels and rhae.levels_completed >= rhae.total_levels:
             wins += 1
@@ -279,7 +280,7 @@ def summarize_run(
     mean_uncapped = sum(uncapped) / len(uncapped) if uncapped else 0.0
     lines.append("  " + "-" * 60)
     lines.append(
-        f"  mean RHAE {mean_rhae:.3f}  |  mean RHAE-Uncapped {mean_uncapped:.3f}  |  "
+        f"  mean RHAE {mean_rhae:.3f}  |  mean LRHAE-Uncapped {mean_uncapped:.3f}  |  "
         f"{wins} wins/{len(tasks)}  |  {len(rhaes)} games scored"
     )
     if status_counts:

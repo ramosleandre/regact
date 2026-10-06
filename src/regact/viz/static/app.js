@@ -334,7 +334,7 @@ function metricSpecs(games) {
           specs.push({ key: "feat:" + feat + "." + k, label: feat + "." + k,
             get: (m) => m.feature_metrics && m.feature_metrics[feat] && m.feature_metrics[feat][k] });
         }
-  // Problem-derived metrics (ARC RHAE, RHAE-Uncapped).
+  // Problem-derived metrics (ARC RHAE, LRHAE-Uncapped).
   const seenDrv = new Set();
   for (const g of games)
     for (const [k, v] of Object.entries(g.metrics.derived_metrics || {}))

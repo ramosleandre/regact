@@ -1,4 +1,4 @@
-"""Tests for the ARC-AGI-3 efficiency metrics RHAE and RHAE-Uncapped."""
+"""Tests for the ARC-AGI-3 efficiency metrics RHAE and LRHAE-Uncapped."""
 
 import json
 from pathlib import Path
@@ -26,42 +26,42 @@ def test_actions_per_level_from_milestones() -> None:
 
 def test_surpassing_human_is_capped_by_completion() -> None:
     # 31 actions vs 40 baseline -> r>1, hits the 1.15 level cap; but the game is a single fully
-    # completed level, so completion=1.0 caps RHAE at 1.0. RHAE-Uncapped keeps r^2.
+    # completed level, so completion=1.0 caps RHAE at 1.0. LRHAE-Uncapped keeps r.
     r = rhae_score(
         baseline_actions=[40], actions_per_level=[31], levels_completed=1, total_levels=1
     )
     assert r.rhae == 1.0
-    assert abs(r.rhae_uncapped - (40 / 31) ** 2) < 1e-9
+    assert abs(r.lrhae_uncapped - 40 / 31) < 1e-9
 
 
-def test_inefficiency_is_squared() -> None:
-    # 47 vs 35 baseline -> r=35/47~=0.745, squared ~0.555. Below the caps both metrics agree.
+def test_inefficiency_penalized_more_by_squaring() -> None:
+    # 47 vs 35 baseline -> r=35/47~=0.745: RHAE squares it (~0.555), LRHAE-Uncapped does not.
     r = rhae_score(
         baseline_actions=[35], actions_per_level=[47], levels_completed=1, total_levels=1
     )
     assert 0.55 < r.rhae < 0.56
-    assert r.rhae_uncapped == r.rhae
+    assert 0.74 < r.lrhae_uncapped < 0.75
 
 
 def test_uncapped_lets_one_level_pay_for_another() -> None:
-    # Level 1 at r=2 (S=4 uncapped, 1.15 capped), level 2 at r=0.5 (S=0.25).
+    # Level 1 at r=2 (1.15 capped), level 2 at r=0.5 (0.25 squared).
     r = rhae_score(
         baseline_actions=[20, 20], actions_per_level=[10, 40], levels_completed=2, total_levels=2
     )
     assert abs(r.rhae - (1.15 * 1 + 0.25 * 2) / 3) < 1e-9
-    assert abs(r.rhae_uncapped - (4 * 1 + 0.25 * 2) / 3) < 1e-9
+    assert abs(r.lrhae_uncapped - (2 * 1 + 0.5 * 2) / 3) < 1e-9
 
 
 def test_zero_when_nothing_completed() -> None:
     r = rhae_score(
         baseline_actions=[35, 40], actions_per_level=[], levels_completed=0, total_levels=2
     )
-    assert r.rhae == 0.0 and r.rhae_uncapped == 0.0
+    assert r.rhae == 0.0 and r.lrhae_uncapped == 0.0
 
 
 def test_no_baseline_is_zero() -> None:
     r = rhae_score(baseline_actions=None, actions_per_level=[10], levels_completed=1)
-    assert r.rhae == 0.0 and r.rhae_uncapped == 0.0
+    assert r.rhae == 0.0 and r.lrhae_uncapped == 0.0
 
 
 def test_weights_later_levels_more() -> None:
@@ -70,8 +70,9 @@ def test_weights_later_levels_more() -> None:
     r = rhae_score(
         baseline_actions=[20, 20], actions_per_level=[20, 40], levels_completed=2, total_levels=2
     )
-    # (1.0*1 + 0.25*2) / (1+2) = 0.5, for both metrics.
-    assert r.rhae == 0.5 and r.rhae_uncapped == 0.5
+    # RHAE: (1.0*1 + 0.25*2) / (1+2) = 0.5 ; LRHAE-Uncapped: (1.0*1 + 0.5*2) / 3 = 0.6667.
+    assert r.rhae == 0.5
+    assert abs(r.lrhae_uncapped - 2 / 3) < 1e-9
 
 
 def test_partial_completion_bounds_the_score() -> None:
@@ -102,7 +103,7 @@ def test_rhae_from_results_end_to_end() -> None:
     assert r.total_levels == 3
     assert r.actions_per_level == (20, 25)
     assert 0.0 < r.rhae < 1.0
-    assert r.rhae_uncapped == r.rhae  # both levels below human efficiency: no cap applies
+    assert r.lrhae_uncapped > r.rhae  # both levels below human efficiency: linear scores higher
 
 
 def test_summarize_run_reads_disk(tmp_path: Path) -> None:
@@ -125,7 +126,7 @@ def test_summarize_run_reads_disk(tmp_path: Path) -> None:
     out = summarize_run(
         str(tmp_path / "smoke"), ["ls20", "vc33"], {"ls20": [19, 16, 34], "vc33": None}
     )
-    assert "ls20" in out and "RHAE/RHAE-Uncapped" in out
+    assert "ls20" in out and "RHAE/LRHAE-Uncapped" in out
     assert "1 games scored" in out  # ls20 scored, vc33 has no results
 
 
@@ -149,4 +150,4 @@ def test_beating_humans_on_one_level_does_not_pay_for_another() -> None:
     r = rhae_score(
         baseline_actions=[100, 100], actions_per_level=[10], levels_completed=1, total_levels=2
     )
-    assert abs(r.rhae - 1 / 3) < 1e-9 and abs(r.rhae_uncapped - 100 / 3) < 1e-9
+    assert abs(r.rhae - 1 / 3) < 1e-9 and abs(r.lrhae_uncapped - 10 / 3) < 1e-9
