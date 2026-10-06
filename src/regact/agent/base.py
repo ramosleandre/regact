@@ -208,7 +208,7 @@ def build_agent(config: AgentConfig) -> CodeAgent:
     if config.name is AgentName.ALAN:
         from regact.agent.alan_subprocess import AlanSubprocessAgent
 
-        return AlanSubprocessAgent(config.args, base_url=config.base_url)
+        return AlanSubprocessAgent(config.args, base_url=config.base_url, vision=config.vision)
     if config.name is AgentName.CLAUDE:
         from regact.agent.claude_adapter import ClaudeAgent
 

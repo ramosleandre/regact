@@ -13,6 +13,8 @@ import dataclasses
 import sys
 import types
 
+import pytest
+
 from regact.agent.alan_adapter import build_alan_agent, map_alan_events
 from regact.agent.events import (
     AgentError,
@@ -306,3 +308,62 @@ def test_a_call_cut_at_the_output_cap_is_marked_not_executed() -> None:
     refused, failed = map_alan_events(msg)
     assert refused.executed is False
     assert failed.executed is True  # an ordinary failure did run
+
+
+def _build(monkeypatch, builtins, args):
+    captured = _fake_alancode(monkeypatch, builtins)
+    build_alan_agent(
+        cwd=".",
+        model="m",
+        base_url=None,
+        api_key=None,
+        system_prompt=None,
+        extra_tools=[],
+        args=args,
+    )
+    return captured
+
+
+def test_vision_adds_the_image_tool_and_turns_the_setting_on(monkeypatch) -> None:
+    bash, view = types.SimpleNamespace(name="Bash"), types.SimpleNamespace(name="ViewImage")
+    read = types.SimpleNamespace(name="Read")
+    blind = _build(monkeypatch, [bash, view, read], {})
+    assert blind["tools"] == [bash] and "settings" not in blind
+    seeing = _build(monkeypatch, [bash, view, read], {"vision": True})
+    assert seeing["tools"] == [bash, view] and seeing["settings"] == {"vision": True}
+
+
+def test_vision_needs_an_alancode_with_the_image_tool(monkeypatch) -> None:
+    with pytest.raises(RuntimeError, match="alancode >= 1.3.19"):
+        _build(monkeypatch, [types.SimpleNamespace(name="Bash")], {"vision": True})
+
+
+def test_vision_is_refused_where_the_model_cannot_name_a_tool() -> None:
+    from regact.agent.alan_subprocess import AlanSubprocessAgent
+
+    with pytest.raises(ValueError, match="bash_block has only the shell"):
+        AlanSubprocessAgent({}, vision=True)
+    assert "vision" not in AlanSubprocessAgent({"tool_protocol": "hermes_xml"})._args
+    seeing = AlanSubprocessAgent({"tool_protocol": "hermes_xml"}, vision=True)
+    assert seeing._args["vision"] is True
+
+
+def test_the_real_alancode_accepts_the_vision_wiring(tmp_path) -> None:
+    alancode = pytest.importorskip("alancode")
+    if tuple(int(p) for p in alancode.__version__.split(".")[:3]) < (1, 3, 19):
+        pytest.skip("alancode older than the vision feature")
+    agent = build_alan_agent(
+        cwd=str(tmp_path),
+        model="remote",
+        base_url=None,
+        api_key=None,
+        system_prompt="s",
+        extra_tools=[],
+        args={"backend": "scripted", "vision": True},
+    )
+    try:
+        assert sorted(tool.name for tool in agent._tools) == ["Bash", "ViewImage"]
+    finally:
+        close = getattr(agent, "close", None)
+        if callable(close):
+            close()

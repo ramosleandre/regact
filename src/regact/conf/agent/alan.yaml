@@ -13,7 +13,7 @@ name: alan
 model: null            # openai/<MODEL_NAME> (the served model); null = none
 base_url: null         # http://127.0.0.1:9876/v1 (the SimpleLM/SGLang endpoint)
 api_key: null          # any dummy for a local server (litellm requires one); null = use $OPENAI_API_KEY
-vision: false          # whether the model reads images; set by the launcher
+vision: false          # whether the model reads images; true adds alancode's ViewImage tool (needs a named-tool tool_protocol)
 args:
   permission_mode: yolo        # headless: no permission prompts
   max_output_tokens: 4096      # cap per completion — keeps small-context models (~32k) from overflowing

@@ -93,6 +93,11 @@ def build_alan_agent(
     # file operations (read/write/edit) through shell commands. ``tools=[...]``
     bash = find_tool_by_name(get_all_builtin_tools(), "Bash")
     tools = [bash] if bash is not None else None
+    if args.get("vision"):  # agent.vision: the model also gets alancode's image tool
+        view = find_tool_by_name(get_all_builtin_tools(), "ViewImage")
+        if view is None or tools is None:
+            raise RuntimeError("agent.vision=true needs alancode >= 1.3.19 (the ViewImage tool)")
+        tools.append(view)
 
     extra: dict[str, Any] = {}
     if args.get("context_window") is not None:
@@ -108,7 +113,7 @@ def build_alan_agent(
         cwd=cwd,
         programmatic=True,
         custom_system_prompt=system_prompt,
-        tools=tools,  # only Bash
+        tools=tools,  # Bash, and ViewImage for a model that reads images
         extra_tools=extra_tools,
         permission_mode=args.get("permission_mode"),
         max_iterations_per_turn=args.get("max_iterations_per_turn"),
@@ -125,6 +130,7 @@ def build_alan_agent(
         ("empty_response_retries", int),
         ("persist_thinking", _as_bool),
         ("bash_timeout_ms", int),
+        ("vision", _as_bool),
     ):
         raw = args.get(name)
         if raw is None:
