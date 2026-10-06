@@ -19,6 +19,12 @@ human the agent was::
 
     LRHAE-Uncapped = sum_l(r_l * l) / sum_l(l)
 
+Relative env actions compares totals instead of averaging per-level ratios: the agent's actions
+on the levels it completed, over the human baseline for those same levels (below 1 = fewer
+actions than the human; undefined until a level is completed)::
+
+    relative_env_actions = sum_{l solved}(a_l) / sum_{l solved}(h_l)
+
 A dataset's score is the mean of its games' scores.
 
 Inputs come from data we already record per episode:
@@ -48,6 +54,20 @@ class RhaeResult:
     total_levels: int
     actions_per_level: tuple[int, ...]  # actions on each COMPLETED level (index 0 = level 1)
     baseline_actions: tuple[int, ...]  # human baseline per level
+
+    @property
+    def relative_env_actions(self) -> float | None:
+        """Agent actions over human actions, both summed on the levels the agent completed."""
+        solved = min(self.levels_completed, len(self.actions_per_level), len(self.baseline_actions))
+        human = sum(self.baseline_actions[:solved])
+        return sum(self.actions_per_level[:solved]) / human if human else None
+
+    def scores(self) -> dict[str, float]:
+        """The game's derived metrics, rounded for reports."""
+        out = {"rhae": round(self.rhae, 3), "lrhae_uncapped": round(self.lrhae_uncapped, 3)}
+        if (relative := self.relative_env_actions) is not None:
+            out["relative_env_actions"] = round(relative, 3)
+        return out
 
 
 def actions_per_level_from_milestones(

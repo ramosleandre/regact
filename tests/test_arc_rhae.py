@@ -52,6 +52,17 @@ def test_uncapped_lets_one_level_pay_for_another() -> None:
     assert abs(r.lrhae_uncapped - (2 * 1 + 0.5 * 2) / 3) < 1e-9
 
 
+def test_relative_env_actions_compares_totals_on_completed_levels() -> None:
+    # Levels 1-2 completed in 30 + 90 actions against a human 20 + 40; level 3 is not completed.
+    r = rhae_score(
+        baseline_actions=[20, 40, 100], actions_per_level=[30, 90], levels_completed=2
+    )
+    assert r.relative_env_actions == 120 / 60
+    assert r.scores()["relative_env_actions"] == 2.0
+    nothing = rhae_score(baseline_actions=[20, 40], actions_per_level=[], levels_completed=0)
+    assert nothing.relative_env_actions is None and "relative_env_actions" not in nothing.scores()
+
+
 def test_zero_when_nothing_completed() -> None:
     r = rhae_score(
         baseline_actions=[35, 40], actions_per_level=[], levels_completed=0, total_levels=2

@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable icon registry for the viz 'who fights who' panels. `agents` maps the saved agent.name (claude/codex/alan) to its icon (static/icons_agents/). `families` maps a model FAMILY (leading letters of the model name: Qwen/GLM/Kimi/DeepSeek/Llama/MiniMax/SWE/Mistral/Gemma/sonnet/opus/gpt) to one logo (static/icons_models/) covering all its models. `models` can override a specific model's icon or text badge and give its params_b (billions). Identity comes from saved agent.name/model, independently of experiment labels. Model lookup first uses the full model identifier, then its name without provider/quantization. Icon lookup: models[name].icon -> families[family] -> text badge. Size: params_b, else parsed from the name (-235B-, -70B-), else mid; sized by `sigmoid`. Task previews are pre-rendered into static/icons_tasks/<task>.png by scripts/gen_task_previews.py (never at viz time). `icon_styles` configures per-asset background, padding_px and object_fit (e.g. light plates for dark logos) without altering the image files.",
+  "_comment": "Editable icon registry for the viz 'who fights who' panels. `agents` maps the saved agent.name (claude/codex/alan) to its icon (static/icons_agents/). `families` maps a model FAMILY (the leading letters of the model name, e.g. Qwen/GLM/Kimi, or else a family name found as a word inside it, e.g. sonnet/opus/haiku/fable in claude-sonnet-5) to one logo (static/icons_models/) covering all its models. `models` can override a specific model's icon or text badge and give its params_b (billions). Identity comes from saved agent.name/model, independently of experiment labels. Model lookup first uses the full model identifier, then its name without provider/quantization. Icon lookup: models[name].icon -> families[family] -> text badge. Size: params_b, else parsed from the name (-235B-, -70B-), else mid; sized by `sigmoid`. Task previews are pre-rendered into static/icons_tasks/<task>.png by scripts/gen_task_previews.py (never at viz time). `icon_styles` configures per-asset background, padding_px and object_fit (e.g. light plates for dark logos) without altering the image files.",
   "sigmoid": {
     "min_px": 22,
     "max_px": 60,
@@ -23,6 +23,8 @@
     "Gemma": "static/icons_models/gemma.png",
     "sonnet": "static/icons_models/anthropic.png",
     "opus": "static/icons_models/anthropic.png",
+  "haiku": "static/icons_models/anthropic.png",
+  "fable": "static/icons_models/anthropic.png",
     "gpt": "static/icons_models/gpt.png",
     "MiMo": "static/icons_models/mimo.png"
   },

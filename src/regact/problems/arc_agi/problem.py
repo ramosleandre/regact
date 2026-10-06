@@ -338,7 +338,7 @@ class ArcAgiProblem(BaseProblem):
     """ARC-AGI-3 as a regact problem (offline, local game data)."""
 
     name = "arc_agi"
-    main_metrics = ("rhae", "lrhae_uncapped")
+    main_metrics = ("rhae", "lrhae_uncapped", "relative_env_actions")
 
     def __init__(
         self,
@@ -568,7 +568,7 @@ class ArcAgiProblem(BaseProblem):
         rhae = rhae_from_results({"episodes": raw_episodes}, baseline_actions=baseline)
         if rhae is None:
             return {}
-        return {"rhae": round(rhae.rhae, 3), "lrhae_uncapped": round(rhae.lrhae_uncapped, 3)}
+        return rhae.scores()
 
     def derived_trace_metrics(
         self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
@@ -588,7 +588,7 @@ class ArcAgiProblem(BaseProblem):
             total_levels=max([int(info.get("win_levels", 0) or 0) for _, info in trace] or [0])
             or None,
         )
-        return {"rhae": round(rhae.rhae, 3), "lrhae_uncapped": round(rhae.lrhae_uncapped, 3)}
+        return rhae.scores()
 
     def build_prompt(
         self,

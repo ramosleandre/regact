@@ -80,7 +80,7 @@ Optional hooks (each has a default): `milestone_detector`, `helper_templates`,
 `derived_submission_metrics` and `derived_trace_metrics` (scores a game derives from its own
 data, like ARC's RHAE and LRHAE-Uncapped), `main_metrics` (which score keys are the game's main
 ones: each run records them in `logs/experiment_state.json` and its end-of-run log line, and the
-viewer shows them first; ARC uses `rhae` and `lrhae_uncapped`),
+viewer shows them first; ARC uses `rhae`, `lrhae_uncapped` and `relative_env_actions`),
 `failure_metrics(*, steps)` (zero credit for controller errors), and
 `is_perfect(aggregate)` (whether a submission should end the run early). The default
 perfect predicate checks `success_rate >= 1.0`; override it if your problem uses a

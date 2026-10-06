@@ -383,4 +383,4 @@ def test_main_metrics_come_from_the_problem(tmp_path: Path) -> None:
         json.dumps({"problem": {"name": "arc_agi", "kwargs": {}}})
     )
     main = game_metrics(load_game(exp, "ls20"))["main_metrics"]
-    assert main == ["rhae", "lrhae_uncapped"]
+    assert main == ["rhae", "lrhae_uncapped", "relative_env_actions"]

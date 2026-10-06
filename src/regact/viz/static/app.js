@@ -738,7 +738,13 @@ function modelLabel(model) {
 function modelRegistration(model) {
   return _icons.models[model] || _icons.models[modelLabel(model)] || {};
 }
-const familyOf = (model) => (String(model).match(/^[A-Za-z]+/) || [""])[0];   // Qwen3-235B -> Qwen
+function familyOf(model) {   // Qwen3-235B -> Qwen; claude-sonnet-5 -> sonnet (a registered family in the name)
+  const lead = (String(model).match(/^[A-Za-z]+/) || [""])[0];
+  const families = Object.keys(_icons.families || {});
+  if (families.includes(lead)) return lead;
+  const tokens = modelLabel(model).toLowerCase().split(/[^a-z]+/);
+  return families.find((f) => tokens.includes(f.toLowerCase())) || lead;
+}
 function modelParamsInfo(model) {   // {b, estimate}: registry params_b (may be flagged estimate), else parsed
   const reg = modelRegistration(model);
   if (reg && typeof reg.params_b === "number") return { b: reg.params_b, estimate: !!reg.estimate };
