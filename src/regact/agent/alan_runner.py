@@ -140,7 +140,11 @@ async def _serve() -> int:
         kind = command.get("cmd")
         if kind == "start":
             agent = _build(command)
-            ready = {"type": READY, "system_prompt": _assembled_prompt(agent)}
+            ready = {
+                "type": READY,
+                "system_prompt": _assembled_prompt(agent),
+                "session_id": getattr(agent, "session_id", None),
+            }
             remote_server = getattr(getattr(agent, "_backend", None), "_server", None)
             address = getattr(remote_server, "server_address", None)
             if isinstance(address, tuple) and len(address) >= 2:
