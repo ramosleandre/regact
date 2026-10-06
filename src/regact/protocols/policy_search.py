@@ -112,6 +112,13 @@ class PolicySearchSession(ProtocolSession):
     experiment: ExperimentState
     exit_task_enabled: bool = True
     is_perfect: Callable[[dict[str, Any]], bool] | None = None
+    main_metrics: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+    def task_metrics(self) -> dict[str, Any] | None:
+        last = self.experiment.last_submission_results
+        if self.main_metrics is None or not last:
+            return None
+        return self.main_metrics(last)
 
     def stop_reason(self) -> str | None:
         # Preserve precedence: a perfect submission wins over ExitTask and budgets.
@@ -224,4 +231,5 @@ class PolicySearchProtocol(ExperimentProtocol):
             hooks=hooks,
             exit_task_enabled=self.config.controller.exit_task_enabled,
             is_perfect=ctx.is_perfect,
+            main_metrics=ctx.main_metrics,
         )

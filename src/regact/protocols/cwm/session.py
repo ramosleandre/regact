@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import ExitStack
 from typing import Any
 
@@ -11,10 +12,16 @@ from regact.protocols.cwm.bundle import description, require_unchanged_model, sn
 from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.planner import plan
 from regact.protocols.cwm.store import canonical
-from regact.protocols.cwm.validation import add_state_size, check_observation, validate
-from regact.protocols.cwm.worker import Worker
+from regact.protocols.cwm.validation import (
+    add_state_size,
+    check_observation,
+    compactness_failure,
+    validate,
+)
+from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.prompting import reset_commands
 from regact.protocols.managed.session import (
+    public_evidence,
     EXPLORATION,
     MODEL_FILES,
     MODELING,
@@ -32,15 +39,12 @@ class Coordinator(ManagedCoordinator):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Incremental views of self.states, so each real step costs O(1), not O(states).
-        self.state_owner: dict[str, int] = {}  # canonical state -> its observation id
-        self.state_sizes: dict[str, Any] = {}  # add_state_size totals over self.states
-
-    def _index_states(self) -> None:
-        self.state_owner, self.state_sizes = {}, {}
-        for oid, state in self.states.items():
-            self.state_owner.setdefault(canonical(state), oid)
-            add_state_size(self.state_sizes, oid, state, self.store.observation(oid))
+        # single_instance: the accepted CWM's State at a point of the live episode, carried across
+        # RunController calls. None until a CWM is accepted, and after a contradiction.
+        self.running: dict[str, Any] | None = None  # {"state", "hash"}
+        self.state_sizes: dict[str, Any] = {}  # compactness totals, validation + exploration
+        self.current_state: Any = None  # the State the controller sees in this RunController
+        self.next_state: Any = None  # step's prediction, adopted once reality matches it
 
     @property
     def commands(self):
@@ -57,25 +61,79 @@ class Coordinator(ManagedCoordinator):
             self.worker(model, self.options.execution.max_seconds_per_RunController, clock=clock)
         )
 
+    def begin_exploration(self):
+        self.current_state = self.next_state = None
+
     def controller_input(self, worker, obs):
-        return self._model_observation(worker, obs, self.current_id)
+        if self.current_state is None:
+            self.current_state = (
+                self.live_state(worker)
+                if self.single_instance
+                else self._explained(
+                    worker, worker.call("get_initial_state", obs=obs), obs, self.current_id
+                )
+            )
+        return self.current_state
 
     def predict(self, worker, state, action):
-        predicted = worker.call("step", state=state, action=action)
-        return check_observation(worker.call("render", state=predicted))
+        self.next_state = worker.call("step", state=state, action=action)
+        return check_observation(worker.call("render", state=self.next_state))
 
     def check_prediction(self, predicted, obs, evidence):
         if canonical(predicted) != canonical(obs):
-            raise ModelMismatch("prediction_mismatch", predicted, obs, evidence)
+            self.running = self.current_state = None
+            raise ModelMismatch("prediction_mismatch", predicted, obs, public_evidence(evidence))
+        self.current_state = self.next_state
+        self._check_size(self.current_state, obs, evidence["after_obs_id"])
+        if self.single_instance:
+            self.running = {"state": self.current_state, "hash": evidence["history_hash"]}
 
     def after_valid_run(self):
         self.accepted["dataset_version"] = self.store.version
 
-    def after_reset(self):
-        # The new reset observation must also be validated. Resets themselves
-        # are recorded episode boundaries, never CWM transition examples.
-        if self.accepted and self.current_id not in self.states:
-            self.change_phase(MODELING, "environment_reset")
+    def live_state(self, worker: Worker) -> Any:
+        """The accepted CWM's State at the live episode's current point: the running state, caught
+        up through anything recorded since (a reset, steps), each screen checked on the way."""
+        position = self.store.last_hash(self.episode)
+        if self.running is not None and self.running["hash"] == position:
+            return self.running["state"]
+        episode = next(e for e in self.store.episodes() if e["episode_id"] == self.episode)
+        steps = self.store.episode_steps(self.episode)
+        anchor = self.running["hash"] if self.running is not None else None
+        hashes = [item["history_hash"] for item in steps]
+        done = hashes.index(anchor) + 1 if anchor in hashes else None
+        if done is None and anchor != episode["start_hash"]:
+            oid = episode["initial_obs_id"]
+            start = self.store.observation(oid)
+            state = self._explained(
+                worker, worker.call("get_initial_state", obs=start), start, oid
+            )
+        else:
+            assert self.running is not None
+            state = self.running["state"]
+        for item in steps[done or 0 :]:
+            state = worker.call("step", state=state, action=item["action"])
+            after = self.store.observation(item["after_obs_id"])
+            state = self._explained(worker, state, after, item["after_obs_id"])
+        self.running = {"state": state, "hash": position}
+        return state
+
+    def _explained(self, worker: Worker, state: Any, obs: dict[str, Any], oid: int) -> Any:
+        rendered = check_observation(worker.call("render", state=state))
+        if canonical(rendered) != canonical(obs):
+            self.running = None
+            raise ModelMismatch("reconstruction_mismatch", rendered, obs, {"observation_id": oid})
+        self._check_size(state, obs, oid)
+        return state
+
+    def _check_size(self, state: Any, obs: dict[str, Any], oid: int) -> None:
+        add_state_size(self.state_sizes, oid, state, obs)
+        failure = compactness_failure(
+            self.state_sizes, self.options.threshold_max_state_obs_size_ratio
+        )
+        if failure is not None:
+            self.running = None
+            raise ModelMismatch("compression_ratio", None, obs, {"observation_id": oid, **failure})
 
     def update(self) -> dict[str, Any]:
         rid = self.store.record("validation", "running", {"dataset_version": self.store.version})
@@ -86,14 +144,25 @@ class Coordinator(ManagedCoordinator):
             "running",
             {"bundle": bundle.name, "manifest": manifest, "dataset_version": self.store.version},
         )
+        seconds = self.validation_budget()
+        clock = budgets.AgentClock(seconds)
+        started = time.monotonic()
         with self.worker(
-            bundle,
-            self.options.execution.max_seconds_per_UpdateCodeWorldModel,
-            "protocol.execution.max_seconds_per_UpdateCodeWorldModel",
-            clock=budgets.AgentClock(self.options.execution.max_seconds_per_UpdateCodeWorldModel),
+            bundle, seconds, "protocol.execution.max_seconds_per_UpdateCodeWorldModel", clock=clock
         ) as worker:
-            summary, states = validate(worker, self.store, self.options)
-        record = {"bundle": bundle.name, "manifest": manifest, "validation": summary}
+            summary, live = validate(
+                worker,
+                self.store,
+                self.options,
+                live_episode=self.episode if self.single_instance else None,
+            )
+        record = {
+            "bundle": bundle.name,
+            "manifest": manifest,
+            "validation": summary,
+            "seconds": time.monotonic() - started,
+            "model_seconds": clock.used,
+        }
         version = (self.accepted["cwm_version"] if self.accepted else 0) + 1  # 1, 2, 3, ...
         if summary["accepted"]:
             record["cwm_version"] = version
@@ -106,11 +175,52 @@ class Coordinator(ManagedCoordinator):
                 "dataset_version": self.store.version,
                 "validation": summary,
             }
-            self.states = states
-            self._index_states()
+            self.running = live
+            self.state_sizes = {
+                k: summary[k]
+                for k in ("state_bytes", "observation_bytes", "largest_ratio_state")
+                if k in summary
+            }
             self.change_phase(EXPLORATION, "model_accepted")
             self.event("cwm_accepted", cwm_version=version)
         return {**summary, "cwm_version": self.accepted["cwm_version"] if self.accepted else None}
+
+    def planning_start(self, worker: Worker, start: dict[str, Any]) -> Any:
+        """Where a plan starts: the live state in single_instance, the initial observation's State
+        in multi_instance. A screen the accepted CWM cannot explain sends the agent back to
+        modelling, as in exploration."""
+        try:
+            if self.single_instance:
+                return self.live_state(worker)
+            return self._explained(
+                worker, worker.call("get_initial_state", obs=start), start, self.initial_id
+            )
+        except ModelMismatch as exc:
+            error = WorkerError(
+                f"The accepted CWM does not explain the planning start ({exc.kind}). "
+                "Inspect the diagnostic, repair the CWM and validate it again."
+            )
+            error.kind = exc.kind
+            error.evidence = {
+                "kind": exc.kind,
+                "predicted": exc.predicted,
+                "observed": exc.actual,
+                **exc.evidence,
+            }
+            self.change_phase(MODELING, exc.kind)
+            raise error from None
+
+    def validation_budget(self) -> float | None:
+        """Seconds of submitted code for one validation: the floor, or a per-1,000-recorded-steps
+        rate when the dataset is large enough for that to be more."""
+        execution = self.options.execution
+        floor, rate = (
+            execution.max_seconds_per_UpdateCodeWorldModel,
+            execution.max_seconds_per_UpdateCodeWorldModel_per_1000_steps,
+        )
+        if floor is None or rate is None:
+            return None
+        return max(floor, rate * self.store.summary()["n_total_transitions"] / 1000)
 
     def plan(self) -> dict[str, Any]:
         assert self.accepted is not None
@@ -153,13 +263,18 @@ class Coordinator(ManagedCoordinator):
                 )
             )
             worker.deadline = goal_worker.deadline = deadline
+            start = (
+                self.store.observation(self.current_id) if self.single_instance else self.initial
+            )
+            start_state = self.planning_start(worker, start)
             result = plan(
                 worker,
-                self.store.observation(self.current_id) if self.single_instance else self.initial,
+                start,
                 self.store.observation_hashes(),
                 self.options,
                 lambda obs: self.problem.enumerate_actions(Obs.from_json(obs)),
                 goal_worker=goal_worker,
+                initial_state=start_state,
             )
         metadata = {
             "plan_id": rid,
@@ -169,6 +284,7 @@ class Coordinator(ManagedCoordinator):
             "cwm_version": self.accepted["cwm_version"],
             "model_bundle": model.name,
             "initial_observation_id": self.current_id if self.single_instance else self.initial_id,
+            "initial_state": start_state,  # the viewer replays the plan from exactly this State
             "dataset_version": self.store.version,
             **result,
         }
@@ -194,35 +310,6 @@ class Coordinator(ManagedCoordinator):
             for k, v in metadata.items()
             if k not in ("actions", "predicted_observation_hashes", "manifest")
         }
-
-    def _model_observation(self, worker: Worker, obs: dict[str, Any], oid: int) -> Any:
-        state = worker.call("parse", obs=obs)
-        restored = check_observation(worker.call("render", state=state))
-        if canonical(restored) != canonical(obs):
-            raise ModelMismatch("reconstruction_mismatch", restored, obs, {"observation_id": oid})
-        text = canonical(state)
-        other = self.state_owner.get(text, oid)
-        if other != oid:
-            raise ModelMismatch("parser_collision", None, obs, {"observation_ids": [other, oid]})
-        if oid not in self.states:
-            self.states[oid] = state
-            self.state_owner[text] = oid
-            add_state_size(self.state_sizes, oid, state, obs)
-        sizes = dict(self.state_sizes)
-        numerator = sizes["state_bytes"]
-        denominator = sizes["observation_bytes"]
-        if numerator / max(1, denominator) >= self.options.threshold_max_state_obs_size_ratio:
-            raise ModelMismatch(
-                "compression_ratio",
-                None,
-                obs,
-                {
-                    "ratio": numerator / denominator,
-                    "required_below": self.options.threshold_max_state_obs_size_ratio,
-                    **sizes,
-                },
-            )
-        return state
 
 
 # Stable public imports for callers of the earlier CWM module.

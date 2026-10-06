@@ -13,7 +13,7 @@ make run ARGS="experiment=dev"
 # persistent vanilla interaction
 make run ARGS="agent=claude problem=arc_agi 'problem.tasks=[ls20]' protocol=vanilla features=none problem.lifecycle=single_instance limits.max_tool_calls=100 limits.max_seconds_per_task=3600"
 
-# the same execution model, with CWM v5 requirements
+# the same execution model, with CWM v6 requirements
 make run ARGS="agent=codex problem=arc_agi 'problem.tasks=[ls20]' protocol=cwm features=none problem.lifecycle=single_instance limits.max_tool_calls=100 limits.max_seconds_per_task=3600"
 
 # see the composed config without running it

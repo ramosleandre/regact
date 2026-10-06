@@ -21,6 +21,7 @@ def plan(
     actions_for: Callable[[dict[str, Any]], Iterable[Any]],
     *,
     goal_worker: Worker | None = None,
+    initial_state: Any = None,
 ) -> dict[str, Any]:
     cfg = config.planner
     goal_worker = goal_worker or worker
@@ -34,7 +35,9 @@ def plan(
         calls += 1
         return worker.call(op, **args)
 
-    state = model_call("parse", obs=initial)
+    state = initial_state
+    if state is None:
+        state = model_call("get_initial_state", obs=initial)
     nodes = [
         {"state": state, "obs": initial, "parent": None, "action": None, "depth": 0, "novel": False}
     ]

@@ -171,12 +171,12 @@ async def test_callback_budget_names_the_effective_limit(rig):
     collect(c)
     model(c.workdir)
     c.options.execution.max_seconds_per_call = 0.2
-    parser = c.workdir / "world_model/model_parser.py"
-    parser.write_text("import time\ndef parse(obs):\n time.sleep(1)\n")
+    parser = c.workdir / "world_model/model_initial_state.py"
+    parser.write_text("import time\ndef get_initial_state(obs):\n time.sleep(1)\n")
     result, change = await call(c, "UpdateCodeWorldModel")
     assert result["status"] == "Incomplete"
     assert result["error"]["budget"]["value"] == 0.2
-    assert result["error"]["callback"] == "parse" and change is None
+    assert result["error"]["callback"] == "get_initial_state" and change is None
 
 
 def test_planner_budget_counts_parse_step_and_render(rig):

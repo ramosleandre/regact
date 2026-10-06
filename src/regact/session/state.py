@@ -37,6 +37,7 @@ class ExperimentState:
     tool_calls_total: int = 0  # tool calls emitted this run; << turn => agent spinning
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
+    main_metrics: dict[str, Any] | None = None  # the problem's main scores, as last computed
     turn: int = 0  # 1-indexed turn in progress (0 before the first)
     agent_usage: dict[str, Any] | None = None  # CLI agents: tokens per model, set at close
     schema_version: int = 3

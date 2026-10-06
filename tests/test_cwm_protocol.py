@@ -72,8 +72,8 @@ def model(root, bad=False):
     (d / "model_state.py").write_text(
         "from dataclasses import dataclass\n@dataclass(frozen=True)\nclass State:\n n:int\n"
     )
-    (d / "model_parser.py").write_text(
-        'from world_model.model_state import State\ndef parse(o): return State(o["frame"][0])\n'
+    (d / "model_initial_state.py").write_text(
+        'from world_model.model_state import State\ndef get_initial_state(o): return State(o["frame"][0])\n'
     )
     (d / "model_render.py").write_text(
         'def render(s): return {"frame":[s.n]*30, "reward":float(s.n>=6),'
@@ -240,21 +240,6 @@ def test_plan_real_exploration_and_replay(rig):
     assert c.phase == "Active Exploration"
 
 
-def test_incremental_state_index_matches_a_full_recompute(rig):
-    from regact.protocols.cwm.store import canonical
-    from regact.protocols.cwm.validation import add_state_size
-
-    c, _ = rig
-    accept(c)
-    exploration(c)
-    assert c.tool("RunController", {})["real_actions"] == 4
-    full: dict = {}
-    for oid, state in c.states.items():
-        add_state_size(full, oid, state, c.store.observation(oid))
-    assert c.state_sizes == full and len(c.states) == 5
-    assert c.state_owner == {canonical(state): oid for oid, state in c.states.items()}
-
-
 def test_cwm_versions_count_accepted_models_without_gaps(rig):
     c, _ = rig
     accept(c)
@@ -274,11 +259,16 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     assert c.phase == "CWM Modeling"
     diagnostic = c.store.get_diagnostic(result["diagnostic_id"])
     assert diagnostic["predicted"]["frame"][0] == 4 and diagnostic["observed"]["frame"][0] == 3
+    # Named like validation counterexamples; internal store fields stay hidden.
+    assert {"episode_id", "step", "observation_id", "transition_id"} <= set(result["counterexample"])
+    assert result["counterexample"]["step"] == 3 and "history_hash" not in result["counterexample"]
     assert "error" in c.tool("PlanInCWM", {})
     model(c.workdir)
     repaired = c.tool("UpdateCodeWorldModel", {})
-    assert repaired["accepted"] and repaired["observations_checked"] == 4
-    assert repaired["transitions_checked"] == 3
+    # Two episodes: the initial collection (2 steps) and the exploration (3 steps, the first two
+    # shared with the collection and reused).
+    assert repaired["accepted"] and repaired["episodes_checked"] == 2
+    assert repaired["steps_checked"] == 5
 
 
 def test_familiar_outcomes_still_run_real_experiments(rig):
@@ -349,7 +339,7 @@ def test_callback_timeout_is_recorded_and_not_accepted(rig):
     result = c.tool("UpdateCodeWorldModel", {})
     assert time.monotonic() - started < 4
     assert result["error_type"] == "code_timeout", result
-    assert result["observations_checked"] == 3 and not result["complete"]
+    assert result["steps_checked"] == 1 and not result["complete"]
     assert c.phase == "CWM Modeling" and c.accepted is None
     assert c.store.db.execute("SELECT status FROM records").fetchone()[0] == "rejected"
 
@@ -359,10 +349,11 @@ def test_bad_reconstruction_and_compression_are_rejected(rig):
     collect(c)
     model(c.workdir)
     p = c.workdir / "world_model/model_render.py"
-    p.write_text(p.read_text().replace("[s.n]*30", "[0]*30"))
+    p.write_text(p.read_text().replace("[s.n]*30", "[s.n+1]*30"))
     result = c.tool("UpdateCodeWorldModel", {})
     assert not result["accepted"] and result["complete"]
-    assert result["failures"]["reconstruction_mismatch"] == 2
+    # The episode's first screen is not reproduced, so the episode stops there.
+    assert result["failures"] == {"reconstruction_mismatch": 1}
     assert result["counterexamples"][0]["diagnostic_id"]
     model(c.workdir)
     c.options.threshold_max_state_obs_size_ratio = 0.01
@@ -388,11 +379,17 @@ def test_exploration_action_budget_and_global_real_budget(rig):
 def test_observation_determinism_preserves_both_witnesses(tmp_path):
     store = ExperienceStore(tmp_path / "experience.sqlite3")
     try:
-        ep, _ = store.start_episode({"x": 0}, "test", {})
-        a = store.record_step(ep, {"x": 0}, 1, {"x": 1})
-        b = store.record_step(ep, {"x": 0}, 1, {"x": 2})
+        first, _ = store.start_episode({"x": 0}, "test", {})
+        a = store.record_step(first, {"x": 0}, 1, {"x": 1})
+        # Same screen and action again, but later in the episode: hidden state may differ.
+        later = store.record_step(first, {"x": 1}, 0, {"x": 0})
+        hidden = store.record_step(first, {"x": 0}, 1, {"x": 2})
+        assert later["conflicting_witnesses"] == hidden["conflicting_witnesses"] == []
+        # Same start and same action from a fresh episode, a different result: genuine randomness.
+        second, _ = store.start_episode({"x": 0}, "test", {})
+        b = store.record_step(second, {"x": 0}, 1, {"x": 3})
         assert b["conflicting_witnesses"][0]["event_id"] == a["event_id"]
-        assert store.summary()["n_unique_transitions"] == 2
+        assert store.summary()["n_unique_transitions"] == 4
     finally:
         store.close()
 
@@ -401,7 +398,7 @@ def test_worker_cannot_read_database_or_network(rig):
     c, _ = rig
     collect(c)
     model(c.workdir)
-    parser = c.workdir / "world_model/model_parser.py"
+    parser = c.workdir / "world_model/model_initial_state.py"
     parser.write_text(
         "from pathlib import Path\nimport socket\n"
         + parser.read_text()
@@ -442,7 +439,7 @@ def test_submitted_symlinks_and_plan_output_symlinks_are_rejected(rig, tmp_path)
     model(c.workdir)
     target = tmp_path / "outside.py"
     target.write_text("SECRET")
-    source = c.workdir / "world_model/model_parser.py"
+    source = c.workdir / "world_model/model_initial_state.py"
     source.unlink()
     source.symlink_to(target)
     result = c.tool("UpdateCodeWorldModel", {})

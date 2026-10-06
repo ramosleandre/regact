@@ -103,6 +103,7 @@ def build_prompt(
     verbalize_variant: str,
     command_script: str,
     descriptions: Mapping[str, str] | None = None,
+    commands: Mapping[str, str] | None = None,
     workspace_extensions: str = "",
     workflow_steps: str | None = None,
     workflow_intro: str = "",
@@ -153,6 +154,7 @@ def build_prompt(
         verbalize_variant=verbalize_variant,
         terminal_examples=_TERMINAL_EXAMPLES,
         command_script=command_script,
+        command_descriptions=commands,
     )
 
 

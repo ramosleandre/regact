@@ -2,7 +2,7 @@
 
 A **protocol** defines what the coding agent is asked to produce, which framework commands it can use, how interaction is controlled, and when the task is complete. Select one protocol per task with `protocol=...`.
 
-This page describes the current architecture, including **CWM v5**. “v5” names the design generation, not a CLI value or an accepted CWM's `cwm_version`.
+This page describes the current architecture, including **CWM v6**. “v6” names the design generation, not a CLI value or an accepted CWM's `cwm_version`.
 
 ## Choose a protocol
 
@@ -21,7 +21,7 @@ There are three runnable protocols:
 | `multi_instance` | Fresh start per call | Fresh start per call | Fresh evaluation episodes |
 | Independent final policy evaluation | No | No | Yes |
 
-For the agent workflow, API and complete parameter tables, read [Managed execution](managed_protocols.md), then [CWM v5](cwm.md) for the additional modeling contract. Both problem config groups still default to `multi_instance`; explicitly select `problem.lifecycle=single_instance` for persistent interaction.
+For the agent workflow, API and complete parameter tables, read [Managed execution](managed_protocols.md), then [CWM v6](cwm.md) for the additional modeling contract. Both problem config groups still default to `multi_instance`; explicitly select `problem.lifecycle=single_instance` for persistent interaction.
 
 `controller.*` configures policy-search evaluation, not vanilla/CWM. `features.*` is also specific to policy search; managed protocols require `features=none`.
 
@@ -62,7 +62,7 @@ The scientific comparison is **requiring and validating an explicit CWM versus n
 ## Execution references
 
 - [Managed execution](managed_protocols.md) defines call versus episode, single-/multi-instance behavior, explicit resets, controller callbacks, dataset access and all shared budget scopes.
-- [CWM v5](cwm.md) defines the two phases, accepted snapshots, per-action validation, optional local simulation/planning, CWM-specific parameters and limitations.
+- [CWM v6](cwm.md) defines the two phases, accepted snapshots, per-action validation, optional local simulation/planning, CWM-specific parameters and limitations.
 - [Experiments](experiments.md) describes saved evidence and conversation/CWM playback. Call trajectories are reconstructed on demand from recorded observations.
 
 ## Runtime extension points
@@ -173,8 +173,8 @@ messages but retains flag recording.
 | `exploration.py` | `controller.py` |
 | Managed `framework/control.py` | `framework/commands.py` |
 | `framework/cwm_data.py` | `framework/data_api.py` |
-| `framework/simulation.py` or an agent-owned model environment | `framework/cwm_env.py` plus editable `simulate.py` |
+| `framework/simulation.py` or an agent-owned model environment | `framework/cwm_env.py` |
 | Preliminary simulated episode / novelty gate | Direct real execution with per-action checks; local simulation is optional |
 | `protocol.execution.max_seconds_per_episode` | Removed; use `protocol.execution.max_seconds_per_RunController` |
 
-Policy search retains its own `solution.py`, `framework/control.py` and evaluation settings. Existing saved runs/workspaces are not rewritten. Historical field names in their logs describe the implementation that produced them. Current limitations and deferred changes are listed in [CWM v5](cwm.md#scientific-and-operational-limitations).
+Policy search retains its own `solution.py`, `framework/control.py` and evaluation settings. Existing saved runs/workspaces are not rewritten. Historical field names in their logs describe the implementation that produced them. Current limitations and deferred changes are listed in [CWM v6](cwm.md#scientific-and-operational-limitations).

@@ -3,7 +3,7 @@
 __PROTOCOL_INTRO__- **Recorded experience.** Real observations and transitions are automatically recorded in an external dataset accessible through `framework.data_api`. Read `framework/data_api.py` for API documentation, field definitions and examples.
 - **Initial situation.** A random policy already prepared the dataset, targeting __INITIAL_TARGET__ unique observations (possibly fewer if a collection limit was reached). Call `data_api.summary()` to inspect the current dataset. __INITIAL_GUIDANCE__
 __PROTOCOL_STEPS__
-- **Final objective.** Fully complete the game. Keep working until the game is solved or the framework ends the task (for example, when its budget is exhausted). Seek useful understanding as well as immediate progress: test mechanisms and hypotheses rather than collecting arbitrary new observations just for novelty.
+- **Final objective.** Fully complete the game. Keep working until the game is solved or the framework ends the task (for example, when its budget is exhausted). Seek useful understanding as well as immediate progress: test mechanisms and hypotheses.
 
 __LIFECYCLE__
 

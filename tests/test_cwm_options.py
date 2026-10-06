@@ -65,7 +65,7 @@ def test_planner_registration_refusal_and_shared_notices(rig):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("cap", [2, 100, None])
-def test_generated_pagination_signature_and_complete_iteration(rig, cap):
+def test_generated_data_api_hides_the_query_cap(rig, cap):
     c, _ = rig
     c.options.data_api.max_items = cap
     c.options.n_unique_observations_in_initial_collection = 4
@@ -77,20 +77,17 @@ def test_generated_pagination_signature_and_complete_iteration(rig, cap):
     api = ModuleType("data_api")
     exec(compile(source, "data_api.py", "exec"), api.__dict__)
     api._query = lambda op, **args: c.data({"op": op, **args})
-    for name, expected in (
-        ("list_observation_ids", [1, 2, 3, 4]),
-        ("list_transition_ids", [1, 2, 3]),
-    ):
-        function = getattr(api, name)
-        assert inspect.signature(function).parameters["limit"].default == cap
-        assert function.__doc__.startswith("Return one page")
-        ids, cursor = [], 0
-        while page := function(after_id=cursor):
-            ids.extend(page)
-            cursor = page[-1]
-        assert ids == expected
-        if cap is None:
-            assert function(limit=None) == expected
-        else:
-            with pytest.raises(ValueError, match="pagination"):
-                function(limit=None)
+    # The caller never pages: every ID comes back, and loads of any size are batched under the cap.
+    assert api.list_observation_ids() == [1, 2, 3, 4]
+    assert api.list_transition_ids() == [1, 2, 3]
+    assert [o["frame"][0] for o in api.load_observations([4, 1, 2, 3])] == [3, 0, 1, 2]
+    assert api.load_observations(2) == api.load_observations("[2]")
+    transition = api.load_transitions("[1:3]")[2]
+    assert transition["observation_id"] == 3 and transition["next_observation_id"] == 4
+    assert transition["next_observation"]["frame"][0] == 3 and transition["action"] == 1
+    [episode] = api.list_episodes()
+    assert episode["live"] and episode["n_steps"] == 3
+    observations, actions = api.load_history(episode["episode_id"])
+    assert [o["frame"][0] for o in observations] == [0, 1, 2, 3] and actions == [1, 1, 1]
+    observations, actions = api.load_history(episode["episode_id"], step=1)
+    assert len(observations) == 2 and actions == [1]

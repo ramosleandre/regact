@@ -289,5 +289,5 @@ def test_trace_metrics_score_all_task_actions() -> None:
     trace = [(baseline[0], {"levels_completed": 1, "win_levels": len(baseline)})]
     derived = _problem().derived_trace_metrics("ls20", trace)
     weight = 1 / sum(range(1, len(baseline) + 1))  # level 1 at human efficiency, weight 1
-    assert derived == {"rhae": round(weight, 3), "lrhae": round(weight, 3)}
-    assert _problem().derived_trace_metrics("ls20", []) == {"rhae": 0.0, "lrhae": 0.0}
+    assert derived == {"rhae": round(weight, 3), "rhae_uncapped": round(weight, 3)}
+    assert _problem().derived_trace_metrics("ls20", []) == {"rhae": 0.0, "rhae_uncapped": 0.0}

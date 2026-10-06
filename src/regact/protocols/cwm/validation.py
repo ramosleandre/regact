@@ -83,24 +83,50 @@ def add_state_size(summary: dict[str, Any], oid: int, state: Any, obs: Any) -> N
     for key, sign in (("smallest_state", 1), ("largest_state", -1)):
         if key not in summary or sign * state_bytes < sign * summary[key]["state_bytes"]:
             summary[key] = item
+    largest = summary.get("largest_ratio_state")
+    if largest is None or item["ratio"] > largest["ratio"]:
+        summary["largest_ratio_state"] = item
+
+
+def compactness_failure(sizes: dict[str, Any], threshold: float) -> dict[str, Any] | None:
+    """Both the aggregate ratio and the largest single state must stay under the threshold, so a
+    State that grows along an episode (visited sets, logs) fails even when the average is low."""
+    ratio = sizes.get("state_bytes", 0) / max(1, sizes.get("observation_bytes", 0))
+    largest = sizes.get("largest_ratio_state")
+    if ratio >= threshold:
+        return {"ratio": ratio, "required_below": threshold}
+    if largest is not None and largest["ratio"] >= threshold:
+        return {"largest_state": largest, "required_below": threshold}
+    return None
+
+
+_REPEAT_EVERY = 10  # repeatability is checked on episode starts and every 10th step
 
 
 def validate(
-    worker: Worker, store: ExperienceStore, config: CwmConfig
-) -> tuple[dict[str, Any], dict[int, Any]]:
-    states: dict[int, Any] = {}
-    by_state: dict[str, int] = {}
+    worker: Worker, store: ExperienceStore, config: CwmConfig, *, live_episode: int | None = None
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Replay every recorded episode in time order: get_initial_state on its first observation,
+    then step carries the State, and render is checked against every recorded observation.
+
+    Returns the summary and, when the live episode was predicted to its end, the running state
+    there (``{"state", "hash"}``) for single_instance exploration to continue from.
+    """
     summary: dict[str, Any] = {
         "accepted": False,
         "complete": False,
         "dataset_version": store.version,
-        "observations_checked": 0,
-        "transitions_checked": 0,
+        "episodes_checked": 0,
+        "steps_checked": 0,
         "failures": {},
         "counterexamples": [],
         "state_bytes": 0,
         "observation_bytes": 0,
     }
+    sizes: dict[str, Any] = {}
+    repeated = store.repeated_histories()
+    validated: dict[str, Any] = {}  # repeated history hash -> State there, validated once
+    diverged: set[str] = set()  # repeated history hashes where a failure is already reported
 
     def failure(
         kind: str,
@@ -132,77 +158,99 @@ def validate(
             )
         examples.append(entry)
 
-    def finish_counts() -> None:
-        summary["counterexamples_omitted"] = sum(summary["failures"].values()) - len(
-            summary["counterexamples"]
-        )
+    def call(op: str, repeat: bool, where: dict[str, Any], **args: Any) -> Any:
+        value = worker.call(op, **args)
+        if repeat:
+            again = worker.call(op, **args)
+            if canonical(again) != canonical(value):
+                failure(
+                    "non_deterministic_model", {**where, "callback": op}, outputs=(value, again)
+                )
+        return value
 
+    def explains(state: Any, obs: Any, kind: str, where: dict[str, Any], repeat: bool) -> bool:
+        rendered = check_observation(call("render", repeat, where, state=state))
+        if canonical(rendered) != canonical(obs):
+            failure(kind, where, rendered, obs)
+            return False
+        add_state_size(sizes, where["observation_id"], state, obs)
+        return True
+
+    def reached(history: str, state: Any, ok: bool = True) -> bool:
+        if history in repeated:
+            if ok:
+                validated[history] = state
+            else:
+                diverged.add(history)
+        return ok
+
+    live: dict[str, Any] | None = None
     try:
-        for oid in store.observation_ids():
-            obs = store.observation(oid)
-            state = worker.call("parse", obs=obs)
-            repeated = worker.call("parse", obs=obs)
-            if canonical(repeated) != canonical(state):
-                failure(
-                    "non_deterministic_model",
-                    {"observation_id": oid, "callback": "parse"},
-                    outputs=(state, repeated),
+        for episode in store.episodes():
+            episode_id = episode["episode_id"]
+            where = {
+                "episode_id": episode_id,
+                "step": 0,
+                "observation_id": episode["initial_obs_id"],
+            }
+            if episode["start_hash"] in validated:
+                state, alive = validated[episode["start_hash"]], True
+            elif episode["start_hash"] in diverged:
+                state, alive = None, False
+            else:
+                start = store.observation(episode["initial_obs_id"])
+                state = call("get_initial_state", True, where, obs=start)
+                alive = reached(
+                    episode["start_hash"],
+                    state,
+                    explains(state, start, "reconstruction_mismatch", where, True),
                 )
-            text = canonical(state)
-            if text in by_state and by_state[text] != oid:
-                failure("parser_collision", {"observation_ids": [by_state[text], oid]})
-            by_state[text] = oid
-            states[oid] = state
-            reconstructed = check_observation(worker.call("render", state=state))
-            repeated = worker.call("render", state=state)
-            if canonical(repeated) != canonical(reconstructed):
-                failure(
-                    "non_deterministic_model",
-                    {"observation_id": oid, "callback": "render"},
-                    outputs=(reconstructed, repeated),
-                )
-            if canonical(reconstructed) != canonical(obs):
-                failure("reconstruction_mismatch", {"observation_id": oid}, reconstructed, obs)
-            add_state_size(summary, oid, state, obs)
-            summary["observations_checked"] += 1
-        ratio = summary["state_bytes"] / max(1, summary["observation_bytes"])
-        summary["state_obs_size_ratio"] = ratio
-        if ratio >= config.threshold_max_state_obs_size_ratio:
-            failure(
-                "compression_ratio",
-                {"ratio": ratio, "required_below": config.threshold_max_state_obs_size_ratio},
-            )
-        for tid in store.transition_ids():
-            transition = store.transition(tid)
-            state = states[transition["before_obs_id"]]
-            successor = worker.call("step", state=state, action=transition["action"])
-            repeated = worker.call("step", state=state, action=transition["action"])
-            if canonical(repeated) != canonical(successor):
-                failure(
-                    "non_deterministic_model",
-                    {"transition_id": tid, "callback": "step"},
-                    outputs=(successor, repeated),
-                )
-            predicted = check_observation(worker.call("render", state=successor))
-            if canonical(predicted) != canonical(transition["o_next"]):
-                failure(
-                    "prediction_mismatch",
-                    {
-                        "transition_id": tid,
-                        "before_obs_id": transition["before_obs_id"],
-                        "after_obs_id": transition["after_obs_id"],
-                    },
-                    predicted,
-                    transition["o_next"],
-                )
-            summary["transitions_checked"] += 1
+            for item in store.episode_steps(episode_id) if alive else []:
+                summary["steps_checked"] += 1
+                if item["history_hash"] in validated:
+                    state = validated[item["history_hash"]]
+                    continue
+                if item["history_hash"] in diverged:
+                    alive = False
+                    break
+                where = {
+                    "episode_id": episode_id,
+                    "step": item["step_index"] + 1,
+                    "observation_id": item["after_obs_id"],
+                    "transition_id": item["transition_id"],
+                }
+                repeat = item["step_index"] % _REPEAT_EVERY == 0
+                state = call("step", repeat, where, state=state, action=item["action"])
+                observed = store.observation(item["after_obs_id"])
+                ok = explains(state, observed, "prediction_mismatch", where, repeat)
+                if not reached(item["history_hash"], state, ok):
+                    alive = False  # the rest of this episode cannot be predicted from here
+                    break
+            if episode_id == live_episode and alive:
+                live = {"state": state, "hash": store.last_hash(episode_id)}
+            summary["episodes_checked"] += 1
+        summary.update({k: sizes[k] for k in ("state_bytes", "observation_bytes") if k in sizes})
+        for key in ("smallest_state", "largest_state", "largest_ratio_state"):
+            if key in sizes:
+                summary[key] = sizes[key]
+        summary["state_obs_size_ratio"] = sizes.get("state_bytes", 0) / max(
+            1, sizes.get("observation_bytes", 0)
+        )
+        if size_failure := compactness_failure(sizes, config.threshold_max_state_obs_size_ratio):
+            failure("compression_ratio", size_failure)
     except WorkerError as exc:
         summary["error"] = budgets.truncate_error(str(exc), config.feedback.max_error_chars)
         summary["error_type"] = exc.kind
         summary["error_context"] = exc.context
-        finish_counts()
-        return summary, states
-    finish_counts()
+        _finish_counts(summary)
+        return summary, None
+    _finish_counts(summary)
     summary["complete"] = True
     summary["accepted"] = not summary["failures"]
-    return summary, states
+    return summary, live
+
+
+def _finish_counts(summary: dict[str, Any]) -> None:
+    summary["counterexamples_omitted"] = sum(summary["failures"].values()) - len(
+        summary["counterexamples"]
+    )

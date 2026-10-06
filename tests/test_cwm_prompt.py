@@ -82,16 +82,16 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
     assert not (tmp_path / "code_library").exists()
     assert "model_env.py" not in text
     assert ("cwm_env.py" in text) == helpers
-    assert ("simulate.py" in text) == helpers
+    assert "simulate.py" not in text and "replay_episode" not in text
     assert "framework/simulation.py" not in text
     assert "simulates it again" not in text
-    assert "No preliminary simulation or predicted novelty is required" in text
+    assert "predicted novelty" not in text and "just for novelty" not in text
     assert "source files or imported dependencies have changed" in text
     assert "CWM_INTERFACE.md" not in text
     assert not (tmp_path / "CWM_INTERFACE.md").exists()
     assert sorted(p.name for p in (tmp_path / "world_model").iterdir()) == [
         "__init__.py",
-        "model_parser.py",
+        "model_initial_state.py",
         "model_render.py",
         "model_state.py",
         "model_transition.py",
@@ -192,7 +192,7 @@ def test_data_api_module_docstring_example_runs(rig, monkeypatch, capsys):  # no
     monkeypatch.setitem(sys.modules, "framework", package)
     monkeypatch.setitem(sys.modules, "framework.data_api", module)
     monkeypatch.chdir(c.workdir)
-    example = module.__doc__.split("Example from a workspace script:\n", 1)[1].split("\n\n", 1)[0]
+    example = module.__doc__.split("Example:\n", 1)[1].split("\n\n", 1)[0]
     exec(textwrap.dedent(example), {})
     assert (c.workdir / "observation.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert "Image of observation" in capsys.readouterr().out

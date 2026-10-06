@@ -359,6 +359,14 @@ async def run_task(
                 output_dir=output_dir,
                 logger=logger,
                 is_perfect=problem.is_perfect,
+                main_metrics=lambda results: problem.main_scores(
+                    {
+                        **results.get("aggregate", {}),
+                        **problem.derived_submission_metrics(
+                            task_name, results.get("episodes", [])
+                        ),
+                    }
+                ),
                 failure_metrics=problem.failure_metrics,
                 compute_episode_metrics=problem.compute_episode_metrics,
                 aggregate_episode_metrics=problem.aggregate_episode_metrics,

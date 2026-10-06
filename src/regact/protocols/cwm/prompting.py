@@ -24,10 +24,11 @@ _DESCRIPTIONS = {
     "docs/CWM_modeling_phase.md": "how to implement, validate and repair the CWM",
     "docs/active_exploration_phase.md": "how to actively interact with the environment",
     "docs/plan_in_CWM.md": "(optional) how to use the CWM-dependent planner tool",
-    "framework/cwm_env.py": "EnvCWM and its recorded-start initialization helper",
-    "simulate.py": "editable script for optional local CWM simulation",
+    "framework/cwm_env.py": "EnvCWM and its recorded-start initialization (helper file)",
     "goal.py": "the file to write goals before using the PlanInCWM command",
-    "world_model/model_parser.py": 'define your "parser: observation (dictionary) -> State"',
+    "world_model/model_initial_state.py": (
+        'define your "get_initial_state: observation (dictionary) -> State"'
+    ),
     "world_model/model_render.py": 'define your "render: state -> observation (dictionary)"',
     "world_model/model_state.py": 'define your class "State"',
     "world_model/model_transition.py": 'define your "step: state, action -> state"',
@@ -37,9 +38,9 @@ _LOCAL_HELPERS = """
 
 `framework/cwm_env.py` provides `EnvCWM` and `make_cwm_env`. Read their docstrings for arguments and examples. They use the current workspace CWM; they do not validate or submit it, update the dataset, or perform real actions.
 
-`EnvCWM(initial_state=state)` requires an explicit State and never queries the dataset. `make_cwm_env()` instead loads the next controller's starting observation once and parses it: the current observation in single-instance mode, or the original initial observation in multi-instance mode. Passing initial_state skips that lookup. Both return States from reset()/step(action), or full observation dictionaries with obs_mode=True. Reset restores the starting State without taking a real action.
+`EnvCWM(initial_state=state)` requires an explicit State and never queries the dataset. `make_cwm_env()` instead starts where the next controller starts: in single-instance mode it rebuilds the current State from the live episode with your workspace CWM (`get_initial_state` on its first observation, then `step` through every recorded action); in multi-instance mode it uses `get_initial_state` on the original initial observation. Passing initial_state skips that lookup. Both return States from reset()/step(action), or full observation dictionaries with obs_mode=True. Reset restores the starting State without taking a real action.
 
-`python simulate.py --max-actions 20` runs controller.py locally and prints each action and State. Edit simulate.py freely to inspect predictions or try different starting states. Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
+Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
 
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at every new submission, including a refused one; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
@@ -124,11 +125,6 @@ def build_prompt(
     context = FeatureContext(problem_name=problem.name, task_name=task_name, workdir="")
     planner = "PlanInCWM" in enabled_commands(options)
     workspace_notes = "It also reads your CWM from `world_model/`."
-    if options.workspace_helpers_enabled:
-        workspace_notes += (
-            " `simulate.py` is an optional starter script for local simulation; "
-            "adapt it or write your own scripts."
-        )
     if planner:
         workspace_notes += (
             " The planner reads goals from `goal.py` and saves action lists under `plans/`."
@@ -145,6 +141,7 @@ def build_prompt(
             vision=config.agent.vision,
         ),
         descriptions=_DESCRIPTIONS,
+        commands={**enabled_commands(options), **reset_commands(config, problem)},
         workspace_extensions=workspace_notes,
         workflow_steps=_render("workflow.md", options),
         workflow_intro=_render("intro.md", options),

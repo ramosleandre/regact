@@ -1,6 +1,7 @@
 """Lifecycle, reset, fresh-controller and baseline invariants with actual isolated code."""
 
 import concurrent.futures
+import json
 import time
 from types import SimpleNamespace
 
@@ -433,3 +434,17 @@ def test_controller_call_reports_where_its_time_went(make_rig, protocol):
     for phase in ("native_step", "record_step"):
         assert timings[f"{phase}_seconds"] >= timings[f"{phase}_max_seconds"] >= 0
     assert timings["controller_worker_close_seconds"] >= 0
+
+
+def test_a_run_records_the_problems_main_metrics(make_rig, monkeypatch):
+    c = make_rig("vanilla")
+    monkeypatch.setattr(type(c.problem), "main_metrics", ("steps_seen", "absent"), raising=False)
+    monkeypatch.setattr(
+        type(c.problem),
+        "derived_trace_metrics",
+        lambda self, task, trace: {"steps_seen": len(trace), "other": 1},
+    )
+    c.persist()
+    recorded = json.loads((c.root / "status.json").read_text())["main_metrics"]
+    assert recorded == {"steps_seen": c.store.summary()["n_total_transitions"]}
+    assert c.task_metrics() == recorded

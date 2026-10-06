@@ -108,7 +108,7 @@ The coding agent can read experience while developing. Submitted CWM/controller/
 
 Callback time, controller-call time and per-process memory limits are independent of the coding agent's shell timeout. Validation/planning also have their own whole-operation budgets. These workers stay isolated when the coding agent's sandbox is disabled. See [Managed execution](managed_protocols.md#code-isolation-and-practical-limits) for limits and [CWM](cwm.md) for the exact validation contract.
 
-Isolation prevents runtime database lookup, but cannot prevent an agent copying observed facts into submitted Python constants. Repeatability/mutation checks are useful tests, not a proof of mathematical purity or generalization. Local `simulate.py` runs with the coding agent's permissions and current workspace code; official framework operations use the frozen, restricted code.
+Isolation prevents runtime database lookup, but cannot prevent an agent copying observed facts into submitted Python constants. Repeatability/mutation checks are useful tests, not a proof of mathematical purity or generalization. Local simulation scripts run with the coding agent's permissions and current workspace code; official framework operations use the frozen, restricted code.
 
 ## What the sandbox does NOT do
 

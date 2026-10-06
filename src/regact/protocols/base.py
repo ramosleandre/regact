@@ -43,6 +43,8 @@ class ProtocolContext:
     output_dir: str
     logger: RunLogger
     is_perfect: Callable[[dict[str, Any]], bool]
+    # (a submission's results) -> the problem's main metrics for it
+    main_metrics: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     failure_metrics: Callable[..., dict[str, Any]] | None = None
     compute_episode_metrics: Callable[..., dict[str, Any]] | None = None
     aggregate_episode_metrics: Callable[..., dict[str, Any]] | None = None
@@ -86,6 +88,10 @@ class ProtocolSession(ABC):
 
     async def close(self) -> None:
         """Release protocol resources on every exit, including dry runs."""
+        return None
+
+    def task_metrics(self) -> dict[str, Any] | None:
+        """The problem's main metrics for the task so far, or None when nothing is scored yet."""
         return None
 
     def after_teardown(self, reason: str, logger: RunLogger) -> None:

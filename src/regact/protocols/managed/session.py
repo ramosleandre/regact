@@ -28,7 +28,13 @@ from regact.protocols.cwm.bundle import description, snapshot
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.ids import expand_id_ranges
 from regact.protocols.cwm.images import clear_images, save_preview, select_preview_ids
-from regact.protocols.cwm.store import ExperienceStore, atomic_json, canonical, digest
+from regact.protocols.cwm.store import (
+    ExperienceStore,
+    atomic_json,
+    canonical,
+    digest,
+    info_trace,
+)
 from regact.protocols.cwm.validation import differences
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.prompting import reset_commands
@@ -39,7 +45,7 @@ MODELING = "CWM Modeling"
 EXPLORATION = "Active Exploration"
 
 MODEL_FILES = [
-    f"world_model/model_{part}.py" for part in ("state", "parser", "render", "transition")
+    f"world_model/model_{part}.py" for part in ("state", "initial_state", "render", "transition")
 ]
 
 
@@ -93,7 +99,6 @@ class ManagedCoordinator:
         self.step_timings: dict[str, float] = {}  # per RunController call; see _note_timing
         self.context: ProtocolContext | None = None
         self.accepted: dict[str, Any] | None = None
-        self.states: dict[int, Any] = {}
         self.latest: dict[str, Any] | None = None
         self.best: dict[str, Any] | None = None
         self.closed = False
@@ -141,7 +146,19 @@ class ManagedCoordinator:
             {"from": before, "to": phase, "next_step": self.phase_description(phase)}
         )
 
+    def task_metrics(self) -> dict[str, Any]:
+        """The problem's main metrics over all the task's real actions so far."""
+        return self.problem.main_scores(
+            {
+                **(self.latest or {}).get("aggregate", {}),
+                **self.problem.derived_trace_metrics(self.task, info_trace(self.store.db)),
+            }
+        )
+
     def persist(self) -> None:
+        metrics = self.task_metrics()
+        if self.context is not None:
+            self.context.experiment.main_metrics = metrics
         atomic_json(
             self.root / "status.json",
             {
@@ -156,6 +173,7 @@ class ManagedCoordinator:
                 "milestones": self.milestones,
                 **self.store.summary(),
                 "accepted_cwm": self.accepted,
+                "main_metrics": metrics,
                 "latest_exploration": self.latest,
                 "best_exploration": self.best,
                 "config": dataclasses.asdict(self.options),
@@ -412,6 +430,7 @@ class ManagedCoordinator:
             if op == "summary":
                 value = {
                     "phase": self.phase,
+                    "lifecycle": self.config.problem.lifecycle.value,
                     "initial_observation_id": self.initial_id,
                     "current_observation_id": self.current_id,
                     "controller_start_observation_id": self.current_id
@@ -433,7 +452,33 @@ class ManagedCoordinator:
             elif op == "observations":
                 value = [self.store.observation(int(i)) for i in ids]
             elif op == "transitions":
-                value = [self.store.transition(int(i)) for i in ids]
+                value = [_public_transition(self.store.transition(int(i))) for i in ids]
+            elif op == "episodes":
+                value = [
+                    {
+                        "episode_id": e["episode_id"],
+                        "started_by": e["purpose"],
+                        "start_observation_id": e["initial_obs_id"],
+                        "n_steps": e["n_steps"],
+                        "live": e["episode_id"] == self.episode,
+                    }
+                    for e in self.store.episodes()
+                ]
+            elif op == "history":
+                episode = body.get("episode_id")
+                upto = body.get("step")
+                if type(episode) is not int or (upto is not None and type(upto) is not int):
+                    raise ValueError("episode_id must be an integer, and step an integer or null")
+                start = next(
+                    (e for e in self.store.episodes() if e["episode_id"] == episode), None
+                )
+                if start is None:
+                    raise ValueError(f"unknown episode ID {episode}")
+                steps = self.store.episode_steps(episode)[:upto]
+                value = {
+                    "observation_ids": [start["initial_obs_id"], *(i["after_obs_id"] for i in steps)],
+                    "actions": [i["action"] for i in steps],
+                }
             elif op == "diagnostic":
                 value = self.store.get_diagnostic(int(body["id"]))
             elif op == "image":
@@ -510,8 +555,9 @@ class ManagedCoordinator:
         try:
             obs = env.reset_explicit(kind, seed=self.config.problem.seed).to_json()
             self.reset_actions += 1
-            if self.episode is not None:
-                self.store.finish_episode(self.episode, "reset_" + kind, {})
+            previous = self.episode
+            if previous is not None:
+                self.store.finish_episode(previous, "reset_" + kind, {})
             self.episode, self.current_id = self.store.start_episode(
                 obs, "reset_" + kind, {"previous_observation_id": before}
             )
@@ -528,6 +574,9 @@ class ManagedCoordinator:
         }
 
     def after_reset(self):
+        pass
+
+    def begin_exploration(self):
         pass
 
     def exploration_model(self):
@@ -613,6 +662,7 @@ class ManagedCoordinator:
             role = "model"
             call_started = time.monotonic()
             self.step_timings = {}
+            self.begin_exploration()
             worker = controller = None
             clock = budgets.AgentClock(self.options.execution.max_seconds_per_RunController)
             try:
@@ -663,7 +713,7 @@ class ManagedCoordinator:
                             result["actual_novel_observations"] += 1
                         if self.terminal == "observation_determinism_violation":
                             reason = self.terminal or "interrupted"
-                            result["counterexample"] = evidence
+                            result["counterexample"] = public_evidence(evidence)
                             result["diagnostic_id"] = self.store.diagnostic(
                                 {"kind": reason, "observed": obs, **evidence}
                             )
@@ -957,6 +1007,33 @@ class ManagedCoordinator:
                     self.closed = True
 
 
+def public_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
+    """A recorded step as counterexamples name it, the same way validation does."""
+    return {
+        "episode_id": evidence["episode_id"],
+        "step": evidence["step_index"] + 1,  # actions applied in that episode
+        "observation_id": evidence["after_obs_id"],
+        "transition_id": evidence["transition_id"],
+        **(
+            {"conflicting_witnesses": evidence["conflicting_witnesses"]}
+            if evidence.get("conflicting_witnesses")
+            else {}
+        ),
+    }
+
+
+def _public_transition(t: dict[str, Any]) -> dict[str, Any]:
+    """The data API's transition record, with the key names agents expect."""
+    return {
+        "transition_id": t["transition_id"],
+        "observation_id": t["before_obs_id"],
+        "action": t["action"],
+        "next_observation_id": t["after_obs_id"],
+        "observation": t["o"],
+        "next_observation": t["o_next"],
+    }
+
+
 class ModelMismatch(Exception):
     def __init__(self, kind: str, predicted: Any, actual: Any, evidence: dict[str, Any]) -> None:
         super().__init__(kind)
@@ -1031,6 +1108,9 @@ class ManagedSession(ProtocolSession):
 
     def stop_reason(self) -> str | None:
         return self.coordinator.terminal
+
+    def task_metrics(self) -> dict[str, Any] | None:
+        return self.coordinator.task_metrics()
 
     def reminder(self, reminders: int) -> str:
         phase = self.coordinator.phase

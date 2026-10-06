@@ -1,6 +1,6 @@
 # Game: ARC-AGI-3 ({task})
 
-ARC-AGI-3 is an interactive game benchmark. Each game is a multi-level puzzle on a 64x64 grid (cell values 0-15). You must complete all levels to win. The game is deterministic - the same actions reproduce the same outcome - but the rules differ per game and must be discovered through interaction, not assumed.
+ARC-AGI-3 is an interactive game benchmark. Each game is a multi-level puzzle on a 64x64 grid (cell values 0-15). You must complete all levels to win. The game is a (possibly partially observable) deterministic MDP - the same actions reproduce the same outcome - but the rules differ per game and must be discovered through interaction, not assumed.
 
 ## Observation
 

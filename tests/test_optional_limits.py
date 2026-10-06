@@ -151,8 +151,8 @@ def test_unlimited_callback_still_obeys_operation_deadline(rig):
     c, _ = rig
     c.collect_initial()
     model(c.workdir)
-    (c.workdir / "world_model/model_parser.py").write_text(
-        "import time\ndef parse(o):\n time.sleep(10)\n"
+    (c.workdir / "world_model/model_initial_state.py").write_text(
+        "import time\ndef get_initial_state(o):\n time.sleep(10)\n"
     )
     c.options.execution.max_seconds_per_call = None
     c.options.execution.max_seconds_per_UpdateCodeWorldModel = 0.3
@@ -165,8 +165,8 @@ def test_long_worker_error_keeps_its_cause_and_can_be_unlimited(rig):
     c, _ = rig
     c.collect_initial()
     model(c.workdir)
-    (c.workdir / "world_model/model_parser.py").write_text(
-        'def parse(o):\n raise ValueError("BEGIN: " + "x" * 6000 + " END: cause")\n'
+    (c.workdir / "world_model/model_initial_state.py").write_text(
+        'def get_initial_state(o):\n raise ValueError("BEGIN: " + "x" * 6000 + " END: cause")\n'
     )
     c.options.feedback.max_error_chars = 100
     result = c.tool("UpdateCodeWorldModel", {})

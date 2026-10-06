@@ -10,19 +10,17 @@ from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.ids import format_id_ranges
 
 FAILURES = {
-    "reconstruction_mismatch": "parse then render does not reproduce a recorded observation",
-    "prediction_mismatch": "the predicted next observation differs from recorded reality",
-    "parser_collision": "distinct observations map to the same state",
-    "compression_ratio": "the serialized states are too large",
+    "reconstruction_mismatch": "render does not reproduce the first observation of an episode",
+    "prediction_mismatch": "the State carried by step stopped matching a recorded observation",
+    "compression_ratio": "the serialized states are too large, on average or for one state",
     "non_deterministic_model": "a callback returned different outputs for identical input",
 }
 ENDINGS = {
     "solved": "The full game is solved; the task has ended.",
     "interrupted": "The task was interrupted; no further work will run.",
     "observation_determinism_violation": (
-        "The same recorded observation and action produced different real "
-        "outcomes. This protocol requires observation-deterministic dynamics; the"
-        " task has stopped."
+        "The same episode start and the same actions produced different real outcomes. This "
+        "protocol requires a deterministic game; the task has stopped."
     ),
     "initial_observation_mismatch": (
         "A fresh reset did not reproduce the fixed starting observation; the task has stopped."
@@ -46,11 +44,8 @@ REASONS = {
         "Reality contradicted a predicted observation. Inspect the counterexample."
     ),
     "reconstruction_mismatch": (
-        "The CWM cannot reconstruct a newly observed observation. Inspect the counterexample."
-    ),
-    "parser_collision": (
-        "A new observation shares its state with a different observation. "
-        "Preserve the missing distinction."
+        "The CWM cannot reconstruct the observation this call started from (after a reset, the "
+        "parsed or reset State). Inspect the counterexample."
     ),
     "compression_ratio": (
         "The state-size ratio exceeded the acceptance threshold on new experience."
@@ -153,8 +148,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             "status": status,
             "message": message,
             "checked": {
-                "observations": r.get("observations_checked", 0),
-                "transitions": r.get("transitions_checked", 0),
+                "episodes": r.get("episodes_checked", 0),
+                "steps": r.get("steps_checked", 0),
             },
         }
         if r.get("cwm_version") is not None:
@@ -168,8 +163,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 "ratio": r["state_obs_size_ratio"],
                 "required_below": c.threshold_max_state_obs_size_ratio,
             }
-            if r["state_obs_size_ratio"] >= c.threshold_max_state_obs_size_ratio:
-                for key in ("smallest_state", "largest_state"):
+            if "compression_ratio" in r.get("failures", {}):
+                for key in ("smallest_state", "largest_state", "largest_ratio_state"):
                     if key in r:
                         out["state_size"][key] = r[key]
         for key in ("failures", "counterexamples", "counterexamples_omitted"):
@@ -272,7 +267,7 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 "Invalid action from the exploration controller. The real environment rejected it: "
                 + error
             )
-        elif callback in ("parse", "render", "step"):
+        elif callback in ("get_initial_state", "render", "step"):
             error = f"CWM {callback} failed: {error}"
         elif callback in ("act", "is_done", "controller_init"):
             error = f"Exploration controller {callback} failed: {error}"

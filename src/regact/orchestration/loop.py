@@ -229,7 +229,15 @@ async def run_session(
     _save_state(ctx)
     await _run_teardown_hooks(protocol.hooks, reason, ctx)
     protocol.after_teardown(reason, logger)
-    logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_end", phase="teardown", reason=reason)
+    experiment.main_metrics = protocol.task_metrics()
+    logger.log(
+        LogComponent.ORCHESTRATOR,
+        "INFO",
+        "session_end",
+        phase="teardown",
+        reason=reason,
+        main_metrics=experiment.main_metrics,
+    )
     _save_state(ctx)
     return reason
 

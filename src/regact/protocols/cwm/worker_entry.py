@@ -85,15 +85,17 @@ def immutable_call(fn: Callable[..., Any], value: Any, *args: Any) -> Any:
 
 def state_result(state: Any) -> Any:
     if not isinstance(state, State):
-        raise TypeError("parse/step must return an instance of world_model.model_state.State")
+        raise TypeError(
+            "get_initial_state/step must return an instance of world_model.model_state.State"
+        )
     return encode(state)
 
 
 def handle(request: dict[str, Any]) -> Any:
     global controller
     op = request["op"]
-    if op == "parse":
-        return state_result(immutable_call(parse, request["obs"]))
+    if op == "get_initial_state":
+        return state_result(immutable_call(get_initial_state, request["obs"]))
     if op == "render":
         return immutable_call(render, decode(request["state"]))
     if op == "step":
@@ -164,7 +166,7 @@ if __name__ == "__main__":
             if len(sys.argv) < 4 or sys.argv[3] == "1":
                 load = importlib.import_module
                 State = agent(load, "world_model.model_state").State
-                parse = agent(load, "world_model.model_parser").parse
+                get_initial_state = agent(load, "world_model.model_initial_state").get_initial_state
                 render = agent(load, "world_model.model_render").render
                 step = agent(load, "world_model.model_transition").step
         wire.write(json.dumps({"ready": True, "seconds": spent}) + "\n")
