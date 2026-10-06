@@ -442,6 +442,11 @@ async def run_task(
             tools: list[Tool] = [LoggingTool(tool, logger) for tool in session.tools]
 
             agent = agent or build_agent(config.agent)
+            if resuming:
+                # Before anything asks the agent for its paths: the sandbox binds the home the
+                # conversation lives in, not a fresh one.
+                assert experiment.agent_resume is not None
+                agent.resume_from(experiment.agent_resume)
             caps = agent.capabilities()
             # Every non-native protocol reaches the framework tools over the workdir control CLI, so
             # the channel MUST be bound for it (uses_control_cli is the shared predicate the prompt
@@ -583,9 +588,6 @@ async def run_task(
                         reason=initial_reason,
                     )
                     return initial_reason
-                if resuming:
-                    assert experiment.agent_resume is not None
-                    agent.resume_from(experiment.agent_resume)
                 await agent.start(
                     cwd=workdir,
                     model=config.agent.model,
