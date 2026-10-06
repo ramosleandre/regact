@@ -86,8 +86,23 @@ def _runner_regact_paths() -> list[str]:
 class AlanSubprocessAgent(CodeAgent):
     """``CodeAgent`` backed by an ``alancode`` agent in a sandboxable child process."""
 
-    def __init__(self, args: dict[str, Any] | None = None, *, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        args: dict[str, Any] | None = None,
+        *,
+        base_url: str | None = None,
+        vision: bool = False,
+    ) -> None:
         self._args = dict(args or {})  # alancode tuning, forwarded verbatim to the child
+        if vision:
+            # The image tool is a second tool: the model must be able to name the tool it calls.
+            if self._args.get("tool_protocol", "bash_block") == "bash_block":
+                raise ValueError(
+                    "agent.vision=true with agent=alan needs a tool format that names the tool "
+                    "(agent.args.tool_protocol: native, hermes_xml, glm, ...); bash_block has "
+                    "only the shell"
+                )
+            self._args["vision"] = True
         self._display_prompt: str | None = None
         self._session_id: str | None = None  # alancode's session, reported by the child
         self._base_url = base_url
