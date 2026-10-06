@@ -69,6 +69,13 @@ _LIMIT_RESET = re.compile(
 )
 
 
+# A message regact leaves for the model, delivered by a PostToolUse hook (the CLI cannot be sent
+# a message in the middle of a turn). mv before cat: a note is delivered at most once.
+_NOTE_FILE = "regact_note.json"
+_NOTE_HOOK = (
+    f'f="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}/{_NOTE_FILE}"; '
+    '[ -s "$f" ] && mv "$f" "$f.sent" 2>/dev/null && cat "$f.sent"; exit 0'
+)
 _KEPT_HOME_MAX_AGE_S = 14 * 24 * 3600  # a conversation kept for a resume, then never resumed
 _RESET_JUST_PASSED = timedelta(minutes=30)  # an error seen this soon after its own reset time
 
@@ -205,10 +212,12 @@ class ClaudeAgent(_CliAgent):
         # tools inside the workdir (it cannot read the game data outside it).
         settings_dir = os.path.join(self._cwd, ".claude")
         os.makedirs(settings_dir, exist_ok=True)
+        settings = claude_deny_settings(self._cwd, deny_images=not self._vision)
+        settings["hooks"] = {
+            "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": _NOTE_HOOK}]}]
+        }
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
-            json.dump(
-                claude_deny_settings(self._cwd, deny_images=not self._vision), handle, indent=2
-            )
+            json.dump(settings, handle, indent=2)
         self._configure_home()
         if self._base_url:  # an Anthropic-compatible server, e.g. llama.cpp's llama-server
             self._env_overrides |= {
@@ -254,6 +263,30 @@ class ClaudeAgent(_CliAgent):
         if not self.keep_session:
             shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
+
+    def deliver_after_tool(self, message: str) -> bool:
+        """The PostToolUse hook in the workdir settings hands this file's content to the model
+        as additional context after its current tool, then removes it."""
+        path = os.path.join(self._config_dir(), _NOTE_FILE)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                waiting = json.load(handle)["hookSpecificOutput"]["additionalContext"] + "\n\n"
+        except (OSError, ValueError, KeyError):
+            waiting = ""
+        note = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": waiting + message,
+            }
+        }
+        temporary = f"{path}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as handle:
+                json.dump(note, handle)
+            os.replace(temporary, path)
+        except OSError:
+            return False
+        return True
 
     def resume_token(self) -> dict[str, Any] | None:
         if self._session_id is None:

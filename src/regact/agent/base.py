@@ -99,6 +99,12 @@ class CodeAgent(ABC):
         """
         return None
 
+    def deliver_after_tool(self, message: str) -> bool:
+        """Hand the agent a message it will read right after its current tool call, for backends
+        that cannot be injected mid-send. False when the backend has no such channel: the
+        caller then adds the message to the next send."""
+        return False
+
     # Set before close() when the task may be resumed: the backend keeps what resume_token names.
     keep_session = False
 

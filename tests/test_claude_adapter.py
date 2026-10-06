@@ -105,3 +105,31 @@ async def test_a_dead_credential_is_never_written_over_a_live_one(tmp_path, monk
     home.write_text("not json")  # the task's file is unreadable when it closes, and the newest
     await agent.close()
     assert _token(real) == "rotated-by-user" and _token(root) == "rotated-by-user"
+
+
+def test_a_note_for_the_model_is_handed_over_once_by_the_tool_hook(tmp_path, monkeypatch) -> None:
+    import json
+    import subprocess
+
+    from regact.agent.claude_adapter import _NOTE_HOOK, ClaudeAgent
+
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    agent = ClaudeAgent({"claude_home": str(tmp_path / "root")})
+    agent._cwd = str(tmp_path / "wd")
+    (tmp_path / "wd").mkdir()
+    agent._configure_workdir()
+    settings = json.loads((tmp_path / "wd/.claude/settings.json").read_text())
+    [hook] = settings["hooks"]["PostToolUse"][0]["hooks"]
+    assert hook == {"type": "command", "command": _NOTE_HOOK} and "deny" in settings["permissions"]
+
+    def after_a_tool() -> str:
+        env = {"CLAUDE_CONFIG_DIR": agent._config_dir(), "PATH": "/usr/bin:/bin"}
+        done = subprocess.run(["sh", "-c", _NOTE_HOOK], env=env, capture_output=True, text=True)
+        assert done.returncode == 0
+        return done.stdout
+
+    assert after_a_tool() == ""  # nothing waiting: the hook says nothing
+    assert agent.deliver_after_tool("first warning") and agent.deliver_after_tool("second")
+    told = json.loads(after_a_tool())["hookSpecificOutput"]
+    assert told == {"hookEventName": "PostToolUse", "additionalContext": "first warning\n\nsecond"}
+    assert after_a_tool() == ""  # delivered once

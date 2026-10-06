@@ -50,7 +50,7 @@ from regact.tools.base import Tool, ToolContext
 
 _ABORTED_REASONS = frozenset({"loop_crash"})
 
-# Delivered after completed tools (CLI adapters: next outer turn), subject to flagging_warning_cap,
+# Delivered after completed tools (a backend with no such channel: next outer turn), subject to flagging_warning_cap,
 # so a model reaching for a sandboxed action learns why it failed and stops wasting budget on it.
 _FLAGGING_WARNING = (
     "WARNING: a command was flagged by the environment's monitoring as conflicting with "
@@ -574,18 +574,20 @@ async def _maybe_warn_flagged(ctx: _LoopContext) -> None:
     ctx.warnings_injected += 1
     message = _FLAGGING_WARNING + "\n\n" + commands + "\n\n" + ctx.protocol.interaction_guidance()
     immediate = ctx.agent.capabilities().supports_inject
+    after_tool = immediate or ctx.agent.deliver_after_tool(message)
     ctx.logger.log(
         LogComponent.AGENT,
         "WARNING",
         "flagging_warning",
-        delivery="after_tool" if immediate else "next_turn",
+        delivery="after_tool" if after_tool else "next_turn",
         warning_number=ctx.warnings_injected,
     )
     if immediate:
         await ctx.agent.inject(message)
+    if after_tool:
         ctx.transcript.write(UserMessage(message))
     else:
-        # CLI adapters cannot accept messages inside their current send().
+        # This backend cannot be reached inside its current send().
         # Add to the next send here, so the transcript shows its actual delivery.
         ctx.pending_warnings.append(message)
 

@@ -263,3 +263,20 @@ async def test_calls_the_agent_never_ran_do_not_spend_the_tool_budget():
             ToolResult(f"c{i}", "NOT executed", True, executed=False), ctx, outcome
         )
     assert ctx.experiment.tool_calls_total == 1
+
+
+async def test_a_backend_with_an_after_tool_channel_gets_the_warning_there(monkeypatch):
+    agent = ScriptedAgent()
+    handed: list[str] = []
+    monkeypatch.setattr(agent, "capabilities", lambda: Mock(supports_inject=False))
+    monkeypatch.setattr(agent, "deliver_after_tool", lambda message: handed.append(message) or True)
+    ctx = context(agent)
+    outcome = _TurnOutcome()
+    call = ToolCall("a", "Bash", {"command": "python -c 'import minigrid'"})
+    await _dispatch_event(call, ctx, outcome)
+    await _dispatch_event(ToolResult("a", "done"), ctx, outcome)
+
+    assert len(handed) == 1 and handed[0].startswith("WARNING: a command was flagged")
+    assert not ctx.pending_warnings and not agent.injected  # not held for the next send
+    assert ctx.logger.log.call_args.kwargs["delivery"] == "after_tool"
+    assert isinstance(ctx.transcript.write.call_args.args[0], UserMessage)

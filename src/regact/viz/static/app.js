@@ -949,6 +949,11 @@ const _CWM_TOOL_STYLE = {
 async function renderConversation(name) {
   const d = await gameDetail(name);
   const conv = h("div", "conv");
+  const toTop = h("button", "totop", "\u2191 Top");
+  toTop.title = "Back to the top of the page";
+  toTop.onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
+  document.body.append(toTop);
+  pageCleanups.push(() => toTop.remove());
   const navItems = [];     // {id, tag, label} — submissions + cheats, to jump to
   let nSubmit = 0, nCheat = 0, nCwm = 0;
   if (!d.turns.length) conv.append(h("div", "muted", "no transcript"));

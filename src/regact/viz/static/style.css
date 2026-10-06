@@ -201,3 +201,5 @@ h2.expsection { margin-top: 22px; font-size: 15px; }
 .sw-pick::-webkit-color-swatch { border: none; border-radius: 2px; }
 .sw-pick::-moz-color-swatch { border: none; border-radius: 2px; }
 .chart .errbar { stroke: var(--fg); stroke-width: 1.4; opacity: .8; }
+.totop { position: fixed; right: 18px; bottom: 18px; z-index: 20; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); color: var(--fg); cursor: pointer; }
+.totop:hover { color: var(--accent); }
