@@ -125,6 +125,7 @@ def build_alan_agent(
         ("empty_response_retries", int),
         ("persist_thinking", _as_bool),
         ("bash_timeout_ms", int),
+        ("compaction_threshold_percent", int),
     ):
         raw = args.get(name)
         if raw is None:

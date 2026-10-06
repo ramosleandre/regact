@@ -21,5 +21,8 @@ args:
   bash_timeout_ms: null        # Bash timeout when the model passes none; null = alancode's 120000
   context_window: null         # tell Alan its window (int); null = infer. Set for a local
                                # server (litellm can't fetch it offline; keep < max-model-len).
+  # Alan summarizes its history once it reaches this percent (1-99) of the usable window
+  # (context_window - max_output_tokens - a safety margin); null = alancode's 80.
+  compaction_threshold_percent: null
   # backend: scripted          # provider selection: auto (default) | anthropic-native | scripted
                                # (scripted + model=remote = HTTP-driven remote provider)

@@ -262,8 +262,14 @@ def test_build_alan_agent_forwards_sweep_settings(monkeypatch) -> None:
         api_key=None,
         system_prompt=None,
         extra_tools=[],
-        args={"persist_thinking": "true", "empty_response_retries": "3", "bash_timeout_ms": 240000},
+        args={
+            "persist_thinking": "true",
+            "empty_response_retries": "3",
+            "bash_timeout_ms": 240000,
+            "compaction_threshold_percent": "95",
+        },
     )
+    assert captured["settings"]["compaction_threshold_percent"] == 95
     assert captured["settings"]["persist_thinking"] is True  # string coerced
     assert captured["settings"]["empty_response_retries"] == 3  # int coerced
     assert captured["settings"]["bash_timeout_ms"] == 240000
