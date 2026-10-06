@@ -55,7 +55,9 @@ def test_mapping_defaults() -> None:
 
 def test_agent_vision_is_explicit_and_defaults_off() -> None:
     def vision(agent: dict) -> bool:
-        return run_config_from_mapping({"agent": agent, "problem": {"name": "arc_agi"}}).agent.vision
+        return run_config_from_mapping(
+            {"agent": agent, "problem": {"name": "arc_agi"}}
+        ).agent.vision
 
     assert vision({"name": "claude"}) is False  # never inferred from the agent name
     assert vision({"name": "alan", "vision": True}) is True
@@ -302,3 +304,26 @@ def test_alan_remote_under_network_isolation_fails_at_launch() -> None:
         run_config_from_mapping(base)
     open_net = {**base, "sandbox_opts": {"network_isolation": False}}
     assert run_config_from_mapping(open_net).agent.model == "remote"
+
+
+def test_every_top_level_option_of_the_yaml_reaches_the_run_config() -> None:
+    """An option composed by Hydra but not mapped by the loader is silently ignored: resume=<dir>
+    then starts a fresh run. Each top-level key of conf/config.yaml must change the RunConfig."""
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    import regact
+
+    conf_dir = str(Path(regact.__file__).parent / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(
+            config_name="config",
+            overrides=["resume=/runs/earlier", "resume_any_version=true"],
+        )
+    config = run_config_from_mapping(OmegaConf.to_container(cfg, resolve=True))
+    assert config.resume == "/runs/earlier"
+    assert config.resume_any_version is True
+    assert (
+        run_config_from_mapping({"agent": {"name": "claude"}, "problem": {"name": "p"}}).resume
+        is None
+    )
