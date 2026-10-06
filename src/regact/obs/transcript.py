@@ -36,10 +36,10 @@ _TS_KEY = "ts"
 class TranscriptWriter:
     """Append normalized agent events to ``transcript.jsonl``."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, append: bool = False) -> None:
         # The writer owns this handle for its lifetime; close() / __exit__ release it.
         self._media = Path(path).parent / "media"
-        self._handle: IO[str] = open(path, "w", encoding="utf-8")  # noqa: SIM115
+        self._handle: IO[str] = open(path, "a" if append else "w", encoding="utf-8")  # noqa: SIM115
 
     def write(self, event: AgentEvent) -> None:
         # Stamped at write time, so the stream carries WHEN as well as what. Without it the only

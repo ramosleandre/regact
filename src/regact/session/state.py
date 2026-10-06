@@ -15,6 +15,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+# None: the process died before recording a reason.
+_RESUMABLE_EXITS = (None, "interrupted", "walltime_limit", "agent_api", "loop_crash")
+
+
 @dataclass
 class ExperimentState:
     """The live state of one task's run."""
@@ -38,6 +42,8 @@ class ExperimentState:
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
     main_metrics: dict[str, Any] | None = None  # the problem's main scores, as last computed
+    agent_resume: dict[str, Any] | None = None  # what continues the agent's conversation
+    resumed_at: list[float] = field(default_factory=list)  # UNIX time of each resume
     usage_limit_waits: int = 0  # times the run slept until a backend usage limit reset
     usage_limit_waited_s: float = 0.0  # seconds slept that way; not counted in duration_s
     turn: int = 0  # 1-indexed turn in progress (0 before the first)
@@ -50,6 +56,11 @@ class ExperimentState:
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(dataclasses.asdict(self), handle, indent=2)
         os.replace(tmp, path)
+
+    def resumable(self) -> bool:
+        """Whether the task stopped for a reason a later process can continue from: its process
+        died, it was interrupted, its job ran out of time, or the backend or framework failed."""
+        return self.exit_reason in _RESUMABLE_EXITS
 
     @classmethod
     def load(cls, path: str) -> ExperimentState:

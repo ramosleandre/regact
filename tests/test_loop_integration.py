@@ -271,6 +271,18 @@ async def test_a_usage_limit_that_resets_too_late_ends_the_run(tmp_path: Path) -
     assert reason == "agent_api" and stack.experiment.usage_limit_waits == 0
 
 
+async def test_a_resumed_task_gets_what_the_new_deadline_leaves(tmp_path: Path) -> None:
+    """A task that already ran 1,000 s, resumed in a job that ends in 500 s, has about 500 s."""
+    stack = _Stack(tmp_path)
+    stack.experiment.duration_s = 1000.0
+    stack.limits = LimitsConfig(experiment_deadline_unix=int(time.time()) + 500)
+    agent = ScriptedAgent([[ToolCall("c1", "ExitTask", {}), IterationComplete()]])
+    reason = await stack.run(agent)
+
+    assert reason == "agent_exit"  # not walltime_limit at the first check
+    assert 1000.0 <= stack.experiment.duration_s < 1010.0
+
+
 async def test_waits_for_usage_limits_are_capped_over_the_task(tmp_path: Path, monkeypatch) -> None:
     from regact.orchestration import loop
 

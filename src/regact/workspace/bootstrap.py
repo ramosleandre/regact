@@ -106,11 +106,16 @@ if __name__ == "__main__":
 '''
 
 
+_REGACT_OWNED = ("framework/", "docs/")
+
+
 class Workspace:
     """The agent's working directory."""
 
-    def __init__(self, root: str) -> None:
+    def __init__(self, root: str, *, keep_agent_files: bool = False) -> None:
         self.root = root
+        # Resume: only regact's own files are rewritten (they embed this process's server URL).
+        self.keep_agent_files = keep_agent_files
 
     def bootstrap(
         self,
@@ -175,6 +180,12 @@ class Workspace:
 
     def _write(self, relpath: str, content: str) -> None:
         path = os.path.join(self.root, relpath)
+        if (
+            self.keep_agent_files
+            and os.path.exists(path)
+            and not relpath.startswith(_REGACT_OWNED)
+        ):
+            return
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(content)

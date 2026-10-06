@@ -192,7 +192,8 @@ class ClaudeAgent(_CliAgent):
     async def close(self) -> None:
         """Drop the per-task config home on teardown (nothing reads claude's native session dir
         post-run; the normalized transcript is already in logs/), so seeded auth + session state do
-        not accumulate. First preserve any token refresh Claude wrote back to the isolated ROOT
+        not accumulate - unless the task may be resumed (``keep_session``). First preserve any token
+        refresh Claude wrote back to the isolated ROOT
         (never the user's ~/.claude) - dropping a rotated refresh token revokes the persistent one.
         """
         await super().close()
@@ -206,8 +207,27 @@ class ClaudeAgent(_CliAgent):
             except OSError:
                 pass  # best-effort; a lost refresh just re-seeds from ~/.claude next run
         self._usage = claude_usage(self._session_home)  # before the home and its logs are deleted
-        shutil.rmtree(self._session_home, ignore_errors=True)
+        if not self.keep_session:
+            shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
+
+    def resume_token(self) -> dict[str, Any] | None:
+        if self._session_id is None:
+            return None
+        return {"session_id": self._session_id, "home": self._session_home}
+
+    def resume_from(self, token: dict[str, Any]) -> None:
+        home = token.get("home")
+        if home is not None:
+            if not os.path.isdir(home):
+                raise RuntimeError(f"the conversation's Claude home is gone: {home}")
+            src = self._freshest_creds()
+            if src is not None and os.path.realpath(src) != os.path.realpath(
+                os.path.join(home, ".credentials.json")
+            ):
+                shutil.copyfile(src, os.path.join(home, ".credentials.json"))
+            self._session_home = home
+        self._session_id = token["session_id"]
 
     def usage_limit_reset(self, message: str) -> float | None:
         return limit_reset_unix(message, time.time())

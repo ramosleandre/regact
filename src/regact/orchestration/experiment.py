@@ -135,10 +135,18 @@ def _run_label(task: str, attempt: int, n_attempts: int) -> str:
 
 async def run_experiment(config: RunConfig, *, output_root: str | None = None) -> dict[str, str]:
     """Run every task ``n_attempts_per_task`` times; return ``{run_label: exit_reason}``."""
-    root = resolve_run_dir(config, output_root=output_root)
-    # An explicit output_root names one exact dir (tests); a stamped path is claimed exclusively.
+    root = (
+        os.path.abspath(config.resume)
+        if config.resume is not None
+        else resolve_run_dir(config, output_root=output_root)
+    )
+    # An explicit output_root names one exact dir (tests); a stamped path is claimed exclusively;
+    # a resumed launch continues in the directory it names.
     try:
-        if output_root is not None:
+        if config.resume is not None:
+            if not os.path.isdir(root):
+                raise FileNotFoundError(f"resume: no run directory at {root}")
+        elif output_root is not None:
             os.makedirs(root, exist_ok=True)
         else:
             root = _claim_run_dir(root)

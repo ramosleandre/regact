@@ -1,5 +1,6 @@
 """Protocol boundary and byte parity with pre-refactor main (see fixture source_commit)."""
 
+import dataclasses
 import hashlib
 import json
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Any, ClassVar
 import pytest
 
 from regact.agent.capabilities import ToolProtocol
-from regact.agent.events import ToolCall
+from regact.agent.events import AgentError, IterationComplete, ToolCall
 from regact.agent.scripted_agent import ScriptedAgent
 from regact.config.loader import run_config_from_mapping
 from regact.config.schema import (
@@ -27,6 +28,7 @@ from regact.config.schema import (
 from regact.env.renderer import RawRenderer
 from regact.envclient.obs import Obs
 from regact.features.base import FeatureContext, Hook, HookPhase
+from regact.obs.errors import ErrorCategory
 from regact.obs.result import EvalResult
 from regact.orchestration.task import run_task
 from regact.problems.base import BaseProblem
@@ -363,3 +365,51 @@ def test_feature_templates_see_preceding_controller_files(
         lifecycle=Lifecycle.MULTI_INSTANCE,
     )
     assert (tmp_path / "extra.py").exists()
+
+
+async def test_an_interrupted_task_is_resumed_in_place_and_a_finished_one_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(registry, "_REGISTRY", {})
+    monkeypatch.setattr(_ToyProtocol, "resumable", True)
+    register_protocol("toy", _ToyProtocol)
+
+    class Resumable(ScriptedAgent):
+        resumed_with: dict[str, Any] | None = None
+
+        def resume_token(self) -> dict[str, Any] | None:
+            return {"session_id": "conversation-1"}
+
+        def resume_from(self, token: dict[str, Any]) -> None:
+            self.resumed_with = token
+
+    config = _config(protocol=ProtocolConfig(name="toy"))
+    failing = [AgentError(ErrorCategory.AGENT_API, "down"), IterationComplete()]
+    first = Resumable([[ToolCall("1", "Advance", {})], failing, failing, failing])
+    out = str(tmp_path)
+    reason = await run_task(config, _Problem(), "corridor", output_dir=out, agent=first)
+    assert reason == "agent_api"
+    assert first.keep_session
+    (tmp_path / "workdir/toy.py").write_text("# the agent's edit\n")
+
+    resumed = dataclasses.replace(config, resume=out)
+    second = Resumable([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
+    assert (
+        await run_task(resumed, _Problem(), "corridor", output_dir=out, agent=second)
+        == "toy_complete"
+    )
+    assert second.resumed_with == {"session_id": "conversation-1"} and not second.keep_session
+    assert "interrupted and has now been resumed" in second.sent[0]
+    state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
+    assert state["tool_calls_total"] == 3 and len(state["resumed_at"]) == 1
+    assert (tmp_path / "workdir/toy.py").read_text() == "# the agent's edit\n"
+    transcript = (tmp_path / "logs/transcript.jsonl").read_text()
+    assert transcript.count("Toy workflow") == 1  # the system prompt is recorded once
+    assert '"1"' in transcript and '"3"' in transcript  # one continuous transcript
+
+    third = Resumable([[ToolCall("4", "Advance", {})]])
+    assert (
+        await run_task(resumed, _Problem(), "corridor", output_dir=out, agent=third)
+        == "toy_complete"
+    )
+    assert third.sent == []  # already finished: not run again

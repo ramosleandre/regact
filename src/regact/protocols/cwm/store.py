@@ -140,6 +140,21 @@ class ExperienceStore:
                     (episode,),
                 )
 
+    def last_phase(self) -> str | None:
+        """The phase the task was in: the last recorded phase change, if any."""
+        row = self.db.execute(
+            "SELECT json_extract(payload,'$.after') FROM events WHERE kind='phase_changed' "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return None if row is None else str(row[0])
+
+    def last_record(self, kind: str, status: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT payload FROM records WHERE kind=? AND status=? ORDER BY id DESC LIMIT 1",
+            (kind, status),
+        ).fetchone()
+        return None if row is None else cast(dict[str, Any], json.loads(row[0]))
+
     def milestone_steps(self) -> list[dict[str, Any]]:
         """Every recorded step whose observation reports milestones, in order."""
         return [

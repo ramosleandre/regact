@@ -99,6 +99,19 @@ class CodeAgent(ABC):
         """
         return None
 
+    # Set before close() when the task may be resumed: the backend keeps what resume_token names.
+    keep_session = False
+
+    def resume_token(self) -> dict[str, Any] | None:
+        """What a later process needs to continue this conversation (saved in the experiment
+        state), or ``None`` when this backend cannot continue one."""
+        return None
+
+    def resume_from(self, token: dict[str, Any]) -> None:
+        """Continue the conversation a previous process described with :meth:`resume_token`.
+        Called before :meth:`start`."""
+        raise RuntimeError(f"{type(self).__name__} cannot resume a conversation")
+
     def usage_limit_reset(self, message: str) -> float | None:
         """The UNIX time at which the usage limit named by a backend error resets, or ``None``
         when the error is not a usage limit this backend recognises."""

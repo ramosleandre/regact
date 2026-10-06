@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlparse
@@ -180,6 +181,13 @@ def _lifecycle_policy(lifecycle: Lifecycle) -> EnvLifecyclePolicy:
     return MultiInstancePolicy()
 
 
+_RESUME_MESSAGE = (
+    "This task was interrupted and has now been resumed. Your working directory, the recorded "
+    "data and the game's position are as you left them; a command that was running when the "
+    "interruption happened did not complete. Continue your work."
+)
+
+
 def _build_server(
     config: RunConfig,
     problem: BaseProblem,
@@ -218,8 +226,9 @@ def _bootstrap_workdir(
     workdir: str,
     conn: EnvConnection,
     protocol: ExperimentProtocol,
+    keep_agent_files: bool = False,
 ) -> None:
-    Workspace(workdir).bootstrap(
+    Workspace(workdir, keep_agent_files=keep_agent_files).bootstrap(
         [],
         templates=protocol.templates,
         expose_environment=protocol.exposes_environment,
@@ -270,6 +279,22 @@ async def run_task(
     workdir = os.path.join(output_dir, "workdir")
     logs_dir = os.path.join(output_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
+    state_path = os.path.join(logs_dir, "experiment_state.json")
+    previous = (
+        ExperimentState.load(state_path)
+        if config.resume is not None and os.path.exists(state_path)
+        else None
+    )
+    if previous is not None:
+        if not previous.resumable():
+            return str(previous.exit_reason)  # finished in the earlier launch
+        if not protocol.resumable:
+            raise RuntimeError(f"protocol {protocol.name} cannot resume a task")
+        if previous.agent_resume is None:
+            raise RuntimeError(
+                f"{output_dir}: the agent's conversation was not kept, so this task cannot be "
+                "resumed; run it again from scratch"
+            )
     # Before config.json is written, so the artifact records the inner cap the run used.
     _seed_alan_iteration_budget(config.agent, config.limits)
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as handle:
@@ -281,9 +306,12 @@ async def run_task(
     in_process = config.agent.name is AgentName.SCRIPTED
 
     async with protocol, serve_env(server, task_name, in_process=in_process) as conn:
+        resuming = previous is not None
         with (
-            TranscriptWriter(os.path.join(logs_dir, "transcript.jsonl")) as transcript,
-            RunLogger(logs_dir, task=task_name, console=True) as logger,
+            TranscriptWriter(
+                os.path.join(logs_dir, "transcript.jsonl"), append=resuming
+            ) as transcript,
+            RunLogger(logs_dir, task=task_name, console=True, append=resuming) as logger,
         ):
             _bootstrap_workdir(
                 config,
@@ -292,9 +320,10 @@ async def run_task(
                 workdir=workdir,
                 conn=conn,
                 protocol=protocol,
+                keep_agent_files=resuming,
             )
 
-            experiment = ExperimentState(
+            experiment = previous or ExperimentState(
                 problem_name=problem.name,
                 task_name=task_name,
                 problem_kwargs=dict(config.problem.kwargs),
@@ -304,6 +333,10 @@ async def run_task(
                     "config" if config.agent.args.get("context_window") is not None else None
                 ),
             )
+            if resuming:
+                experiment.exit_reason = experiment.last_error_category = None
+                experiment.exit_requested = False
+                experiment.resumed_at.append(time.time())
             src_dir = _regact_src_dir()
             deny_read = _secret_module_paths(problem.secret_modules())
             # Hide regact's OWN problem wrappers from the sandbox. The agent needs
@@ -519,6 +552,9 @@ async def run_task(
                         reason=initial_reason,
                     )
                     return initial_reason
+                if resuming:
+                    assert experiment.agent_resume is not None
+                    agent.resume_from(experiment.agent_resume)
                 await agent.start(
                     cwd=workdir,
                     model=config.agent.model,
@@ -532,7 +568,11 @@ async def run_task(
                 rendered_first_obs = None
                 if config.first_obs_in_prompt:
                     rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
-                first_message = builder.build_first_message(rendered_first_obs)
+                first_message = (
+                    _RESUME_MESSAGE
+                    if resuming
+                    else builder.build_first_message(rendered_first_obs)
+                )
 
                 reason = await run_session(
                     agent,
@@ -554,6 +594,7 @@ async def run_task(
                 try:
                     await session.close()
                 finally:
+                    agent.keep_session = experiment.resumable()
                     await agent.close()
                     if (usage := agent.usage()) is not None:
                         experiment.agent_usage = usage

@@ -89,7 +89,8 @@ class ManagedCoordinator:
         resuming = (self.root / "experience.sqlite3").exists()
         if resuming and config.resume is None:
             raise RuntimeError(
-                "this task directory already has recorded experience; continue it with resume=<run dir>"
+                "this task directory already has recorded experience; "
+                "continue it with resume=<run dir>"
             )
         self.store = ExperienceStore(self.root / "experience.sqlite3")
         self.lock = threading.RLock()
@@ -186,11 +187,12 @@ class ManagedCoordinator:
         self.initial_collection = saved.get("initial_collection")
         self.accepted = saved.get("accepted_cwm")
         self.latest, self.best = saved.get("latest_exploration"), saved.get("best_exploration")
+        self.phase = self.store.last_phase() or self.initial_phase
         self.after_restore()
         self.event("task_resumed", episode_id=last, current_observation_id=self.current_id)
 
     def after_restore(self) -> None:
-        """Protocol state that depends on what was restored (the CWM phase)."""
+        """Protocol state beyond the shared one (the accepted CWM)."""
 
     def task_metrics(self) -> dict[str, Any]:
         """The problem's main metrics over all the task's real actions so far."""

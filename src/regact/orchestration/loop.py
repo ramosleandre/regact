@@ -136,8 +136,13 @@ async def run_session(
     flagging_warning_cap: int = 0,
 ) -> str:
     """Drive one task to completion; return the exit reason."""
-    start = time.monotonic()
-    limits = dataclasses.replace(limits, max_seconds_per_task=limits.seconds_left())
+    start = time.monotonic() - experiment.duration_s  # a resumed task keeps its elapsed time
+    budget = limits.seconds_left()
+    if budget is not None and experiment.duration_s:  # counted from the task's first start
+        cap = limits.max_seconds_per_task
+        budget += experiment.duration_s
+        budget = budget if cap is None else min(budget, cap)
+    limits = dataclasses.replace(limits, max_seconds_per_task=budget)
     protocol.on_start(start, limits.max_seconds_per_task)
     ctx = _LoopContext(
         agent=agent,
@@ -157,11 +162,13 @@ async def run_session(
     )
     logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
     experiment.save(state_path)
-    if system_prompt:  # record the inputs so the viewer shows the whole session, not just replies
+    # Record the inputs so the viewer shows the whole session, not just replies (a resumed task
+    # already has them).
+    if system_prompt and not experiment.resumed_at:
         transcript.write(SystemPrompt(agent.prompt_for_transcript(system_prompt)))
 
     message = first_message
-    turns = 0
+    turns = experiment.turn
     error_turns = 0  # consecutive turns that ended in a backend error
     no_tool_turns = 0  # consecutive turns that produced no tool call (doom-loop breaker)
     reminders = 0
@@ -328,6 +335,7 @@ def _save_state(ctx: _LoopContext) -> None:
         ctx.experiment.env_moves = ctx.move_count()
     if ctx.experiment.agent_session_id is None:
         ctx.experiment.agent_session_id = ctx.agent.session_id()
+    ctx.experiment.agent_resume = ctx.agent.resume_token() or ctx.experiment.agent_resume
     info = ctx.agent.resolved_model_info()
     resolved = info.get("context_window") if info else None
     if info is not None and resolved is not None:  # reported window wins over the baseline

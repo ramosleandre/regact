@@ -62,17 +62,24 @@ class Coordinator(ManagedCoordinator):
         )
 
     def after_restore(self):
-        # Evidence recorded after the accepted CWM was last checked may contradict it.
-        checked = self.accepted is not None and (
-            self.accepted["dataset_version"] == self.store.version
-        )
-        self.phase = EXPLORATION if checked else MODELING
-        if checked:
-            self.state_sizes = {
-                k: self.accepted["validation"][k]
-                for k in ("state_bytes", "observation_bytes", "largest_ratio_state")
-                if k in self.accepted["validation"]
-            }
+        # The store's last accepted validation, in case status.json missed it. Steps recorded
+        # after it are checked against the CWM when live_state next replays the live episode.
+        record = self.store.last_record("validation", "accepted")
+        if record is None:
+            self.accepted, self.phase = None, MODELING
+            return
+        summary = record["validation"]
+        self.accepted = {
+            "cwm_version": record["cwm_version"],
+            "bundle": record["bundle"],
+            "dataset_version": summary["dataset_version"],
+            "validation": summary,
+        }
+        self.state_sizes = {
+            k: summary[k]
+            for k in ("state_bytes", "observation_bytes", "largest_ratio_state")
+            if k in summary
+        }
 
     def begin_exploration(self):
         self.current_state = self.next_state = None

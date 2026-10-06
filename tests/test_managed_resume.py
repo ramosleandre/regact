@@ -127,8 +127,11 @@ def test_a_task_resumes_where_its_store_ends(hidden_rig, lifecycle):
             c.reset_actions,
         )
         assert r.milestones == c.milestones and r.initial_collection == c.initial_collection
-        # Nothing was recorded after the accepted CWM was last checked: exploration continues.
-        assert r.phase == "Active Exploration" and r.accepted == c.accepted
+        assert r.phase == "Active Exploration"
+        assert (r.accepted["cwm_version"], r.accepted["bundle"]) == (
+            c.accepted["cwm_version"],
+            c.accepted["bundle"],
+        )
         exploration(r, (1,))
         result = r.tool("RunController", {})
         assert result["real_actions"] == 1 and "error" not in result, result
@@ -139,23 +142,45 @@ def test_a_task_resumes_where_its_store_ends(hidden_rig, lifecycle):
         r.close("test_finished")
 
 
-def test_evidence_newer_than_the_accepted_cwm_forces_a_revalidation(hidden_rig):
-    c = played(hidden_rig, Lifecycle.SINGLE_INSTANCE)
-    c.persist()
-    c.tool("ResetEnvironment", {})  # recorded, but the process dies before the next persist
+def test_a_stale_status_file_does_not_lose_the_position_or_the_accepted_cwm(hidden_rig):
+    c = hidden_rig(lifecycle=Lifecycle.SINGLE_INSTANCE, target=3)
     stale = c.root / "status.json"
-    saved = stale.read_text()
-    c.persist()
-    stale.write_text(saved)
+    saved = stale.read_text()  # written before any CWM was accepted
+    hidden_model(c.workdir)
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    exploration(c, (1, 1))
+    assert c.tool("RunController", {})["real_actions"] == 2
+    c.tool("ResetEnvironment", {})
+    stale.write_text(saved)  # the process died before any of that reached status.json
     killed(c)
 
     r = reopened(c, Lifecycle.SINGLE_INSTANCE)
     try:
-        assert r.reset_actions == c.reset_actions and r.current_id == c.current_id
-        assert r.phase == "CWM Modeling"
-        assert r.tool("UpdateCodeWorldModel", {})["accepted"]
+        assert r.reset_actions == 1 and r.current_id == c.current_id
+        # The phase and the accepted CWM come from the store: a reset keeps Active Exploration.
+        assert r.phase == "Active Exploration"
+        assert r.accepted["cwm_version"] == c.accepted["cwm_version"]
         exploration(r, (1, 1))
-        assert r.tool("RunController", {})["real_actions"] == 2
+        result = r.tool("RunController", {})
+        assert result["real_actions"] == 2 and "error" not in result, result
+    finally:
+        r.close("test_finished")
+
+
+def test_steps_the_accepted_cwm_never_saw_are_checked_on_resume(hidden_rig):
+    c = played(hidden_rig, Lifecycle.SINGLE_INSTANCE)
+    c.persist()
+    # The process dies mid-RunController: two real steps are recorded, nothing else.
+    for _ in range(2):
+        c._step(1)
+    killed(c)
+    r = reopened(c, Lifecycle.SINGLE_INSTANCE)
+    try:
+        assert r.phase == "Active Exploration"
+        # The carried State is rebuilt through those two steps before the controller acts.
+        exploration(r, (1,))
+        result = r.tool("RunController", {})
+        assert result["real_actions"] == 1 and "error" not in result, result
     finally:
         r.close("test_finished")
 

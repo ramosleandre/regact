@@ -24,12 +24,15 @@ class RunLogger:
     terminal shows a concise cross-task view without the full per-task detail.
     """
 
-    def __init__(self, logs_dir: str, *, task: str, console: bool = False) -> None:
+    def __init__(
+        self, logs_dir: str, *, task: str, console: bool = False, append: bool = False
+    ) -> None:
         self._task = task
         self._console = console
+        mode = "a" if append else "w"  # append: a resumed task continues its logs
         # The logger owns these handles for its lifetime; close() / __exit__ release them.
-        self._events: IO[str] = open(f"{logs_dir}/events.jsonl", "w", encoding="utf-8")  # noqa: SIM115
-        self._human: IO[str] = open(f"{logs_dir}/output.log", "w", encoding="utf-8")  # noqa: SIM115
+        self._events: IO[str] = open(f"{logs_dir}/events.jsonl", mode, encoding="utf-8")  # noqa: SIM115
+        self._human: IO[str] = open(f"{logs_dir}/output.log", mode, encoding="utf-8")  # noqa: SIM115
 
     def log(
         self,
