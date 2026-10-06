@@ -102,7 +102,7 @@ done
 [ "${ready}" = 1 ] || { echo "[bench] ${BASE} not ready in ${READY_TIMEOUT_S}s"; [ -n "${PID}" ] && { tail -60 "${SLOG}"; kill "${PID}"; } 2>/dev/null; exit 1; }
 
 export OPENAI_API_KEY="${OPENAI_API_KEY:-local}"
-EXTRA_ARGS=("agent.args.context_window=${CONTEXT_WINDOW}")
+EXTRA_ARGS=("++agent.args.context_window=${CONTEXT_WINDOW}")
 [ -n "${TOOL_CALL_FORMAT}" ] && EXTRA_ARGS+=("+agent.args.tool_call_format=${TOOL_CALL_FORMAT}")
 # Per-run hydra overrides forwarded from the sbatch (max_output_tokens, escalated_max_tokens,
 # tool_protocol, sandbox_opts.*, limits.*); space-separated, word-split into the arg array.
