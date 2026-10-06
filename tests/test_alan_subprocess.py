@@ -381,3 +381,57 @@ async def test_an_alan_child_we_killed_is_not_reported_as_an_agent_error() -> No
     events = [event async for event in agent.send("go")]
     await killer
     assert not any(isinstance(e, AgentError) for e in events)
+
+
+async def test_ready_frame_gives_the_session_and_the_resume_token() -> None:
+    agent = AlanSubprocessAgent({"memory": "off"})
+    assert agent.resume_token() is None  # no session before the child reports one
+
+    async def frames():  # type: ignore[no-untyped-def]
+        yield {"type": READY, "system_prompt": "p", "session_id": "abc123"}
+
+    agent._read_frames = frames  # type: ignore[method-assign]
+    await agent._await_ready()
+    assert agent.session_id() == "abc123"
+    assert agent.resume_token() == {"session_id": "abc123"}
+
+
+def test_resume_from_asks_the_child_for_the_same_session() -> None:
+    agent = AlanSubprocessAgent({"memory": "off"})
+    agent.resume_from({"session_id": "abc123"})
+    assert agent._args == {"memory": "off", "session_id": "abc123"}
+
+
+@pytest.mark.live
+@pytest.mark.slow
+async def test_a_second_runner_continues_the_first_ones_session(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """End-to-end with the real alancode: the session a first child created is the one a second
+    child, started from its resume token in the same workdir, reports back."""
+    import os
+    import sys
+
+    src = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/src"
+    start = {
+        "cwd": str(tmp_path),
+        "model": "openai/fake",
+        "base_url": "http://127.0.0.1:9/v1",
+        "api_key": "dummy",
+        "system_prompt": "You are a test.",
+        "tools": [],
+        "env": {"PYTHONPATH": os.pathsep.join([src, *sys.path[:1]])},
+        "runtime_wrap": None,
+    }
+    first = AlanSubprocessAgent({"permission_mode": "yolo", "memory": "off"})
+    try:
+        await first.start(**start)
+        token = first.resume_token()
+    finally:
+        await first.close()
+    assert token is not None and (tmp_path / ".alan" / "sessions" / token["session_id"]).is_dir()
+    second = AlanSubprocessAgent({"permission_mode": "yolo", "memory": "off"})
+    second.resume_from(token)
+    try:
+        await second.start(**start)
+        assert second.session_id() == token["session_id"]
+    finally:
+        await second.close()

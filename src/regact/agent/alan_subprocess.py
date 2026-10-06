@@ -89,6 +89,7 @@ class AlanSubprocessAgent(CodeAgent):
     def __init__(self, args: dict[str, Any] | None = None, *, base_url: str | None = None) -> None:
         self._args = dict(args or {})  # alancode tuning, forwarded verbatim to the child
         self._display_prompt: str | None = None
+        self._session_id: str | None = None  # alancode's session, reported by the child
         self._base_url = base_url
         self._proc: asyncio.subprocess.Process | None = None
         self._pending: list[str] = []  # queued by inject(), prepended to the next turn
@@ -216,6 +217,17 @@ class AlanSubprocessAgent(CodeAgent):
         with contextlib.suppress(ProcessLookupError):
             proc.kill()
 
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    def resume_token(self) -> dict[str, Any] | None:
+        # alancode keeps the conversation under <workdir>/.alan/sessions/<id>, so the id is all
+        # a later process needs, and there is nothing to keep or delete at close.
+        return None if self._session_id is None else {"session_id": self._session_id}
+
+    def resume_from(self, token: dict[str, Any]) -> None:
+        self._args = {**self._args, "session_id": token["session_id"]}
+
     async def close(self) -> None:
         """Ask the child to exit, then make sure it is gone."""
         if self._proc is not None and self._proc.returncode is None:
@@ -306,6 +318,8 @@ class AlanSubprocessAgent(CodeAgent):
             if kind == READY:
                 prompt = frame.get("system_prompt")
                 self._display_prompt = prompt if isinstance(prompt, str) else None
+                session = frame.get("session_id")
+                self._session_id = session if isinstance(session, str) else None
                 endpoint = frame.get("remote_endpoint")
                 if isinstance(endpoint, str):
                     from regact.obs.console import console

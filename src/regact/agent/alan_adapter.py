@@ -55,8 +55,12 @@ def _usage_dict(usage: Any) -> dict[str, Any] | None:
 def _result_text(content: Any) -> str:
     """Flatten a tool-result payload (plain string or list of text blocks) into a string."""
     if isinstance(content, list):
-        return "".join(str(getattr(block, "text", block)) for block in content
-                       if (block.get("type") if isinstance(block, dict) else getattr(block, "type", None)) != "image")
+        return "".join(
+            str(getattr(block, "text", block))
+            for block in content
+            if (block.get("type") if isinstance(block, dict) else getattr(block, "type", None))
+            != "image"
+        )
     return str(content)
 
 
@@ -93,6 +97,9 @@ def build_alan_agent(
     extra: dict[str, Any] = {}
     if args.get("context_window") is not None:
         extra["context_window"] = int(args["context_window"])  # env interp can yield a str
+    if args.get("session_id"):
+        # Continue this session: alancode reloads its transcript from <cwd>/.alan/sessions/<id>.
+        extra["session_id"] = str(args["session_id"])
     agent = AlanCodeAgent(
         backend=args.get("backend"),  # e.g. "scripted" (+ model=remote → HTTP-driven provider)
         model=model,
