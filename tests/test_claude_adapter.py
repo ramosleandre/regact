@@ -3,6 +3,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from regact.agent.claude_adapter import limit_reset_unix
 
 
@@ -133,3 +135,51 @@ def test_a_note_for_the_model_is_handed_over_once_by_the_tool_hook(tmp_path, mon
     told = json.loads(after_a_tool())["hookSpecificOutput"]
     assert told == {"hookEventName": "PostToolUse", "additionalContext": "first warning\n\nsecond"}
     assert after_a_tool() == ""  # delivered once
+
+
+def _prepared(tmp_path, monkeypatch):
+    from regact.agent.claude_adapter import ClaudeAgent
+
+    real = tmp_path / "real/.credentials.json"
+    monkeypatch.setattr(ClaudeAgent, "_real_creds", lambda self: str(real))
+    monkeypatch.delenv("REGACT_CLAUDE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    _credential(real, 2000, "the user's login")
+    agent = ClaudeAgent({"claude_home": str(tmp_path / "root")})
+    agent._cwd = str(tmp_path / "wd")
+    (tmp_path / "wd").mkdir()
+    return agent, real
+
+
+@pytest.mark.parametrize("source", ["file", "regact variable", "cli variable"])
+async def test_a_run_token_replaces_the_copy_of_the_login(tmp_path, monkeypatch, source) -> None:
+    from pathlib import Path
+
+    agent, real = _prepared(tmp_path, monkeypatch)
+    if source == "file":
+        (tmp_path / "root").mkdir()
+        (tmp_path / "root/oauth_token").write_text("  token-for-runs\n")
+    else:
+        regact = source == "regact variable"
+        name = "REGACT_CLAUDE_OAUTH_TOKEN" if regact else "CLAUDE_CODE_OAUTH_TOKEN"
+        monkeypatch.setenv(name, "token-for-runs")
+    before = real.read_text()
+    agent._configure_workdir()
+
+    home = Path(agent._env_overrides["CLAUDE_CONFIG_DIR"])
+    assert agent._env_overrides["CLAUDE_CODE_OAUTH_TOKEN"] == "token-for-runs"
+    assert not (home / ".credentials.json").exists()  # no copy of the login in the task's home
+    _credential(home / ".credentials.json", 9000, "something the CLI wrote")
+    agent._command("continue")
+    await agent.close()
+    assert real.read_text() == before and not (tmp_path / "root/.credentials.json").exists()
+
+
+def test_without_a_run_token_the_login_is_copied_as_before(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    agent, _ = _prepared(tmp_path, monkeypatch)
+    agent._configure_workdir()
+    home = Path(agent._env_overrides["CLAUDE_CONFIG_DIR"])
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in agent._env_overrides
+    assert _token(home / ".credentials.json") == "the user's login"

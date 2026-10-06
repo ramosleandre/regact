@@ -76,6 +76,9 @@ _NOTE_HOOK = (
     f'f="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}/{_NOTE_FILE}"; '
     '[ -s "$f" ] && mv "$f" "$f.sent" 2>/dev/null && cat "$f.sent"; exit 0'
 )
+_RUN_TOKEN_ENV = "REGACT_CLAUDE_OAUTH_TOKEN"
+_RUN_TOKEN_FILE = "oauth_token"
+_CLI_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # what the Claude CLI itself reads
 _KEPT_HOME_MAX_AGE_S = 14 * 24 * 3600  # a conversation kept for a resume, then never resumed
 _RESET_JUST_PASSED = timedelta(minutes=30)  # an error seen this soon after its own reset time
 
@@ -158,9 +161,26 @@ class ClaudeAgent(_CliAgent):
         forced = self._args.get("claude_home") is not None
         return (
             forced
+            or self._run_token() is not None
             or os.path.exists(os.path.join(self._home_root, ".credentials.json"))
             or os.path.exists(self._real_creds())
         )
+
+    def _run_token(self) -> str | None:
+        """A long-lived token for runs, made once with ``claude setup-token``: the variable
+        REGACT_CLAUDE_OAUTH_TOKEN, else the file ``oauth_token`` in the isolated root, else a
+        CLAUDE_CODE_OAUTH_TOKEN already in the launch environment.
+
+        With one, a task's home holds no copy of the login and nothing here touches the user's
+        credential files: the CLI authenticates from the token, which is never refreshed, so a
+        run cannot race the user's own sessions for a refresh."""
+        token = os.environ.get(_RUN_TOKEN_ENV, "").strip()
+        if not token:
+            with contextlib.suppress(OSError), open(
+                os.path.join(self._home_root, _RUN_TOKEN_FILE), encoding="utf-8"
+            ) as handle:
+                token = handle.read().strip()
+        return token or os.environ.get(_CLI_TOKEN_ENV, "").strip() or None
 
     def _share_credentials(self) -> None:
         """Keep one token lineage across the real ``~/.claude``, the isolated root and this task's
@@ -171,6 +191,8 @@ class ClaudeAgent(_CliAgent):
         race gets the live credential before its next turn; a task that won it hands its
         credential to the others, the user's own login included, which would otherwise be the
         revoked one."""
+        if self._run_token() is not None:
+            return
         paths = [self._real_creds(), os.path.join(self._home_root, ".credentials.json")]
         if self._session_home is not None:
             paths.append(os.path.join(self._session_home, ".credentials.json"))
@@ -245,6 +267,8 @@ class ClaudeAgent(_CliAgent):
         history leaks in. On Keychain-only auth we leave ``CLAUDE_CONFIG_DIR`` unset so claude keeps
         its real home + auth."""
         config_dir = self._config_dir()
+        if (token := self._run_token()) is not None and not self._base_url:
+            self._env_overrides[_CLI_TOKEN_ENV] = token  # never sent to a self-hosted server
         if config_dir == os.path.join(os.path.expanduser("~"), ".claude"):
             return  # Keychain-only auth: real home, relocating would drop auth
         self._env_overrides["CLAUDE_CONFIG_DIR"] = config_dir
@@ -336,6 +360,8 @@ class ClaudeAgent(_CliAgent):
             return "warn", "'claude' not on PATH"
         env = dict(os.environ)
         config_dir = self._config_dir()
+        if (token := self._run_token()) is not None:
+            env[_CLI_TOKEN_ENV] = token
         if config_dir != os.path.join(os.path.expanduser("~"), ".claude"):
             env["CLAUDE_CONFIG_DIR"] = config_dir
         try:
