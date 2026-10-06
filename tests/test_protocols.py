@@ -421,3 +421,29 @@ async def test_an_interrupted_task_is_resumed_in_place_and_a_finished_one_is_ski
         == "toy_complete"
     )
     assert third.sent == []  # already finished: not run again
+
+
+async def test_a_task_whose_conversation_is_lost_continues_with_a_new_agent_on_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(registry, "_REGISTRY", {})
+    monkeypatch.setattr(_ToyProtocol, "resumable", True)
+    register_protocol("toy", _ToyProtocol)
+    config = _config(protocol=ProtocolConfig(name="toy"))
+    failing = [AgentError(ErrorCategory.AGENT_API, "down"), IterationComplete()]
+    out = str(tmp_path)
+    first = ScriptedAgent([[ToolCall("1", "Advance", {})], failing, failing, failing])
+    assert await run_task(config, _Problem(), "corridor", output_dir=out, agent=first) == "agent_api"
+
+    resumed = dataclasses.replace(config, resume=out)
+    with pytest.raises(RuntimeError, match="resume_fresh_agent=true"):
+        await run_task(resumed, _Problem(), "corridor", output_dir=out, agent=ScriptedAgent([]))
+
+    taking_over = dataclasses.replace(resumed, resume_fresh_agent=True)
+    second = ScriptedAgent([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
+    reason = await run_task(taking_over, _Problem(), "corridor", output_dir=out, agent=second)
+    assert reason == "toy_complete"
+    assert "taking over a task" in second.sent[0] and "1 tool calls" in second.sent[0]
+    assert "interrupted and has now been resumed" not in second.sent[0]
+    state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
+    assert state["fresh_agent_resumes"] == 1 and state["tool_calls_total"] == 3

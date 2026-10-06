@@ -158,6 +158,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         dry_run=bool(data.get("dry_run", False)),
         resume=data.get("resume"),
         resume_any_version=bool(data.get("resume_any_version", False)),
+        resume_fresh_agent=bool(data.get("resume_fresh_agent", False)),
         limits=_limits_from(data.get("limits") or {}),
         sandbox=_sandbox_bool(data.get("sandbox", False)),
         sandbox_opts=dict(data.get("sandbox_opts") or {}),

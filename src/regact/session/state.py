@@ -46,6 +46,7 @@ class ExperimentState:
     main_metrics: dict[str, Any] | None = None  # the problem's main scores, as last computed
     agent_resume: dict[str, Any] | None = None  # what continues the agent's conversation
     resumed_at: list[float] = field(default_factory=list)  # UNIX time of each resume
+    fresh_agent_resumes: int = 0  # resumes that had to start a new agent conversation
     usage_limit_waits: int = 0  # times the run slept until a backend usage limit reset
     usage_limit_waited_s: float = 0.0  # seconds slept that way; not counted in duration_s
     turn: int = 0  # 1-indexed turn in progress (0 before the first)

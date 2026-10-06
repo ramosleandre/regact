@@ -53,3 +53,55 @@ async def test_the_conversation_home_is_kept_for_a_resumable_task_and_reused(tmp
         assert "gone" in str(error)
     else:
         raise AssertionError("a missing home must refuse the resume")
+
+
+def _credential(path, expires_at: int, token: str) -> None:
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"claudeAiOauth": {"expiresAt": expires_at, "refreshToken": token}}))
+
+
+def _token(path) -> str:
+    import json
+
+    return json.loads(path.read_text())["claudeAiOauth"]["refreshToken"]
+
+
+async def test_the_credential_that_expires_last_reaches_every_copy(tmp_path, monkeypatch) -> None:
+    from regact.agent.claude_adapter import ClaudeAgent
+
+    real, root = tmp_path / "real/.credentials.json", tmp_path / "root/.credentials.json"
+    monkeypatch.setattr(ClaudeAgent, "_real_creds", lambda self: str(real))
+    _credential(real, 2000, "live")
+    _credential(root, 1000, "revoked")  # a newer file, an older token
+    agent = ClaudeAgent({"claude_home": str(tmp_path / "root")})
+    home = tmp_path / "root/session" / agent._config_dir().rsplit("/", 1)[1] / ".credentials.json"
+    # Seeded from the credential that expires last, whatever the files' dates; the stale root
+    # copy is repaired too.
+    assert _token(home) == "live" and _token(root) == "live"
+
+    # The user's own session refreshed first: this task's copy is revoked. Its next turn starts
+    # from the live one.
+    _credential(real, 3000, "rotated-by-user")
+    agent._command("continue")
+    assert _token(home) == "rotated-by-user"
+
+    # This task refreshed: the user's login must not be left with the revoked token.
+    _credential(home, 4000, "rotated-by-task")
+    await agent.close()
+    assert _token(real) == "rotated-by-task" and _token(root) == "rotated-by-task"
+
+
+async def test_a_dead_credential_is_never_written_over_a_live_one(tmp_path, monkeypatch) -> None:
+    from regact.agent.claude_adapter import ClaudeAgent
+
+    real, root = tmp_path / "real/.credentials.json", tmp_path / "root/.credentials.json"
+    monkeypatch.setattr(ClaudeAgent, "_real_creds", lambda self: str(real))
+    _credential(real, 2000, "live")
+    agent = ClaudeAgent({"claude_home": str(tmp_path / "root")})
+    home = tmp_path / "root/session" / agent._config_dir().rsplit("/", 1)[1] / ".credentials.json"
+    _credential(real, 3000, "rotated-by-user")
+    home.write_text("not json")  # the task's file is unreadable when it closes, and the newest
+    await agent.close()
+    assert _token(real) == "rotated-by-user" and _token(root) == "rotated-by-user"

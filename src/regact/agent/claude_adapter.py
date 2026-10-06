@@ -8,6 +8,7 @@ Resume across turns uses the session id Claude reports in its ``init`` event.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -72,6 +73,39 @@ _KEPT_HOME_MAX_AGE_S = 14 * 24 * 3600  # a conversation kept for a resume, then 
 _RESET_JUST_PASSED = timedelta(minutes=30)  # an error seen this soon after its own reset time
 
 
+_MISSING = (-1.0, 0.0)
+
+
+def _credential_age(path: str) -> tuple[float, float]:
+    """Orders Claude credential files from stale to live: by when their access token expires,
+    then, for files that state no expiry, by modification time. ``_MISSING`` for no file."""
+    try:
+        modified = os.path.getmtime(path)
+    except OSError:
+        return _MISSING
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return float(json.load(handle)["claudeAiOauth"]["expiresAt"]), 0.0
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0.0, modified
+
+
+def _replace_file(source: str, target: str) -> None:
+    """Copy ``source`` over ``target`` in one step, private to the user; best effort. A target
+    that already holds the same bytes is left alone."""
+    temporary = f"{target}.{uuid.uuid4().hex}.tmp"
+    try:
+        with open(source, "rb") as new, contextlib.suppress(OSError), open(target, "rb") as old:
+            if new.read() == old.read():
+                return
+        shutil.copyfile(source, temporary)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.remove(temporary)
+
+
 def limit_reset_unix(message: str, now: float) -> float | None:
     """When the usage limit in a Claude Code error message resets, as UNIX time: the next
     occurrence of the stated local time after ``now``, or that time today when it has only just
@@ -121,13 +155,25 @@ class ClaudeAgent(_CliAgent):
             or os.path.exists(self._real_creds())
         )
 
-    def _freshest_creds(self) -> str | None:
-        """The NEWEST existing credential of {isolated root, real ~/.claude} - seed the LIVE token,
-        never a stale copy. OAuth rotates the refresh token, so a stale copy reads back as
-        'revoked'. Handles both logins: into ~/.claude (its copy is newer) or into the root."""
-        candidates = [os.path.join(self._home_root, ".credentials.json"), self._real_creds()]
-        existing = [c for c in candidates if os.path.exists(c)]
-        return max(existing, key=os.path.getmtime) if existing else None
+    def _share_credentials(self) -> None:
+        """Keep one token lineage across the real ``~/.claude``, the isolated root and this task's
+        home: the credential that expires last is copied over the older ones, never the reverse.
+
+        OAuth rotates the refresh token on every refresh, so the copies diverge the moment one
+        process refreshes: whoever holds an older copy is then 'revoked'. A task that lost that
+        race gets the live credential before its next turn; a task that won it hands its
+        credential to the others, the user's own login included, which would otherwise be the
+        revoked one."""
+        paths = [self._real_creds(), os.path.join(self._home_root, ".credentials.json")]
+        if self._session_home is not None:
+            paths.append(os.path.join(self._session_home, ".credentials.json"))
+        age = {path: _credential_age(path) for path in paths}
+        live = max(paths, key=lambda path: age[path])
+        if age[live] is _MISSING:
+            return
+        for path in paths:
+            if age[path] < age[live] and os.path.isdir(os.path.dirname(path)):
+                _replace_file(live, path)
 
     def _make_session_home(self) -> str:
         """A FRESH per-task config dir seeded with ONLY the (freshest) auth credential - no
@@ -140,9 +186,8 @@ class ClaudeAgent(_CliAgent):
             kept = os.path.join(sessions, name)
             if time.time() - os.path.getmtime(kept) > _KEPT_HOME_MAX_AGE_S:
                 shutil.rmtree(kept, ignore_errors=True)
-        src = self._freshest_creds()
-        if src is not None:
-            shutil.copyfile(src, os.path.join(home, ".credentials.json"))
+        self._session_home = home
+        self._share_credentials()
         return home
 
     def _config_dir(self) -> str:
@@ -198,20 +243,13 @@ class ClaudeAgent(_CliAgent):
     async def close(self) -> None:
         """Drop the per-task config home on teardown (nothing reads claude's native session dir
         post-run; the normalized transcript is already in logs/), so seeded auth + session state do
-        not accumulate - unless the task may be resumed (``keep_session``). First preserve any token
-        refresh Claude wrote back to the isolated ROOT
-        (never the user's ~/.claude) - dropping a rotated refresh token revokes the persistent one.
+        not accumulate - unless the task may be resumed (``keep_session``). A token this task
+        refreshed is first handed to the other credential files (see _share_credentials).
         """
         await super().close()
         if self._session_home is None:
             return
-        refreshed = os.path.join(self._session_home, ".credentials.json")
-        if os.path.exists(refreshed):
-            try:
-                os.makedirs(self._home_root, exist_ok=True)
-                shutil.copyfile(refreshed, os.path.join(self._home_root, ".credentials.json"))
-            except OSError:
-                pass  # best-effort; a lost refresh just re-seeds from ~/.claude next run
+        self._share_credentials()
         self._usage = claude_usage(self._session_home)  # before the home and its logs are deleted
         if not self.keep_session:
             shutil.rmtree(self._session_home, ignore_errors=True)
@@ -227,12 +265,8 @@ class ClaudeAgent(_CliAgent):
         if home is not None:
             if not os.path.isdir(home):
                 raise RuntimeError(f"the conversation's Claude home is gone: {home}")
-            src = self._freshest_creds()
-            if src is not None and os.path.realpath(src) != os.path.realpath(
-                os.path.join(home, ".credentials.json")
-            ):
-                shutil.copyfile(src, os.path.join(home, ".credentials.json"))
             self._session_home = home
+            self._share_credentials()
         self._session_id = token["session_id"]
 
     def usage_limit_reset(self, message: str) -> float | None:
@@ -316,6 +350,8 @@ class ClaudeAgent(_CliAgent):
         return [os.path.realpath("/tmp") + "/claude-"]
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
+        if self._session_home is not None:  # every turn starts from the live credential
+            self._share_credentials()
         argv = ["claude", "-p", message, "--output-format", "stream-json", "--verbose"]
         argv += ["--permission-mode", str(self._args.get("permission_mode", "bypassPermissions"))]
         if self._args.get("effort"):

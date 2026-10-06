@@ -186,6 +186,13 @@ _RESUME_MESSAGE = (
     "data and the game's position are as you left them. A command that was running when the "
     "interruption happened did not complete, and scripts you had left running were stopped."
 )
+_TAKE_OVER_MESSAGE = (
+    "You are taking over a task that another agent session started and that was interrupted. "
+    "That session's conversation is lost; its files in your working directory and the recorded "
+    "data are intact, and the game is at the position it reached. {calls} tool calls and about "
+    "{minutes} minutes of the budget are already spent. Start by reading the files in the "
+    "working directory. {notice}"
+)
 # Launch settings a resume may change; anything else must equal the task's config.json.
 _RESUME_MAY_CHANGE = frozenset(
     {
@@ -193,6 +200,7 @@ _RESUME_MAY_CHANGE = frozenset(
         "launch",
         "resume",
         "resume_any_version",
+        "resume_fresh_agent",
         "output_root",
         "experiment_name",
         "parallel_workers",
@@ -303,10 +311,11 @@ async def run_task(
             return str(previous.exit_reason)  # finished in the earlier launch
         if not protocol.resumable:
             raise RuntimeError(f"protocol {protocol.name} cannot resume a task")
-        if previous.agent_resume is None and previous.turn > 0:
+        if previous.agent_resume is None and previous.turn > 0 and not config.resume_fresh_agent:
             raise RuntimeError(
                 f"{output_dir}: the agent's conversation was not kept, so this task cannot be "
-                "resumed; run it again from scratch"
+                "resumed; run it again from scratch, or pass resume_fresh_agent=true to continue "
+                "it with a new agent"
             )
     # Before config.json is written, so the artifact records the inner cap the run used.
     _seed_alan_iteration_budget(config.agent, config.limits)
@@ -444,11 +453,19 @@ async def run_task(
             agent = agent or build_agent(config.agent)
             # A task stopped before its agent ever ran has no conversation: its agent starts anew.
             token = experiment.agent_resume if resuming else None
-            continued = token is not None
             if token is not None:
                 # Before anything asks the agent for its paths: the sandbox binds the home the
                 # conversation lives in, not a fresh one.
-                agent.resume_from(token)
+                try:
+                    agent.resume_from(token)
+                except RuntimeError:
+                    if not config.resume_fresh_agent:
+                        raise
+                    token = None  # the conversation is gone: a new agent takes over
+            continued = token is not None
+            took_over = resuming and not continued and experiment.turn > 0
+            if took_over:
+                experiment.fresh_agent_resumes += 1
             caps = agent.capabilities()
             # Every non-native protocol reaches the framework tools over the workdir control CLI, so
             # the channel MUST be bound for it (uses_control_cli is the shared predicate the prompt
@@ -608,6 +625,12 @@ async def run_task(
                     if continued
                     else builder.build_first_message(rendered_first_obs)
                 )
+                if took_over:
+                    first_message += "\n\n" + _TAKE_OVER_MESSAGE.format(
+                        calls=experiment.tool_calls_total,
+                        minutes=round(experiment.duration_s / 60),
+                        notice=session.resume_notice(),
+                    )
 
                 reason = await run_session(
                     agent,

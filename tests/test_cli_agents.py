@@ -299,9 +299,10 @@ def test_claude_uses_an_isolated_config_dir(tmp_path, monkeypatch) -> None:
     assert str(user_home / ".claude") not in agent.host_read_paths()
 
 
-async def test_claude_config_home_is_per_task_and_cleaned(tmp_path) -> None:
+async def test_claude_config_home_is_per_task_and_cleaned(tmp_path, monkeypatch) -> None:
     """Each task gets its OWN empty config home seeded with only auth (so no memory/history from a
     prior task leaks in), and the home is removed on close so nothing accumulates."""
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))  # no real login in this test
     home = tmp_path / "claude-home"
     home.mkdir()
     (home / ".credentials.json").write_text("{}")  # the persistent login at the root
