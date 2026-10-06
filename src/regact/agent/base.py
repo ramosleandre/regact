@@ -99,6 +99,11 @@ class CodeAgent(ABC):
         """
         return None
 
+    def usage_limit_reset(self, message: str) -> float | None:
+        """The UNIX time at which the usage limit named by a backend error resets, or ``None``
+        when the error is not a usage limit this backend recognises."""
+        return None
+
     def usage(self) -> dict[str, Any] | None:
         """Token usage of the finished run, read after :meth:`close` (``None`` if not tracked)."""
         return None

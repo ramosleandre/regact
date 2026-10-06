@@ -144,6 +144,8 @@ Managed protocols measure online interaction; their best observed result is not 
 
 ## Competition (Kaggle)
 
+**Usage limits:** when a backend error is a usage limit the agent adapter recognises (Claude Code's "You've hit your session limit · resets 7:20pm (Europe/Paris)"), the run sleeps until the reset instead of ending, if the reset is at most 6 hours away and before `limits.experiment_deadline_unix`. The task clock is paused meanwhile: `duration_s` excludes the wait, and `usage_limit_waits` / `usage_limit_waited_s` in `logs/experiment_state.json` record it, with `usage_limit_wait` and `usage_limit_resumed` events.
+
 **Legacy integration:** the default `competition` profile combines `single_instance` with policy search, whose on-environment evaluator rejects that lifecycle. Vanilla/CWM now support persistent environments, but that does not establish compatibility with the Kaggle adapter or online ARC reset scopes. The entry point below is not a validated v5 competition launch.
 
 The Kaggle path uses argparse instead of Hydra:

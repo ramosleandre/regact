@@ -38,6 +38,8 @@ class ExperimentState:
     duration_s: float = 0.0  # wall-clock the agent has spent on this task so far
     env_moves: int = 0
     main_metrics: dict[str, Any] | None = None  # the problem's main scores, as last computed
+    usage_limit_waits: int = 0  # times the run slept until a backend usage limit reset
+    usage_limit_waited_s: float = 0.0  # seconds slept that way; not counted in duration_s
     turn: int = 0  # 1-indexed turn in progress (0 before the first)
     agent_usage: dict[str, Any] | None = None  # CLI agents: tokens per model, set at close
     schema_version: int = 3

@@ -230,6 +230,47 @@ async def test_pipeline_survives_a_transient_backend_error(tmp_path: Path) -> No
     assert "agent_error_retry" in (stack.logs / "events.jsonl").read_text()
 
 
+async def test_a_usage_limit_is_waited_out_with_the_task_clock_paused(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from regact.orchestration import loop
+
+    monkeypatch.setattr(loop, "_USAGE_LIMIT_MARGIN_S", 0)
+
+    class LimitedAgent(ScriptedAgent):
+        def usage_limit_reset(self, message: str) -> float | None:
+            return time.time() + 1.2 if "session limit" in message else None
+
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(max_seconds_per_task=1)  # shorter than the wait itself
+    limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
+    limited = [[limit, IterationComplete()] for _ in range(4)]
+    agent = LimitedAgent([*limited, [ToolCall("c1", "ExitTask", {}), IterationComplete()]])
+    reason = await stack.run(agent)
+
+    # Four limits in a row: more than the error-retry allowance, and 4.8 s of waiting against
+    # a 1 s task budget. Neither ended the run.
+    assert reason == "agent_exit"
+    assert stack.experiment.usage_limit_waits == 4
+    assert stack.experiment.usage_limit_waited_s >= 4.0
+    assert stack.experiment.duration_s < 1.0
+    events = (stack.logs / "events.jsonl").read_text()
+    assert events.count('"usage_limit_wait"') == 4 and "usage_limit_resumed" in events
+
+
+async def test_a_usage_limit_that_resets_too_late_ends_the_run(tmp_path: Path) -> None:
+    class LimitedAgent(ScriptedAgent):
+        def usage_limit_reset(self, message: str) -> float | None:
+            return time.time() + 3600
+
+    stack = _Stack(tmp_path)
+    stack.limits = LimitsConfig(experiment_deadline_unix=int(time.time()) + 600)
+    limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
+    reason = await stack.run(LimitedAgent([[limit, IterationComplete()]] * 5))
+
+    assert reason == "agent_api" and stack.experiment.usage_limit_waits == 0
+
+
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     stack.limits = LimitsConfig(max_turns_per_task=2)

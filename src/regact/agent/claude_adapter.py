@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from regact.agent.base import executable_paths
 from regact.agent.capabilities import Capabilities
@@ -53,6 +57,39 @@ def claude_deny_settings(
     if deny_images:  # a text-only model rejects any request that carries an image
         deny += [f"Read(**/*.{suffix})" for suffix in _IMAGE_SUFFIXES]
     return {"permissions": {"deny": deny}}
+
+
+# "You've hit your session limit - resets 7:20pm (Europe/Paris)"; weekly limits add a date
+# ("resets Oct 12, 8am (Europe/Paris)").
+_LIMIT_RESET = re.compile(
+    r"limit.*resets\s+(?:(?P<month>[A-Za-z]{3})\s+(?P<day>\d{1,2}),?\s+)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<half>am|pm)\s*\((?P<zone>[^)]+)\)",
+    re.IGNORECASE,
+)
+
+
+def limit_reset_unix(message: str, now: float) -> float | None:
+    """When the usage limit in a Claude Code error message resets, as UNIX time: the next
+    occurrence of the stated local time after ``now``. ``None`` for any other message."""
+    match = _LIMIT_RESET.search(message)
+    if match is None:
+        return None
+    try:
+        zone = ZoneInfo(match["zone"].strip())
+        current = datetime.fromtimestamp(now, zone)
+        hour = int(match["hour"]) % 12 + (12 if match["half"].lower() == "pm" else 0)
+        minute = int(match["minute"] or 0)
+        reset = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if match["month"]:
+            dated = datetime.strptime(f"{match['month']} {match['day']}", "%b %d")
+            reset = reset.replace(month=dated.month, day=dated.day)
+            if reset <= current:
+                reset = reset.replace(year=reset.year + 1)
+        elif reset <= current:
+            reset += timedelta(days=1)
+    except (ValueError, KeyError):
+        return None
+    return reset.timestamp()
 
 
 class ClaudeAgent(_CliAgent):
@@ -167,6 +204,9 @@ class ClaudeAgent(_CliAgent):
         self._usage = claude_usage(self._session_home)  # before the home and its logs are deleted
         shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
+
+    def usage_limit_reset(self, message: str) -> float | None:
+        return limit_reset_unix(message, time.time())
 
     def usage(self) -> dict[str, Any] | None:
         return self._usage

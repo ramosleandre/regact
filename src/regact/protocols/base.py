@@ -82,8 +82,9 @@ class ProtocolSession(ABC):
         """Optional trusted initialization before the agent starts (never in dry runs)."""
         return None
 
-    def on_start(self, start: float) -> None:
-        """Receive the common session clock, after bootstrap."""
+    def on_start(self, start: float, seconds: float | None) -> None:
+        """Receive the common session clock and the task's time budget from it (None = no
+        limit): after bootstrap, and again whenever the clock was paused."""
         return None
 
     async def close(self) -> None:

@@ -1128,9 +1128,8 @@ class ManagedSession(ProtocolSession):
             context.experiment.save(str(self.coordinator.output / "logs/experiment_state.json"))
         await asyncio.to_thread(self.coordinator.collect_initial, stop)
 
-    def on_start(self, start: float) -> None:
-        budget = self.coordinator.config.limits.seconds_left()
-        self.coordinator.deadline = start + budget if budget is not None else float("inf")
+    def on_start(self, start: float, seconds: float | None) -> None:
+        self.coordinator.deadline = start + seconds if seconds is not None else float("inf")
 
     async def close(self) -> None:
         context = self.coordinator.context

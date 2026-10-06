@@ -67,6 +67,10 @@ _FLAGGING_WARNING = (
 # A single backend error (one 500/timeout from a slow local server) must not end the
 # session; only a wall of them means the backend is really gone.
 _MAX_CONSECUTIVE_ERROR_TURNS = 3
+# A backend usage limit (a subscription window) is waited out instead of ending the run, when it
+# resets within this long. The margin covers a reset that lands slightly late.
+_MAX_USAGE_LIMIT_WAIT_S = 6 * 3600
+_USAGE_LIMIT_MARGIN_S = 60
 _ERROR_RETRY_MESSAGE = (
     "Your previous turn was interrupted by a backend error. "
     "Continue working from where you left off."
@@ -108,6 +112,7 @@ class _TurnOutcome:
 
     saw_tool_call: bool = False  # agent emitted >=1 tool call (framework, bash, or native)
     error_category: ErrorCategory | None = None  # a backend error in the stream
+    error_message: str = ""
     crashed: bool = False  # an unexpected exception escaped the turn
     pending_tools: set[str] = field(default_factory=set)  # calls awaiting their matching result
 
@@ -132,7 +137,7 @@ async def run_session(
     """Drive one task to completion; return the exit reason."""
     start = time.monotonic()
     limits = dataclasses.replace(limits, max_seconds_per_task=limits.seconds_left())
-    protocol.on_start(start)
+    protocol.on_start(start, limits.max_seconds_per_task)
     ctx = _LoopContext(
         agent=agent,
         experiment=experiment,
@@ -189,6 +194,24 @@ async def run_session(
                 break
             if outcome.error_category is not None:
                 experiment.last_error_category = outcome.error_category.value
+                wait = _usage_limit_wait(agent.usage_limit_reset(outcome.error_message), limits)
+                if wait is not None:
+                    if watchdog is not None:
+                        watchdog.cancel()
+                    waited = await _sleep_through_usage_limit(wait, ctx)
+                    if waited is None:
+                        reason = "interrupted"
+                        break
+                    # The task clock does not run while the backend refuses work.
+                    start += waited
+                    ctx.start = start
+                    limits = _budget_after_pause(limits, start)
+                    protocol.on_start(start, limits.max_seconds_per_task)
+                    watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
+                    error_turns = 0
+                    turns += 1
+                    message = _ERROR_RETRY_MESSAGE
+                    continue
                 error_turns += 1
                 if error_turns >= _MAX_CONSECUTIVE_ERROR_TURNS:
                     reason = outcome.error_category.value
@@ -240,6 +263,48 @@ async def run_session(
     )
     _save_state(ctx)
     return reason
+
+
+def _usage_limit_wait(reset_unix: float | None, limits: LimitsConfig) -> float | None:
+    """Seconds to sleep until a backend usage limit resets, or None when the error is not such a
+    limit, or waiting is pointless (too long, or past the experiment's own deadline)."""
+    if reset_unix is None:
+        return None
+    resume_unix = reset_unix + _USAGE_LIMIT_MARGIN_S
+    wait = resume_unix - time.time()
+    deadline = limits.experiment_deadline_unix
+    if wait > _MAX_USAGE_LIMIT_WAIT_S or (deadline is not None and resume_unix >= deadline):
+        return None
+    return max(wait, 0.0)
+
+
+async def _sleep_through_usage_limit(seconds: float, ctx: _LoopContext) -> float | None:
+    """Sleep until the limit resets, recording the wait; None when the run was interrupted."""
+    ctx.logger.log(
+        LogComponent.ORCHESTRATOR, "WARNING", "usage_limit_wait", seconds=round(seconds, 1)
+    )
+    began = time.monotonic()
+    while (left := seconds - (time.monotonic() - began)) > 0:
+        if ctx.interrupted or (ctx.stop is not None and ctx.stop.is_set()):
+            return None
+        await asyncio.sleep(min(left, 5.0))
+    waited = time.monotonic() - began
+    ctx.experiment.usage_limit_waits += 1
+    ctx.experiment.usage_limit_waited_s = round(ctx.experiment.usage_limit_waited_s + waited, 1)
+    ctx.logger.log(
+        LogComponent.ORCHESTRATOR, "INFO", "usage_limit_resumed", waited_seconds=round(waited, 1)
+    )
+    return waited
+
+
+def _budget_after_pause(limits: LimitsConfig, start: float) -> LimitsConfig:
+    """The pause left the task's time budget untouched, but the experiment's absolute deadline
+    kept running: cut the budget to what that deadline still allows."""
+    budget, deadline = limits.max_seconds_per_task, limits.experiment_deadline_unix
+    if budget is None or deadline is None:
+        return limits
+    allowed = int(time.monotonic() - start + max(0.0, deadline - time.time()))
+    return dataclasses.replace(limits, max_seconds_per_task=min(budget, allowed))
 
 
 def _save_state(ctx: _LoopContext) -> None:
@@ -445,6 +510,7 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
             message=event.message,
         )
         outcome.error_category = event.category
+        outcome.error_message = event.message
     # Include flags raised by trusted HTTP handlers during the tool, even if the
     # shell caught the denial and returned success. Wait for parallel calls too.
     if isinstance(event, (ToolCall, ToolResult)) and not outcome.pending_tools:
