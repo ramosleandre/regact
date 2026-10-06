@@ -130,7 +130,7 @@ run_task_bench() {
         agent="${AGENT}" \
         agent.model="openai/${MODEL_NAME}" \
         agent.base_url="${BASE}" \
-        agent.api_key="${OPENAI_API_KEY}" \
+        ++agent.api_key="${OPENAI_API_KEY}" \
         problem="${PROBLEM}" \
         "problem.tasks=[${task}]" \
         problem.lifecycle=multi_instance \
