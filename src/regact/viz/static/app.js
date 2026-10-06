@@ -677,7 +677,7 @@ async function renderGameGraphs(name) {
 }
 
 // ---------------------------------------------------------------- per-game shell
-const TABS = [["", "Overview"], ["cwm", "CWM"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
+const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
 
 function shell(name, active, body) {
   crumb.textContent = name;
@@ -689,7 +689,6 @@ function shell(name, active, body) {
   back.href = parent ? "#run/" + encodeURIComponent(parent) : "#";
   nav.append(back);
   for (const [slug, label] of TABS) {
-    if (slug === "cwm" && _cache[name]?.config?.protocol?.name !== "cwm") continue;
     const href = "#game/" + encodeURIComponent(name) + (slug ? "/" + slug : "");
     const a = h("a", "tab" + (slug === active ? " on" : ""), label);
     a.href = href;
@@ -846,7 +845,6 @@ async function renderOverview(name) {
   const specs = metricSpecs([{ metrics: m }]).filter((s) => s.get && !s.count && !s.categorical);
   const fmtOf = (s) => { const v = s.get(m); return v != null && s.fmt ? s.fmt(v) : fmtMetric(v); };
   const isMain = (s) => s.main;
-  if (m.protocol === "cwm") wrap.append(h("p", "muted", "CWM protocol · score below = latest real exploration. Open CWM for best progress, phases and replay."));
   const main = [["Status", statusOf(m)], ...specs.filter(isMain).map((s) => [s.label, fmtOf(s)])];
   const other = [
     ...specs.filter((s) => !isMain(s)).map((s) => [s.label, fmtOf(s)]),
@@ -1236,23 +1234,57 @@ function controllerReplay(game, id) {
 }
 
 // ---------------------------------------------------------------- artifacts tab
+// A classic file tree: folders first, closed until clicked; onFile(file, element) opens a file.
+function fileTree(files, onFile) {
+  const root = { dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.relpath.split("/");
+    let node = root;
+    for (const part of parts.slice(0, -1)) {
+      if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+      node = node.dirs.get(part);
+    }
+    node.files.push({ name: parts[parts.length - 1], file: f });
+  }
+  const render = (node, depth) => {
+    const box = h("div");
+    for (const name of [...node.dirs.keys()].sort()) {
+      const head = h("div", "fileitem treedir", "\u25B8 " + name + "/");
+      const body = render(node.dirs.get(name), depth + 1);
+      head.style.paddingLeft = 10 + depth * 14 + "px";
+      body.hidden = true;
+      head.onclick = () => {
+        body.hidden = !body.hidden;
+        head.textContent = (body.hidden ? "\u25B8 " : "\u25BE ") + name + "/";
+      };
+      box.append(head, body);
+    }
+    for (const entry of node.files.sort((a, b) => a.name.localeCompare(b.name))) {
+      const item = h("div", "fileitem", entry.name);
+      item.style.paddingLeft = 10 + depth * 14 + "px";
+      item.title = entry.file.relpath;
+      item.onclick = () => onFile(entry.file, item);
+      box.append(item);
+    }
+    return box;
+  };
+  return render(root, 0);
+}
+
 async function renderArtifacts(name) {
   const d = await api("/api/game/artifacts?name=" + encodeURIComponent(name));
   const wrap = h("div", "split");
   const list = h("div", "filelist");
   const view = h("div", "fileview", h("div", "muted", "select a file"));
   list.append(h("div", "h", "Workdir files"));
-  for (const f of d.files) {
-    const item = h("div", "fileitem", f.relpath);
-    item.onclick = () => {
-      [...list.querySelectorAll(".fileitem")].forEach((x) => x.classList.remove("on"));
-      item.classList.add("on");
-      clear(view);
-      view.append(h("h3", null, f.relpath),
-        f.too_large ? h("div", "muted", `Preview omitted: ${fmt(f.size_bytes)} bytes exceeds the 200,000-byte automatic preview limit. The complete file is retained in the run's workdir.`) : h("pre", "code", f.content));
-    };
-    list.append(item);
-  }
+  const show = (f, item) => {
+    [...list.querySelectorAll(".fileitem")].forEach((x) => x.classList.remove("on"));
+    item.classList.add("on");
+    clear(view);
+    view.append(h("h3", null, f.relpath),
+      f.too_large ? h("div", "muted", `Preview omitted: ${fmt(f.size_bytes)} bytes exceeds the 200,000-byte automatic preview limit. The complete file is retained in the run's workdir.`) : h("pre", "code", f.content));
+  };
+  list.append(fileTree(d.files, show));
   if (!d.files.length) list.append(h("div", "muted", "none"));
   wrap.append(list, view);
 
@@ -1270,11 +1302,8 @@ async function renderArtifacts(name) {
     }
     subs.append(c);
   }
-  if (_cache[name]?.config?.protocol?.name === "cwm") {
-    const link = h("a", null, "Open CWM: frozen versions, counterexamples and reconstructed trajectories");
-    link.href = "#game/" + encodeURIComponent(name) + "/cwm";
-    shell(name, "artifacts", h("div", null, wrap, link));
-  } else shell(name, "artifacts", h("div", null, wrap, subs));
+  const cwm = _cache[name]?.config?.protocol?.name === "cwm";
+  shell(name, "artifacts", cwm ? wrap : h("div", null, wrap, subs));
 }
 
 // ---------------------------------------------------------------- logs tab
@@ -1304,209 +1333,6 @@ async function renderLogs(name) {
 }
 
 
-// ---------------------------------------------------------------- CWM protocol
-async function renderCWM(name) {
-  const prefix = '/api/game/cwm?name=' + encodeURIComponent(name);
-  const d = await api(prefix);
-  const wrap = h('div');
-  const refresh = h('button', null, 'Refresh');
-  refresh.onclick = route;
-  wrap.append(h('h2', null, 'Code world model'), refresh,
-    metricTable('Current state', [
-      ['Phase', d.status.phase], ['Exit reason', d.status.exit_reason || 'running'],
-      ['Unique observations', d.status.n_unique_observations], ['Unique transitions', d.status.n_unique_transitions],
-      ['Real actions', d.status.n_total_transitions], ['CWM version', d.status.accepted_cwm?.cwm_version ?? '—'],
-      ['Latest real exploration', aggLine(d.status.latest_exploration?.aggregate)],
-      ['Best observed exploration', aggLine(d.status.best_exploration?.aggregate)]
-    ]));
-  if (d.status.initial_collection) wrap.append(h('details', null, h('summary', null, 'Initial random collection'), h('pre', 'code', JSON.stringify(d.status.initial_collection, null, 2))));
-  const events = h('details', null, h('summary', null, 'Phase history'));
-  for (const event of d.phase_events) events.append(h('pre', 'code', `${new Date(event.timestamp * 1000).toISOString()} · ${event.kind}\n${JSON.stringify(event.payload, null, 2)}`));
-  wrap.append(events, h('p', 'muted', 'Real playback reads recorded observation IDs. Plan playback reruns saved actions in the frozen model; it does not rerun search or touch the real environment. No videos are stored.'));
-
-  function player(kind, id) {
-    const box = h('div', 'card');
-    const button = h('button', null, `Load ${kind === 'episode' ? 'real episode' : kind === 'simulation' ? 'exploration simulation' : 'predicted plan'} ${id}`);
-    const query = `name=${encodeURIComponent(name)}&kind=${kind}&identifier=${id}`;
-    const token = navigation;
-    let disposed = false, timer = null, request = null, imageURL = null, serial = 0;
-    const stop = () => { clearTimeout(timer); timer = null; playing = false; if (play) play.textContent = 'Play'; };
-    let playing = false, play = null;
-    pageCleanups.push(() => {
-      disposed = true; stop(); request?.abort(); if (imageURL) URL.revokeObjectURL(imageURL);
-    });
-    box.append(button);
-    button.onclick = async () => {
-      button.disabled = true;
-      try {
-        const loaded = await api('/api/game/cwm/load?' + query, {method:'POST'});
-        checkNavigation(token);
-        const image = h('img'); image.style.cssText = 'max-width:100%;max-height:450px;image-rendering:pixelated;display:block';
-        image.alt = 'Reconstructed observation';
-        const slider = h('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(loaded.frames - 1); slider.step = '1'; slider.value = '0';
-        slider.setAttribute('aria-label', 'Episode frame');
-        slider.style.width = `min(100%, ${Math.max(30, (loaded.frames - 1) * 28 + 16)}px)`;
-        slider.hidden = loaded.frames <= 1;
-        const ticks = h('datalist'); ticks.id = `frames-${kind}-${id}-${Math.random().toString(36).slice(2)}`;
-        slider.setAttribute('list', ticks.id);
-        for (let i = 0; i < loaded.frames; i += Math.max(1, Math.ceil(loaded.frames / 40))) {
-          const tick = h('option'); tick.value = String(i); ticks.append(tick);
-        }
-        const label = h('div'), errorBox = h('div', 'err');
-        const details = h('details', null, h('summary', null, 'Frame data and evidence IDs'));
-        const raw = h('pre', 'code'); details.append(raw);
-        const prev = h('button', null, 'Previous'), next = h('button', null, 'Next');
-        play = h('button', null, 'Play');
-        const updateButtons = () => {
-          prev.disabled = Number(slider.value) === 0;
-          next.disabled = Number(slider.value) >= loaded.frames - 1;
-          play.disabled = loaded.frames <= 1;
-        };
-        const show = async () => {
-          request?.abort(); request = new AbortController();
-          const signal = request.signal, ticket = ++serial, index = slider.value;
-          updateButtons();
-          try {
-            const url = '/api/game/cwm/frame?' + query + '&index=' + index;
-            const [frame, response] = await Promise.all([
-              api(url, {signal}), fetch(url + '&image=true', {signal, cache:'no-store'})
-            ]);
-            if (!response.ok) throw new Error(`Frame image HTTP ${response.status}: ${await response.text()}`);
-            const blob = await response.blob();
-            if (disposed || ticket !== serial || token !== navigation) return false;
-            const nextURL = URL.createObjectURL(blob);
-            if (imageURL) URL.revokeObjectURL(imageURL);
-            imageURL = nextURL; image.src = nextURL;
-            label.textContent = `${loaded.kind} · frame ${Number(index)+1}/${loaded.frames} · ${loaded.source}`;
-            raw.textContent = JSON.stringify(frame, null, 2); errorBox.textContent = '';
-            return true;
-          } catch (error) {
-            if (!disposed && ticket === serial && error.name !== 'AbortError') { errorBox.textContent = error.message; stop(); }
-            return false;
-          }
-        };
-        const advance = async () => {
-          if (!playing || disposed) return;
-          if (Number(slider.value) >= loaded.frames - 1) { stop(); return; }
-          slider.value = String(Number(slider.value) + 1);
-          if (await show() && playing) timer = setTimeout(advance, 250);
-        };
-        play.onclick = async () => {
-          if (playing) { stop(); return; }
-          playing = true; play.textContent = 'Pause';
-          if (Number(slider.value) >= loaded.frames - 1) { slider.value = '0'; if (!await show()) return; }
-          if (playing) timer = setTimeout(advance, 250);
-        };
-        slider.oninput = () => { stop(); void show(); };
-        prev.onclick = () => { stop(); slider.value = String(Math.max(0, Number(slider.value)-1)); void show(); };
-        next.onclick = () => { stop(); slider.value = String(Math.min(loaded.frames-1, Number(slider.value)+1)); void show(); };
-        const reload = h('button', null, 'Reload frames');
-        reload.onclick = async () => {
-          stop(); request?.abort(); ++serial; reload.disabled = true;
-          try { await button.onclick(); } finally { reload.disabled = false; }
-        };
-        box.replaceChildren(label, image, slider, ticks, h('div', null, prev, play, next, reload), errorBox, details);
-        if (loaded.frames === 1) label.textContent = 'Single frame';
-        await show();
-      } catch (error) {
-        if (!disposed && error.name !== 'AbortError') { box.append(h('pre', 'err', error.message)); button.disabled = false; }
-      }
-    };
-    return box;
-  }
-  const episodes = h('details', null, h('summary', null, `Real episodes (${d.episodes.length}, includes initial collection)`));
-  for (const episode of d.episodes) episodes.append(h('p', null, `Episode ${episode.id} · ${episode.purpose.replaceAll("_", " ")} · ${episode.status}${episode.stop_reason ? " (" + episode.stop_reason.replaceAll("_", " ") + ")" : ""}`), player('episode', episode.id));
-  wrap.append(episodes, h('h2', null, 'Validations, plans and explorations'));
-  const records = h('div'); wrap.append(records);
-  function addRecords(rows) {
-    for (const record of rows) {
-      const p = record.payload;
-      const card = h('div', 'card', h('h3', null, `#${record.id} ${record.kind} · ${record.status}`));
-      if (p.goal) card.append(h('p', null, p.goal));
-      card.append(h('p', 'muted', [p.stop_reason, p.search_stop_reason, p.cwm_version != null ? `CWM version ${p.cwm_version}` : '', p.dataset_version != null ? `dataset ${p.dataset_version}` : ''].filter(Boolean).join(' · ')));
-      const detail = h('details', null, h('summary', null, 'Result and provenance'), h('pre', 'code', JSON.stringify(p, null, 2))); card.append(detail);
-      if (p.simulation_action_sequence) card.append(player('simulation', record.id));
-      if (record.kind === 'plan' && p.candidate_found) card.append(player('plan', record.id));
-      if (p.episode_id) card.append(player('episode', p.episode_id));
-      const examples = p.validation?.counterexamples || (p.diagnostic_id ? [{diagnostic_id:p.diagnostic_id}] : []);
-      for (const example of examples) {
-        if (!example.diagnostic_id) {
-          if (example.observation_ids?.length) {
-            const compare = h('button', null, `Compare observations ${example.observation_ids.join(' / ')}`);
-            compare.onclick = () => {
-              compare.disabled = true;
-              const figures = h('div'); figures.style.cssText = 'display:flex;flex-wrap:wrap;gap:16px';
-              for (const id of example.observation_ids) {
-                const img = h('img'); img.alt = `Observation ${id}`;
-                img.style.cssText = 'max-width:100%;width:320px;image-rendering:pixelated';
-                img.src = `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=observation&identifier=${id}`;
-                img.onerror = () => img.replaceWith(h('p','err','Image unavailable; use the data API to inspect this observation.'));
-                figures.append(h('figure',null,h('figcaption',null,`Observation ${id}`),img));
-              }
-              card.append(figures);
-            };
-            card.append(compare);
-          }
-          continue;
-        }
-        const load = h('button', null, `Load counterexample ${example.diagnostic_id}`);
-        load.onclick = async () => {
-          try {
-            load.disabled = true;
-            const evidence = await api(`/api/game/cwm/evidence?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${example.diagnostic_id}`);
-            const comparison = h('div', 'card');
-            const figures = h('div'); figures.style.cssText = 'display:flex;flex-wrap:wrap;gap:16px';
-            for (const [side, label] of [['predicted','Predicted'],['observed','Observed'],['first_output','First output'],['second_output','Second output']]) {
-              if (!evidence[side]?.frame) continue;
-              const img = h('img'); img.alt = label + ' observation';
-              img.style.cssText = 'max-width:100%;width:320px;image-rendering:pixelated';
-              img.src = `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${example.diagnostic_id}&side=${side}`;
-              img.onerror = () => { img.replaceWith(h('p','err','Image unavailable; inspect raw evidence below.')); };
-              figures.append(h('figure', null, h('figcaption', null, label), img));
-            }
-            comparison.append(figures);
-            const diffs = evidence.differences || p.differences;
-            if (diffs?.length) comparison.append(h('pre','code',JSON.stringify(diffs,null,2)));
-            comparison.append(h('p','muted','Images show frame differences. Reward, completion, actions and info may differ too.'),
-              h('details',null,h('summary',null,'Raw evidence and IDs'),h('pre','code',JSON.stringify(evidence,null,2))));
-            card.append(comparison);
-          } catch (error) { load.disabled = false; card.append(h('pre', 'err', error.message)); }
-        }; card.append(load);
-      }
-      if (p.bundle) {
-        const showCode = h('button', null, 'Inspect frozen code');
-        showCode.onclick = async () => {
-          try {
-            const url = `/api/game/cwm/source?name=${encodeURIComponent(name)}&bundle=${p.bundle}`;
-            const listing = await api(url);
-            const select = h('select');
-            for (const filename of listing.files) { const option=h('option',null,filename); option.value=filename; select.append(option); }
-            const code = h('pre','code'); let selection = 0;
-            select.onchange = async () => {
-              const ticket = ++selection;
-              try { const source = (await api(url+'&filename='+encodeURIComponent(select.value))).source; if (ticket === selection) code.textContent=source; }
-              catch(error) { if (ticket === selection && error.name !== 'AbortError') code.textContent=error.message; }
-            };
-            card.append(select,code); showCode.disabled=true; await select.onchange();
-          } catch(error) { card.append(h('pre','err',error.message)); }
-        }; card.append(showCode);
-      }
-      records.append(card);
-    }
-  }
-  addRecords(d.records);
-  let before = d.next_before;
-  const more = h('button', null, 'Load older records'); more.hidden = !before;
-  more.onclick = async () => {
-    more.disabled = true;
-    try { const page = await api(prefix + '&before=' + before); addRecords(page.records); before = page.next_before; more.hidden = !before; }
-    catch (error) { if (error.name !== 'AbortError') records.append(h('pre', 'err', error.message)); }
-    finally { more.disabled = false; }
-  };
-  wrap.append(more);
-  shell(name, 'cwm', wrap);
-}
-
 // ---------------------------------------------------------------- routing
 async function route() {
   navigation.abort();
@@ -1526,7 +1352,6 @@ async function route() {
     await gameDetail(name);
     const tab = parts[2] || "";
     if (tab === "conversation") await renderConversation(name);
-    else if (tab === "cwm") await renderCWM(name);
     else if (tab === "artifacts") await renderArtifacts(name);
     else if (tab === "logs") await renderLogs(name);
     else if (tab === "graphs") await renderGameGraphs(name);

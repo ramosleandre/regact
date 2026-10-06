@@ -107,6 +107,7 @@ video { width: 100%; max-width: 420px; border: 1px solid var(--line); border-rad
 .fileitem { padding: 6px 10px; cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px; }
 .fileitem:hover { background: var(--panel2); }
 .fileitem.on { background: var(--panel2); color: var(--accent); }
+.fileitem.treedir { color: var(--muted); }
 .fileview { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); min-height: 120px; }
 pre.code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--panel2);
   padding: 10px; border-radius: 8px; max-height: 70vh; overflow: auto; }
