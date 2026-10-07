@@ -137,6 +137,7 @@ class CodexAgent(_CliAgent):
         for key, arg in (
             ("model_context_window", "context_window"),
             ("model_max_output_tokens", "max_output_tokens"),
+            ("model_auto_compact_token_limit", "auto_compact_token_limit"),
         ):
             if self._args.get(arg):
                 lines.append(f"{key} = {int(self._args[arg])}")
@@ -147,6 +148,9 @@ class CodexAgent(_CliAgent):
             f"base_url = {json.dumps(url)}",
             'wire_api = "responses"',
         ]
+        # A slow serve can take minutes before its first token on a long prompt.
+        if self._args.get("stream_idle_timeout_ms"):
+            lines.append(f"stream_idle_timeout_ms = {int(self._args['stream_idle_timeout_ms'])}")
         return "\n".join(lines) + "\n"
 
     async def close(self) -> None:
