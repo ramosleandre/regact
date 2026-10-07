@@ -519,7 +519,13 @@ async def test_claude_base_url_points_at_a_local_anthropic_server(tmp_path) -> N
 
 async def test_codex_base_url_writes_a_local_responses_provider(tmp_path, monkeypatch) -> None:
     agent = CodexAgent(
-        {"codex_home": str(tmp_path / "home"), "context_window": 120000, "max_output_tokens": 8192}
+        {
+            "codex_home": str(tmp_path / "home"),
+            "context_window": 120000,
+            "max_output_tokens": 8192,
+            "auto_compact_token_limit": 90000,
+            "stream_idle_timeout_ms": 1800000,
+        }
     )
     monkeypatch.setattr(agent, "_freshest_auth", lambda: None)
     cwd = tmp_path / "workdir"
@@ -540,6 +546,8 @@ async def test_codex_base_url_writes_a_local_responses_provider(tmp_path, monkey
         provider = config["model_providers"]["local"]
         assert provider["base_url"] == "http://10.0.0.5:8080/v1"
         assert provider["wire_api"] == "responses"
+        assert provider["stream_idle_timeout_ms"] == 1800000
+        assert config["model_auto_compact_token_limit"] == 90000
         assert agent.host_egress_hosts() == ["10.0.0.5"]  # a remote endpoint still needs egress
     finally:
         await agent.close()

@@ -3,7 +3,9 @@ name: codex
 model: gpt-5.6-luna            # e.g. "gpt-5.6-luna"
 # A self-hosted Responses-API server instead of the subscription (server root; /v1 is
 # appended): agent.base_url=http://127.0.0.1:8080 agent.model=<served name>
-# +agent.args.context_window=<served ctx> +agent.args.max_output_tokens=<cap>.
+# +agent.args.context_window=<served ctx> +agent.args.max_output_tokens=<cap>. For a slow serve:
+# +agent.args.stream_idle_timeout_ms=<ms> (how long Codex waits for the next token) and
+# +agent.args.auto_compact_token_limit=<tokens> (compact earlier, while the history is short).
 base_url: null
 
 # Whether the model reads images; the launcher sets it (true for the subscription models).
