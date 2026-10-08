@@ -170,7 +170,7 @@ async def run_session(
 
     message = first_message
     turns = experiment.turn
-    error_turns = 0  # consecutive turns that ended in a backend error
+    error_turns = 0  # consecutive turns that ended in a backend error without any tool call
     no_tool_turns = 0  # consecutive turns that produced no tool call (doom-loop breaker)
     reminders = 0
     watchdog = _spawn_walltime_watchdog(agent, start, limits.max_seconds_per_task)
@@ -227,7 +227,9 @@ async def run_session(
                     turns += 1
                     message = _ERROR_RETRY_MESSAGE
                     continue
-                error_turns += 1
+                # A turn that worked before failing (a CLI agent's turn can hold hours of tool
+                # calls) starts the count again: only errors with nothing in between add up.
+                error_turns = 1 if outcome.saw_tool_call else error_turns + 1
                 if error_turns >= _MAX_CONSECUTIVE_ERROR_TURNS:
                     reason = outcome.error_category.value
                     break

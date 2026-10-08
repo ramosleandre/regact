@@ -214,6 +214,26 @@ async def test_pipeline_stops_on_persistent_backend_error(tmp_path: Path) -> Non
     assert Path(stack.state_path).exists()  # artifacts still written on error
 
 
+async def test_errors_at_the_end_of_turns_that_worked_do_not_add_up(tmp_path: Path) -> None:
+    """A CLI agent's turn can hold many tool calls and still end on a backend error (an answer
+    over the output cap, say). Such turns are progress, not a dead backend."""
+    stack = _Stack(tmp_path)
+
+    def working_then_failing(i: int) -> list:
+        return [
+            ToolCall(f"c{i}", "Bash", {}),
+            ToolResult(f"c{i}", "done"),
+            AgentError(ErrorCategory.AGENT_API, "response exceeded the output token maximum"),
+            IterationComplete(),
+        ]
+
+    turns = [working_then_failing(i) for i in range(5)]
+    agent = ScriptedAgent([*turns, [ToolCall("x", "ExitTask", {}), IterationComplete()]])
+    reason = await stack.run(agent)
+
+    assert reason == "agent_exit" and stack.experiment.tool_calls_total == 6
+
+
 async def test_pipeline_survives_a_transient_backend_error(tmp_path: Path) -> None:
     """One failed turn (e.g. a 500 from a slow local server) must not kill the session."""
     stack = _Stack(tmp_path)
