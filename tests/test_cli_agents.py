@@ -638,3 +638,41 @@ async def test_claude_bash_timeout_sets_default_and_keeps_ceiling_above_it(
         assert agent._env_overrides["BASH_MAX_TIMEOUT_MS"] == ceiling
     finally:
         await agent.close()
+
+
+def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatch):
+    """A run started from inside another agent session must not inherit that session's settings;
+    credentials and ordinary variables still pass, and the adapter's own values win."""
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    for name in ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_EFFORT", "ANTHROPIC_MODEL"):
+        monkeypatch.setenv(name, "from-launcher")
+    monkeypatch.setenv("MAX_THINKING_TOKENS", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    monkeypatch.setenv("CODEX_THREAD_ID", "from-launcher")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://elsewhere")
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.setenv("SOME_PROXY", "kept")
+
+    claude = ClaudeAgent({"claude_home": str(tmp_path / "ch"), "max_thinking_tokens": 2000})
+    claude._cwd = str(tmp_path / "claude-wd")
+    claude._configure_workdir()
+    env = claude._launch_env()
+    assert not {
+        "CLAUDECODE",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_EFFORT",
+        "ANTHROPIC_MODEL",
+    } & set(env)
+    assert env["MAX_THINKING_TOKENS"] == "2000"
+    assert env["ANTHROPIC_API_KEY"] == "key" and env["SOME_PROXY"] == "kept"
+    assert env["CLAUDE_CONFIG_DIR"] == claude._config_dir()
+    assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+    settings = json.loads((tmp_path / "claude-wd/.claude/settings.json").read_text())
+    assert settings["autoMemoryEnabled"] is False
+
+    codex = CodexAgent({"codex_home": str(tmp_path / "xh")})
+    codex._cwd = str(tmp_path / "codex-wd")
+    codex._configure_workdir()
+    env = codex._launch_env()
+    assert "CODEX_THREAD_ID" not in env and "OPENAI_BASE_URL" not in env
+    assert env["OPENAI_API_KEY"] == "key" and env["CODEX_HOME"] == codex._config_dir()

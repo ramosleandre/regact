@@ -37,6 +37,9 @@ from regact.agent.usage import codex_usage
 class CodexAgent(_CliAgent):
     """``CodeAgent`` backed by the headless codex CLI."""
 
+    _env_drop = ("CODEX_", "OPENAI_")
+    _env_keep = ("OPENAI_API_KEY",)
+
     def __init__(self, args: dict[str, object] | None = None, *, vision: bool = False) -> None:
         super().__init__(args, vision=vision)
         # Run codex against a generated, isolated home rather than the user's ~/.codex, so

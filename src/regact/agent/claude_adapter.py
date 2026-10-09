@@ -144,6 +144,17 @@ def limit_reset_unix(message: str, now: float) -> float | None:
 class ClaudeAgent(_CliAgent):
     """``CodeAgent`` backed by the headless Claude Code CLI."""
 
+    _env_drop = (
+        "CLAUDE",
+        "ANTHROPIC_",
+        "MAX_THINKING_TOKENS",
+        "BASH_DEFAULT_TIMEOUT_MS",
+        "BASH_MAX_TIMEOUT_MS",
+        "BASH_MAX_OUTPUT_LENGTH",
+        "MAX_MCP_OUTPUT_TOKENS",
+    )
+    _env_keep = ("ANTHROPIC_API_KEY",)
+
     def __init__(self, args: dict[str, object] | None = None, *, vision: bool = False) -> None:
         super().__init__(args, vision=vision)
         raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
@@ -235,12 +246,14 @@ class ClaudeAgent(_CliAgent):
         settings_dir = os.path.join(self._cwd, ".claude")
         os.makedirs(settings_dir, exist_ok=True)
         settings = claude_deny_settings(self._cwd, deny_images=not self._vision)
+        settings["autoMemoryEnabled"] = False
         settings["hooks"] = {
             "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": _NOTE_HOOK}]}]
         }
         with open(os.path.join(settings_dir, "settings.json"), "w", encoding="utf-8") as handle:
             json.dump(settings, handle, indent=2)
         self._configure_home()
+        self._env_overrides["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
         if self._base_url:  # an Anthropic-compatible server, e.g. llama.cpp's llama-server
             self._env_overrides |= {
                 "ANTHROPIC_BASE_URL": self._base_url,
@@ -358,7 +371,7 @@ class ClaudeAgent(_CliAgent):
         """
         if shutil.which("claude") is None:
             return "warn", "'claude' not on PATH"
-        env = dict(os.environ)
+        env = self._launch_env()
         config_dir = self._config_dir()
         if (token := self._run_token()) is not None:
             env[_CLI_TOKEN_ENV] = token

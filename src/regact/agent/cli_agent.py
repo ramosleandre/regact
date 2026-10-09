@@ -37,6 +37,11 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 class _CliAgent(CodeAgent):
     """Base for subprocess CLI agents; subclasses override the three hooks below."""
 
+    # Name prefixes of the variables the CLI reads as settings, and the credentials among them
+    # that are still inherited. See _launch_env.
+    _env_drop: tuple[str, ...] = ()
+    _env_keep: tuple[str, ...] = ()
+
     def __init__(self, args: dict[str, object] | None = None, *, vision: bool = False) -> None:
         self._args = dict(args or {})  # backend-specific CLI params (mode, effort, …)
         self._vision = vision  # agent.vision: False hides the CLI's image tools
@@ -97,6 +102,17 @@ class _CliAgent(CodeAgent):
     def _configure_workdir(self) -> None:
         """Write any backend-native confinement config into the workdir. Default: none."""
 
+    def _launch_env(self) -> dict[str, str]:
+        """The CLI's environment: the launcher's, minus the variables the CLI reads as its own
+        settings (so a run behaves the same from any shell, including one opened inside another
+        agent session), plus what this adapter sets."""
+        inherited = {
+            name: value
+            for name, value in os.environ.items()
+            if name in self._env_keep or not name.startswith(self._env_drop)
+        }
+        return {**inherited, **self._env_overrides}
+
     async def send(self, message: str) -> AsyncIterator[AgentEvent]:
         if self._pending:
             message = "\n\n".join([*self._pending, message])
@@ -112,7 +128,7 @@ class _CliAgent(CodeAgent):
             stdin=asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=self._cli_log or None,  # per-task agent_cli.log, else inherit
-            env={**os.environ, **self._env_overrides},
+            env=self._launch_env(),
             limit=_STDOUT_LINE_LIMIT,
             start_new_session=True,
         )
