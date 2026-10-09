@@ -265,6 +265,9 @@ class ClaudeAgent(_CliAgent):
             if self._args.get("context_window"):
                 window = str(int(self._args["context_window"]))  # sizes its compaction
                 self._env_overrides["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = window
+        if self._args.get("max_output_tokens"):
+            cap = str(int(self._args["max_output_tokens"]))
+            self._env_overrides["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = cap
         budget = self._args.get("max_thinking_tokens")
         if budget:
             self._env_overrides["MAX_THINKING_TOKENS"] = str(budget)

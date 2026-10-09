@@ -653,7 +653,14 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.setenv("SOME_PROXY", "kept")
 
-    claude = ClaudeAgent({"claude_home": str(tmp_path / "ch"), "max_thinking_tokens": 2000})
+    monkeypatch.setenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "1")
+    claude = ClaudeAgent(
+        {
+            "claude_home": str(tmp_path / "ch"),
+            "max_thinking_tokens": 2000,
+            "max_output_tokens": 16000,
+        }
+    )
     claude._cwd = str(tmp_path / "claude-wd")
     claude._configure_workdir()
     env = claude._launch_env()
@@ -664,6 +671,7 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
         "ANTHROPIC_MODEL",
     } & set(env)
     assert env["MAX_THINKING_TOKENS"] == "2000"
+    assert env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "16000"
     assert env["ANTHROPIC_API_KEY"] == "key" and env["SOME_PROXY"] == "kept"
     assert env["CLAUDE_CONFIG_DIR"] == claude._config_dir()
     assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
