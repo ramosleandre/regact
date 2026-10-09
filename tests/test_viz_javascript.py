@@ -76,6 +76,42 @@ vm.runInContext(String.raw`
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
 
 
+def test_progress_curves_aggregate_runs_and_stop_counting_unfinished_ones():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = Path(__file__).parents[1] / "src/regact/viz/static/app.js"
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sandbox = {document: {getElementById: () => ({})}, window: {addEventListener: () => {}},
+  AbortController, DOMException, Intl, URL, fetch: async () => ({ok: true, json: async () => ({})})};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$/, ''), sandbox);
+vm.runInContext(String.raw`
+  const run = (points, env_moves, exit_reason) => ({exit_reason, env_moves, n_tool_calls: 9,
+    duration_s: 9, progress: {label: 'Levels completed', reference: [], points}});
+  const pt = (value, env_actions, tool_calls) => ({value, env_actions, tool_calls, seconds: 1});
+  const finished = run([pt(1, 10, 2), pt(2, 30, 5)], 40, 'solved');
+  const killed = run([pt(1, 20, 3)], 25, null);
+  const old = run([pt(1, 20, null)], 25, 'solved');
+  const games = [finished, killed, old].map((metrics) => ({experiment: 'e', task: 't', metrics}));
+  const spec = metricSpecs(games).find((s) => s.key === 'progress');
+  if (!spec || !spec.curve || !spec.main) throw Error('no progress curve offered');
+  const group = groupByExpTask(games);
+  const byActions = curveRuns('e', 't', group, false, CURVE_X['env actions']);
+  if (byActions.length !== 3) throw Error('all runs have env actions');
+  if (curveRuns('e', 't', group, true, CURVE_X['env actions']).length !== 2) throw Error('mask');
+  const byCalls = curveRuns('e', 't', group, false, CURVE_X['tool calls']);
+  if (byCalls.length !== 2) throw Error('a run without tool calls recorded');
+  const [f, k] = byActions;
+  if (curveAt(f, 9) !== 0 || curveAt(f, 10) !== 1 || curveAt(f, 500) !== 2) throw Error('steps');
+  if (!f.done || k.done || k.end !== 25) throw Error('where a run stops');
+`, sandbox);
+"""
+    subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
+
+
 def test_shell_commands_render_as_text_with_their_extra_arguments():
     node = shutil.which("node")
     if not node:

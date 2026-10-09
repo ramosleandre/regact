@@ -33,6 +33,18 @@ class BaseProblem(ABC):
         """The entries of ``values`` (aggregate and derived metrics) named in ``main_metrics``."""
         return {key: values[key] for key in self.main_metrics if key in values}
 
+    # What progress_value counts ("Levels completed"); None = the problem reports no progress.
+    progress_label: str | None = None
+
+    def progress_value(self, info: dict[str, Any]) -> float | None:
+        """How far the task is after an observation with this ``info``; never decreases within
+        an episode. Runs record when each new value was first reached."""
+        return None
+
+    def progress_reference(self, task_name: str) -> list[tuple[float, float]]:
+        """A reference player's ``(env actions, progress value)`` points, when one exists."""
+        return []
+
     def reset_commands(self) -> dict[str, str]:
         """Explicit reset capabilities for externally managed controller protocols."""
         return {"ResetEnvironment": "Reset the whole environment from its initial state."}

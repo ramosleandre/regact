@@ -98,6 +98,9 @@ class ManagedCoordinator:
         self.phase_changes: list[dict[str, str]] = []  # this command's, reported in its result
         self._seen_milestones: set[str] = set()
         self.milestones: list[dict[str, Any]] = []
+        # Where the run was each time the problem's progress first reached a new value.
+        self.progress: list[dict[str, Any]] | None = []
+        self.started: float | None = None  # monotonic start of the agent's work, resumes included
         self.terminal: str | None = None
         self.deadline = float("inf")
         self.step_timings: dict[str, float] = {}  # per RunController call; see _note_timing
@@ -185,6 +188,7 @@ class ManagedCoordinator:
         status = self.root / "status.json"
         saved = json.loads(status.read_text()) if status.exists() else {}
         self.initial_collection = saved.get("initial_collection")
+        self.progress = saved.get("progress")  # None: recorded before this was tracked
         self.accepted = saved.get("accepted_cwm")
         self.latest, self.best = saved.get("latest_exploration"), saved.get("best_exploration")
         self.phase = self.store.last_phase() or self.initial_phase
@@ -219,6 +223,7 @@ class ManagedCoordinator:
                 "reset_actions": self.reset_actions,
                 "initial_collection": self.initial_collection,
                 "milestones": self.milestones,
+                **({} if self.progress is None else {"progress": self.progress}),
                 **self.store.summary(),
                 "accepted_cwm": self.accepted,
                 "main_metrics": metrics,
@@ -348,6 +353,22 @@ class ManagedCoordinator:
         )
         return obs
 
+    def _note_progress(self, info: dict[str, Any]) -> None:
+        value = self.problem.progress_value(info)
+        if value is None or self.progress is None:
+            return
+        if value <= max((point["value"] for point in self.progress), default=0):
+            return
+        experiment = self.context.experiment if self.context is not None else None
+        self.progress.append(
+            {
+                "value": value,
+                "env_actions": self.store.summary()["n_total_transitions"] + self.reset_actions,
+                "tool_calls": experiment.tool_calls_total if experiment is not None else 0,
+                "seconds": round(time.monotonic() - self.started, 1) if self.started else 0.0,
+            }
+        )
+
     def _step(self, action: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         if self._limit():
             raise TaskStopped(self.terminal)
@@ -374,6 +395,7 @@ class ManagedCoordinator:
             # A real action may have happened. Never retry or continue uncertain history.
             raise
         self.current_id = evidence["after_obs_id"]
+        self._note_progress(after["info"])
         new_milestones = []
         for milestone in after["info"].get("milestones", []):
             if milestone not in self._seen_milestones:
@@ -1185,6 +1207,7 @@ class ManagedSession(ProtocolSession):
 
     def on_start(self, start: float, seconds: float | None) -> None:
         self.coordinator.deadline = start + seconds if seconds is not None else float("inf")
+        self.coordinator.started = start
 
     async def close(self) -> None:
         context = self.coordinator.context

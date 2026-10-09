@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import io
 import json
 import sqlite3
@@ -11,6 +12,7 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import fields
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -52,6 +54,76 @@ def database(task: Path) -> Iterator[sqlite3.Connection]:
 def info_trace(task: Path) -> list[tuple[int, dict[str, Any]]]:
     with database(task) as db:
         return store_info_trace(db)
+
+
+def progress(
+    task: Path, problem: BaseProblem, task_name: str, recorded: list[dict[str, Any]] | None
+) -> dict[str, Any] | None:
+    """A run's progress points (see ``BaseProblem.progress_value``) with the problem's label and
+    reference player. A run recorded before the points were tracked gets them from its logs."""
+    if problem.progress_label is None:
+        return None
+    return {
+        "label": problem.progress_label,
+        "points": recorded if recorded is not None else _progress_from_logs(task, problem),
+        "reference": problem.progress_reference(task_name),
+    }
+
+
+def _timestamps(path: Path, key: str, wanted: tuple[str, ...]) -> list[tuple[float, str]]:
+    """``(UNIX time, name)`` of the lines of a JSON-lines log whose ``key`` is in ``wanted``."""
+    out: list[tuple[float, str]] = []
+    if not path.is_file():
+        return out
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                item = json.loads(line)
+                if item.get(key) in wanted:
+                    out.append((datetime.fromisoformat(item["ts"]).timestamp(), item[key]))
+            except (ValueError, KeyError, TypeError):
+                continue
+    return out
+
+
+def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]]:
+    with database(task) as db:
+        trace = store_info_trace(db)
+        reached: dict[int, float] = {}  # step -> when its milestone was recorded
+        for at, step in db.execute(
+            """SELECT timestamp, json_extract(payload,'$.milestone.event_id') FROM events
+            WHERE kind='milestone_observed' ORDER BY id"""
+        ):
+            if step is not None:
+                reached.setdefault(int(step), float(at))
+    calls = [at for at, _ in _timestamps(task / "logs/transcript.jsonl", "type", ("ToolCall",))]
+    sessions: list[list[float]] = []  # [start, end] of each stretch the agent worked
+    for at, name in _timestamps(
+        task / "logs/events.jsonl", "event", ("session_start", "session_end")
+    ):
+        if name == "session_start":
+            sessions.append([at, float("inf")])
+        elif sessions:
+            sessions[-1][1] = at
+    points: list[dict[str, Any]] = []
+    best = 0.0
+    for step, (actions, info) in enumerate(trace, start=1):
+        value = problem.progress_value(info)
+        if value is None or value <= best:
+            continue
+        best = value
+        at = reached.get(step)
+        points.append(
+            {
+                "value": value,
+                "env_actions": actions,
+                "tool_calls": None if at is None else bisect.bisect_right(calls, at),
+                "seconds": None
+                if at is None
+                else round(sum(max(0.0, min(end, at) - start) for start, end in sessions), 1),
+            }
+        )
+    return points
 
 
 def _obs(db: sqlite3.Connection, oid: int) -> dict[str, Any]:

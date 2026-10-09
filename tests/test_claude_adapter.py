@@ -44,7 +44,8 @@ async def test_the_conversation_home_is_kept_for_a_resumable_task_and_reused(tmp
     second = ClaudeAgent({"claude_home": str(root)})
     second.resume_from(token)
     assert second._config_dir() == home  # the same home, so --resume finds the conversation
-    assert second._command("continue")[0][-2:] == ["--resume", "conversation-1"]
+    argv = second._command("continue")[0]
+    assert argv[argv.index("--resume") + 1] == "conversation-1"
     await second.close()  # a final exit: the home is dropped
     assert list((root / "session").iterdir()) == []
 

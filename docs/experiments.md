@@ -140,6 +140,8 @@ The dataset stores complete observations, but the API and feedback expose bounde
 
 Match agent/model, lifecycle, seeds, initial collection and budgets when comparing vanilla with CWM. Report tool calls, real actions, time and game progress separately. Equal tool-call counts need not mean equal real actions or compute, and one controller call need not equal one episode.
 
+**Progress over the run:** for vanilla and CWM runs on a problem that reports progress (ARC: levels completed), the Graphs panel draws that progress as a function of what each run had spent: env actions (default), tool calls or time. Each run is a step curve; the line is the chosen aggregate over the runs of a setting and the band is the chosen error bar, as for the bar charts. A finished run keeps its last value to the right edge; an unfinished one (crashed, killed, still running) stops counting after its last point and is dropped when crashed runs are masked. The dashed line is the problem's reference player (ARC: the human baseline). Use it to separate how far an arm gets from how efficiently it gets there, and to see whether a budget cut it. The points are recorded per run in `cwm/status.json` (`progress`).
+
 Managed protocols measure online interaction; their best observed result is not an independent evaluation on held-out seeds. Policy-search submissions and final evaluation also reuse configured seed sequences unless you explicitly set up a separate evaluation. Graphs summarize recorded metrics; they do not establish CWM correctness, useful novelty, or generalization. See [CWM limitations](cwm.md#scientific-and-operational-limitations), including hidden-state effects in MiniGrid.
 
 ## Competition (Kaggle)

@@ -448,3 +448,29 @@ def test_a_run_records_the_problems_main_metrics(make_rig, monkeypatch):
     recorded = json.loads((c.root / "status.json").read_text())["main_metrics"]
     assert recorded == {"steps_seen": c.store.summary()["n_total_transitions"]}
     assert c.task_metrics() == recorded
+
+
+def test_a_run_records_where_it_was_at_each_progress(make_rig, monkeypatch):
+    c = make_rig("vanilla")
+    calls = iter(range(1, 1000))
+    monkeypatch.setattr(type(c.problem), "progress_label", "Steps", raising=False)
+    monkeypatch.setattr(type(c.problem), "progress_value", lambda self, info: next(calls) // 2)
+    exploration(c, (1, 1, 1, 1))
+    c.tool("RunController", {})
+    points = c.progress
+    assert len(points) >= 2
+    assert [p["value"] for p in points] == sorted({p["value"] for p in points})
+    assert [p["env_actions"] for p in points] == sorted({p["env_actions"] for p in points})
+    assert points[-1]["env_actions"] <= c.store.summary()["n_total_transitions"] + c.reset_actions
+    assert all(p["tool_calls"] >= 0 and p["seconds"] >= 0 for p in points)
+    assert json.loads((c.root / "status.json").read_text())["progress"] == points
+
+    # A run recorded before the points were tracked gets them from its store: here every second
+    # recorded step, initial collection included, is a progress.
+    from regact.protocols.cwm import viewer
+
+    calls = iter(range(1, 1000))
+    shown = viewer.progress(c.output, c.problem, c.task, None)
+    assert shown["label"] == "Steps" and len(shown["points"]) >= 2
+    assert all(p["env_actions"] == 2 * p["value"] for p in shown["points"])
+    assert viewer.progress(c.output, c.problem, c.task, points)["points"] is points

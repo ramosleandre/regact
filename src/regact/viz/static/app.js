@@ -235,8 +235,8 @@ async function loadSettings(scope) {
 function saveSettings() {   // debounced PUT of the whole panel state for the current interface
   const body = {
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
-    order: _graph.order, colors: _graph.colors,
-    hidden: [..._graph.hidden], active: [..._graph.active],
+    order: _graph.order, colors: _graph.colors, curveX: _graph.curveX,
+    hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
   };
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
@@ -258,8 +258,10 @@ function modelName(exp) {
 
 const _graph = {
   agg: "mean", err: "none", mask: false, barScale: 1,   // barScale: x-axis bar-width zoom (persisted)
+  curveX: "env actions",   // x axis of the progress curves (a CURVE_X key)
   active: new Set(),  // set by applySettings: saved selection, else the Main metrics
   hidden: new Set(), colors: {}, order: [],
+  known: [],   // metric keys offered when the selection was saved; a Main one added since is shown
 };
 
 // Apply a saved settings blob onto _graph for the current interface; a missing key falls back to the
@@ -270,11 +272,15 @@ function applySettings(s, specs) {
   _graph.err = s.err || "none";
   _graph.mask = !!s.mask;
   _graph.barScale = typeof s.barScale === "number" ? s.barScale : 1;
+  _graph.curveX = CURVE_X[s.curveX] ? s.curveX : "env actions";
   _graph.order = Array.isArray(s.order) ? s.order : [];
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
+  _graph.known = specs.map((spec) => spec.key);
   if (Array.isArray(s.active)) {
     _graph.active = new Set(s.active);
+    const known = new Set(Array.isArray(s.known) ? s.known : specs.filter((spec) => !spec.curve).map((spec) => spec.key));
+    for (const spec of specs) if (spec.main && !known.has(spec.key)) _graph.active.add(spec.key);
   } else {   // no saved metric selection -> the Main metrics
     _graph.active = new Set(specs.filter((spec) => spec.main).map((spec) => spec.key));
   }
@@ -343,6 +349,9 @@ function metricSpecs(games) {
         specs.push({ key: "derived:" + k, label: k.replace(/_/g, "-").toUpperCase(), fmt: pct1, score: k,
           get: (m) => m.derived_metrics && m.derived_metrics[k] });
       }
+  // The problem's progress (ARC: levels completed) as a curve over what each run spent.
+  const prog = games.map((g) => g.metrics.progress).find((p) => p && p.label);
+  if (prog) specs.push({ key: "progress", label: prog.label + " over the run", curve: true, def: true });
   specs.push(STATUS_METRIC);
   const mains = new Set(games.flatMap((g) => g.metrics.main_metrics || []));
   for (const s of specs) s.main = !!(s.def || (s.score && mains.has(s.score)));
@@ -492,6 +501,91 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
   return s;
 }
 
+// Progress curves. Per run: the problem's progress as a step function of what the run had spent
+// (`point` = the field of a progress point, `end` = where the run stopped). A finished run keeps its
+// last value to the right edge; an unfinished one (crashed, killed, still running) stops counting
+// after its last point, and is dropped altogether when the mask is on.
+const CURVE_X = {
+  "env actions": { point: "env_actions", end: (m) => m.env_moves, fmt: fmt },
+  "tool calls": { point: "tool_calls", end: (m) => m.n_tool_calls, fmt: fmt },
+  "time": { point: "seconds", end: (m) => m.duration_s, fmt: dur },
+};
+function curveRuns(exp, task, group, mask, X) {
+  const runs = [];
+  for (const m of (group.byExp.get(exp) && group.byExp.get(exp).get(task)) || []) {
+    const done = isValidRun(m);
+    if (!m.progress || (mask && !done)) continue;
+    const pts = m.progress.points.map((q) => [q[X.point], q.value]);
+    if (pts.some((q) => q[0] == null)) continue;   // no such measure recorded for this run
+    runs.push({ pts, done, end: Math.max(Number(X.end(m)) || 0, ...pts.map((q) => q[0])) });
+  }
+  return runs;
+}
+const curveAt = (run, x) => { let v = 0; for (const [px, pv] of run.pts) if (px <= x) v = pv; return v; };
+function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
+  const X = CURVE_X[xName], agg = AGGREGATORS[aggName];
+  const series = group.experiments.map((exp) => ({ exp, runs: curveRuns(exp, task, group, mask, X) }))
+    .filter((sr) => sr.runs.length);
+  if (!series.length) return null;
+  const all = series.flatMap((sr) => sr.runs);
+  const ref = xName === "env actions"
+    ? ((((group.byExp.get(series[0].exp) || new Map()).get(task) || []).find((m) => m.progress) || {}).progress || {}).reference || []
+    : [];
+  // The axis stops a little after the last progress any run made: beyond it every line is flat, and
+  // one run that kept acting without progress would otherwise squeeze all the others to the left.
+  const xMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[0]))) * 1.15;
+  const yMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[1])), ...ref.map((q) => q[1]));
+  const grid = [...new Set([0, xMax, ...all.flatMap((r) => [r.end, ...r.pts.map((q) => q[0])])])]
+    .filter((x) => x <= xMax).sort((a, b) => a - b);
+  const padL = 44, padR = 16, padT = 10, padB = 30, W = 620, H = 270;
+  const xOf = (x) => padL + (W - padL - padR) * Math.min(1, x / xMax);
+  const yOf = (v) => padT + (H - padT - padB) * (1 - Math.max(0, Math.min(1, v / yMax)));
+  const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  for (let v = 0; v <= yMax; v++) {
+    s.append(svg("line", { class: "gridline", x1: padL, y1: yOf(v), x2: W - padR, y2: yOf(v) }));
+    s.append(svg("text", { class: "ylab", x: padL - 6, y: yOf(v) + 3, "text-anchor": "end" }, txt(String(v))));
+  }
+  for (const f of [0, 0.25, 0.5, 0.75, 1])
+    s.append(svg("text", { class: "xlab", x: xOf(xMax * f), y: H - padB + 16, "text-anchor": "middle" }, txt(X.fmt(Math.round(xMax * f)))));
+  const steps = (ys) => {   // step-after path through (grid[i], ys[i]); null = no run there
+    let d = "", pen = false;
+    grid.forEach((x, i) => {
+      if (ys[i] == null) { pen = false; return; }
+      d += pen ? ` V${yOf(ys[i])}` : ` M${xOf(x)},${yOf(ys[i])}`;
+      pen = true;
+      if (i + 1 < grid.length) d += ` H${xOf(grid[i + 1])}`;
+    });
+    return d;
+  };
+  if (ref.length) {
+    const path = svg("path", { class: "curve-ref", d: steps(grid.map((x) => curveAt({ pts: ref }, x))) });
+    path.append(svg("title", {}, txt("reference player")));
+    s.append(path);
+  }
+  for (const { exp, runs } of series) {
+    const at = grid.map((x) => runs.filter((r) => r.done || x <= r.end).map((r) => curveAt(r, x)));
+    const color = expColor(exp);
+    if (errMethod !== "none") {
+      const band = at.map((xs) => {
+        if (xs.length < 2) return null;
+        if (errMethod === "range") return [Math.min(...xs), Math.max(...xs)];
+        const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1));
+        return [mean - sd, mean + sd];
+      });
+      grid.forEach((x, i) => {
+        if (!band[i] || i + 1 >= grid.length) return;
+        const yh = yOf(band[i][1]), yl = yOf(band[i][0]);
+        s.append(svg("rect", { class: "curve-band", x: xOf(x), y: yh, width: xOf(grid[i + 1]) - xOf(x), height: yl - yh, fill: color }));
+      });
+    }
+    const line = svg("path", { class: "curve-line", stroke: color, d: steps(at.map((xs) => (xs.length ? agg(xs) : null))) });
+    line.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${runs.length} run${runs.length > 1 ? "s" : ""}`)));
+    s.append(line);
+  }
+  return { chart: s, hasRef: ref.length > 0 };
+}
+
 // Status is categorical: per (task, experiment) a full-height bar stacked by exit-reason share,
 // colored by status; a thin underline ties each bar back to its experiment color.
 function statusChart(group, expColor) {
@@ -631,7 +725,19 @@ async function graphsView(games, onlyExp, scope) {
       any = true;
       const card = h("div", "chartcard", h("h3", null, spec.label));
       const scroll = h("div", "chartscroll");
-      if (spec.categorical) {
+      if (spec.curve) {
+        card.append(segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }));
+        let hasRef = false;
+        for (const task of g2.tasks) {
+          const drawn = progressChart(task, g2, expColor, _graph.agg, _graph.err, _graph.mask, _graph.curveX);
+          if (!drawn) continue;
+          hasRef = hasRef || drawn.hasRef;
+          if (g2.tasks.length > 1) scroll.append(h("div", "muted", shortTask(task)));
+          scroll.append(drawn.chart);
+        }
+        card.append(scroll);
+        if (hasRef) card.append(h("div", "muted curve-note", "dashed: reference player (ARC: the human baseline)"));
+      } else if (spec.categorical) {
         const { chart, cats } = statusChart(g2, expColor);
         scroll.append(chart);
         card.append(scroll, legend(cats.map((c) => ({ label: c, color: statusColor(c) }))));

@@ -89,9 +89,14 @@ def build_app(experiment_dir: str) -> FastAPI:
                     success_rate=latest.get("aggregate", {}).get("success_rate"),
                 )
                 problem = reader.problem_of(view.config)
+                task = reader.task_name(name, view.state)
                 with contextlib.suppress(Exception):  # a viewer renders without them
                     result["derived_metrics"] = problem.derived_trace_metrics(
-                        reader.task_name(name, view.state), cwm_viewer.info_trace(root / name)
+                        task, cwm_viewer.info_trace(root / name)
+                    )
+                with contextlib.suppress(Exception):
+                    result["progress"] = cwm_viewer.progress(
+                        root / name, problem, task, state.get("progress")
                     )
         return result
 

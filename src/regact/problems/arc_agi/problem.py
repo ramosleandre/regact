@@ -339,6 +339,7 @@ class ArcAgiProblem(BaseProblem):
 
     name = "arc_agi"
     main_metrics = ("rhae", "lrhae_uncapped", "relative_env_actions")
+    progress_label = "Levels completed"
 
     def __init__(
         self,
@@ -427,6 +428,17 @@ class ArcAgiProblem(BaseProblem):
                 ErrorCategory.ENV_RUNTIME, f"arc_agi: obs_mode {mode!r} not supported yet"
             )
         return ArcRenderer(last_frame_only=mode is ObsMode.RAW_LAST_FRAME_ONLY)
+
+    def progress_value(self, info: dict[str, Any]) -> float | None:
+        return int(info.get("levels_completed", 0) or 0)
+
+    def progress_reference(self, task_name: str) -> list[tuple[float, float]]:
+        """The human baseline: its cumulative actions at each completed level."""
+        points, total = [], 0
+        for level, actions in enumerate(self._task(task_name).baseline_actions or (), start=1):
+            total += actions
+            points.append((float(total), float(level)))
+        return points
 
     def milestone_kind(self, milestone: str) -> str:
         if milestone == "game over":

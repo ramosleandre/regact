@@ -231,6 +231,13 @@ def test_codex_parses_message_reasoning_command_and_completion() -> None:
     ]
 
 
+def test_claude_command_names_the_tools_a_run_gets() -> None:
+    argv, _ = ClaudeAgent()._command("go")
+    assert argv[argv.index("--tools") + 1] == "Bash,Read,Edit,Write,Monitor,TaskStop"
+    argv, _ = ClaudeAgent({"tools": ["Bash", "Read"]})._command("go")
+    assert argv[argv.index("--tools") + 1] == "Bash,Read"
+
+
 def test_codex_command_pipes_prompt_on_stdin() -> None:
     agent = CodexAgent()
     agent._cwd = "/tmp/wd"

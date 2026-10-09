@@ -40,6 +40,10 @@ from regact.security.policy import SecurityPolicy, default_policy
 
 _IMAGE_SUFFIXES = ("png", "jpg", "jpeg", "gif", "webp")
 _CLAUDE_BASH_MAX_TIMEOUT_MS = 600_000  # Claude Code's own default ceiling for a Bash timeout
+# The CLI's built-in tools a run gets (agent.args.tools replaces the list): shell and files, plus
+# waiting on / stopping a command the shell moved to the background. Not sub-agents, messaging
+# between sessions, scheduling, the web, or skills.
+_CLAUDE_TOOLS = ("Bash", "Read", "Edit", "Write", "Monitor", "TaskStop")
 
 
 def claude_deny_settings(
@@ -437,6 +441,8 @@ class ClaudeAgent(_CliAgent):
             argv += ["--append-system-prompt", self._system_prompt]
         if self._model:
             argv += ["--model", self._model]
+        tools: Any = self._args.get("tools") or _CLAUDE_TOOLS
+        argv += ["--tools", tools if isinstance(tools, str) else ",".join(tools)]
         return argv, None  # message is passed as the -p argument, not stdin
 
     def _track_session(self, obj: dict[str, Any]) -> None:
