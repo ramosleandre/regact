@@ -106,7 +106,7 @@ vm.runInContext(String.raw`
   if (byCalls.length !== 2) throw Error('a run without tool calls recorded');
   const [f, k] = byActions;
   if (curveAt(f, 9) !== 0 || curveAt(f, 10) !== 1 || curveAt(f, 500) !== 2) throw Error('steps');
-  if (!f.done || k.done || k.end !== 25) throw Error('where a run stops');
+  if (!f.done || k.done || k.end !== 25 || f.end !== 40) throw Error('where a run stops');
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

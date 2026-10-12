@@ -512,9 +512,9 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
 }
 
 // Progress curves. Per run: the problem's progress as a step function of what the run had spent
-// (`point` = the field of a progress point, `end` = where the run stopped). A finished run keeps its
-// last value to the right edge; an unfinished one (crashed, killed, still running) stops counting
-// after its last point, and is dropped altogether when the mask is on.
+// (`point` = the field of a progress point, `end` = where the run stopped). A run counts up to where
+// it stopped and no further: the aggregate at x is over the runs still going at x, and ends with
+// the last of them. The mask drops crashed / unfinished runs altogether.
 const CURVE_X = {
   "env actions": { point: "env_actions", end: (m) => m.env_moves, fmt: fmt },
   "tool calls": { point: "tool_calls", end: (m) => m.n_tool_calls, fmt: fmt },
@@ -541,11 +541,12 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
   const ref = xName === "env actions"
     ? ((((group.byExp.get(series[0].exp) || new Map()).get(task) || []).find((m) => m.progress) || {}).progress || {}).reference || []
     : [];
-  // The axis stops a little after the last progress any run made: beyond it every line is flat, and
-  // one run that kept acting without progress would otherwise squeeze all the others to the left.
-  const xMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[0]))) * 1.15;
+  const xMax = Math.max(1, ...all.map((r) => r.end));
   const yMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[1])), ...ref.map((q) => q[1]));
-  const grid = [...new Set([0, xMax, ...all.flatMap((r) => [r.end, ...r.pts.map((q) => q[0])])])]
+  // Each run also gets a point just after its end, so it leaves the aggregate there and not at
+  // whichever point of another run comes next.
+  const eps = xMax / 2000;
+  const grid = [...new Set([0, xMax, ...all.flatMap((r) => [r.end, r.end + eps, ...r.pts.map((q) => q[0])])])]
     .filter((x) => x <= xMax).sort((a, b) => a - b);
   // As wide as the window leaves beside the two sidebars (metrics/experiments, and this chart's legend).
   const room = (typeof window !== "undefined" && window.innerWidth) || 0;
@@ -575,7 +576,7 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
     s.append(path);
   }
   for (const { exp, runs } of series) {
-    const at = grid.map((x) => runs.filter((r) => r.done || x <= r.end).map((r) => curveAt(r, x)));
+    const at = grid.map((x) => runs.filter((r) => x <= r.end).map((r) => curveAt(r, x)));
     const color = expColor(exp);
     if (errMethod !== "none") {
       const band = at.map((xs) => {
@@ -594,7 +595,7 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
     if (_graph.perRun.has(exp))
       for (const run of runs)
         s.append(svg("path", { class: "curve-run", stroke: color,
-          d: steps(grid.map((x) => (run.done || x <= run.end ? curveAt(run, x) : null))) }));
+          d: steps(grid.map((x) => (x <= run.end ? curveAt(run, x) : null))) }));
     const line = svg("path", { class: "curve-line", stroke: color, d: steps(at.map((xs) => (xs.length ? agg(xs) : null))) });
     line.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${runs.length} run${runs.length > 1 ? "s" : ""}`)));
     s.append(line);
