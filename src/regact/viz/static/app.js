@@ -237,6 +237,7 @@ function saveSettings() {   // debounced PUT of the whole panel state for the cu
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
     order: _graph.order, colors: _graph.colors, curveX: _graph.curveX,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
+    perRun: [..._graph.perRun],
   };
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
@@ -262,6 +263,7 @@ const _graph = {
   active: new Set(),  // set by applySettings: saved selection, else the Main metrics
   hidden: new Set(), colors: {}, order: [],
   known: [],   // metric keys offered when the selection was saved; a Main one added since is shown
+  perRun: new Set(),   // experiments whose individual runs are drawn (toggled in a chart's legend)
 };
 
 // Apply a saved settings blob onto _graph for the current interface; a missing key falls back to the
@@ -276,6 +278,7 @@ function applySettings(s, specs) {
   _graph.order = Array.isArray(s.order) ? s.order : [];
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
+  _graph.perRun = new Set(Array.isArray(s.perRun) ? s.perRun : []);
   _graph.known = specs.map((spec) => spec.key);
   if (Array.isArray(s.active)) {
     _graph.active = new Set(s.active);
@@ -451,6 +454,7 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
   for (const t of tasks) for (const e of experiments) {   // a mean <= max(tasks), so tasks bound the axis
     const v = val(e, t); if (v != null) max = Math.max(max, v);
     const eb = errOf(e, t); if (eb) max = Math.max(max, eb.hi);   // keep error bars in view
+    if (_graph.perRun.has(e) && !spec.count) max = Math.max(max, ...seriesOf(e, t));   // and run ticks
   }
   max = max || 1;
   const { padL, padB, padR, padT, H } = _chartPad(cols);
@@ -486,6 +490,12 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
       const rect = svg("rect", { x, y: barTop, width: bw, height: base - barTop, fill: expColor(exp) });
       rect.append(svg("title", {}, txt(`${expLeaf(exp)} · ${colName}\n${spec.label}: ${spec.fmt ? spec.fmt(v) : fmtMetric(v)}`)));
       s.append(rect);
+      if (_graph.perRun.has(exp) && col !== _AVG_COL && !spec.count)
+        for (const run of seriesOf(exp, col)) {     // one tick per run across the bar
+          const tick = svg("line", { class: "runtick", x1: x - 1, y1: yOf(run), x2: x + bw + 1, y2: yOf(run) });
+          tick.append(svg("title", {}, txt(`${expLeaf(exp)} · ${colName}\none run: ${spec.fmt ? spec.fmt(run) : fmtMetric(run)}`)));
+          s.append(tick);
+        }
       const eb = colErr(exp, col);               // error/interval bar centered on the bar
       if (eb) {
         const yl = yOf(eb.lo), yh = yOf(eb.hi), cap = Math.max(2, bw * 0.3);
@@ -537,7 +547,9 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
   const yMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[1])), ...ref.map((q) => q[1]));
   const grid = [...new Set([0, xMax, ...all.flatMap((r) => [r.end, ...r.pts.map((q) => q[0])])])]
     .filter((x) => x <= xMax).sort((a, b) => a - b);
-  const padL = 44, padR = 16, padT = 10, padB = 30, W = 620, H = 270;
+  // As wide as the window leaves beside the two sidebars (metrics/experiments, and this chart's legend).
+  const room = (typeof window !== "undefined" && window.innerWidth) || 0;
+  const padL = 44, padR = 16, padT = 10, padB = 30, W = Math.max(620, Math.min(1700, room - 500)), H = W > 900 ? 340 : 270;
   const xOf = (x) => padL + (W - padL - padR) * Math.min(1, x / xMax);
   const yOf = (v) => padT + (H - padT - padB) * (1 - Math.max(0, Math.min(1, v / yMax)));
   const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
@@ -579,6 +591,10 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
         s.append(svg("rect", { class: "curve-band", x: xOf(x), y: yh, width: xOf(grid[i + 1]) - xOf(x), height: yl - yh, fill: color }));
       });
     }
+    if (_graph.perRun.has(exp))
+      for (const run of runs)
+        s.append(svg("path", { class: "curve-run", stroke: color,
+          d: steps(grid.map((x) => (run.done || x <= run.end ? curveAt(run, x) : null))) }));
     const line = svg("path", { class: "curve-line", stroke: color, d: steps(at.map((xs) => (xs.length ? agg(xs) : null))) });
     line.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${runs.length} run${runs.length > 1 ? "s" : ""}`)));
     s.append(line);
@@ -632,12 +648,15 @@ function legend(items) {   // items: [{label, color}] — the static status lege
   for (const it of items) l.append(h("span", "leg", swatch(it.color), " " + it.label));
   return l;
 }
-// The experiments drawn in a chart, in bar order, beside it (scrolls when there are many).
-function expLegend(experiments, expColor) {
+// The experiments drawn in a chart, in bar order, beside it (scrolls when there are many). Clicking
+// one draws each of its runs on every chart: a tick per run on its bars, a faint line per run on
+// the curves.
+function expLegend(experiments, expColor, redraw) {
   const l = h("div", "chartlegend");
   for (const exp of experiments) {
-    const row = h("div", "leg", swatch(expColor(exp)), expLeaf(exp));
-    row.title = exp;
+    const row = h("div", "leg" + (_graph.perRun.has(exp) ? " on" : ""), swatch(expColor(exp)), expLeaf(exp));
+    row.title = exp + "\nclick to show / hide each run";
+    row.onclick = () => { _graph.perRun.has(exp) ? _graph.perRun.delete(exp) : _graph.perRun.add(exp); redraw(); };
     l.append(row);
   }
   return l;
@@ -735,7 +754,7 @@ async function graphsView(games, onlyExp, scope) {
       any = true;
       const card = h("div", "chartcard", h("h3", null, spec.label));
       const scroll = h("div", "chartscroll");
-      const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor));
+      const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor, redraw));
       if (spec.curve) {
         card.append(segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }));
         let hasRef = false;
