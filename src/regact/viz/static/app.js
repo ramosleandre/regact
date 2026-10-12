@@ -632,6 +632,16 @@ function legend(items) {   // items: [{label, color}] — the static status lege
   for (const it of items) l.append(h("span", "leg", swatch(it.color), " " + it.label));
   return l;
 }
+// The experiments drawn in a chart, in bar order, beside it (scrolls when there are many).
+function expLegend(experiments, expColor) {
+  const l = h("div", "chartlegend");
+  for (const exp of experiments) {
+    const row = h("div", "leg", swatch(expColor(exp)), expLeaf(exp));
+    row.title = exp;
+    l.append(row);
+  }
+  return l;
+}
 function swatch(color) { const s = h("span", "sw"); s.style.background = color; return s; }
 
 // The Experiments panel (sidebar, below Metrics). Each row: up/down to reorder (= reorder the bars
@@ -725,6 +735,7 @@ async function graphsView(games, onlyExp, scope) {
       any = true;
       const card = h("div", "chartcard", h("h3", null, spec.label));
       const scroll = h("div", "chartscroll");
+      const body = h("div", "chartbody", expLegend(activeExps, expColor), scroll);
       if (spec.curve) {
         card.append(segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }));
         let hasRef = false;
@@ -735,15 +746,15 @@ async function graphsView(games, onlyExp, scope) {
           if (g2.tasks.length > 1) scroll.append(h("div", "muted", shortTask(task)));
           scroll.append(drawn.chart);
         }
-        card.append(scroll);
+        card.append(body);
         if (hasRef) card.append(h("div", "muted curve-note", "dashed: reference player (ARC: the human baseline)"));
       } else if (spec.categorical) {
         const { chart, cats } = statusChart(g2, expColor);
         scroll.append(chart);
-        card.append(scroll, legend(cats.map((c) => ({ label: c, color: statusColor(c) }))));
+        card.append(body, legend(cats.map((c) => ({ label: c, color: statusColor(c) }))));
       } else {
         scroll.append(groupedBarChart(spec, g2, expColor, _graph.agg, _graph.err, _graph.mask));
-        card.append(scroll);
+        card.append(body);
       }
       charts.append(card);
     }
