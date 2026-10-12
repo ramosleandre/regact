@@ -514,10 +514,10 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
 }
 
 // Progress curves. Per run: the problem's progress as a step function of what the run had spent
-// (`point` = the field of a progress point, `end` = where the run stopped). In the aggregate a
-// finished run keeps its final value to the right edge, and an unfinished one (crashed, killed,
-// still running) stops counting after its end; the mask drops unfinished runs altogether. A run's
-// own line (legend, third state) always ends where the run stopped.
+// (`point` = the field of a progress point, `end` = where the run stopped). In the aggregate a run
+// that stopped keeps its last value for as long as another run of the experiment is still going,
+// and the line ends with the last of them; the mask drops crashed / unfinished runs altogether. A
+// run's own line (legend, third state) ends where that run stopped.
 const CURVE_X = {
   "env actions": { point: "env_actions", end: (m) => m.env_moves, fmt: fmt },
   "tool calls": { point: "tool_calls", end: (m) => m.n_tool_calls, fmt: fmt },
@@ -579,7 +579,8 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
     s.append(path);
   }
   for (const { exp, runs } of series) {
-    const at = grid.map((x) => runs.filter((r) => r.done || x <= r.end).map((r) => curveAt(r, x)));
+    const lastEnd = Math.max(...runs.map((r) => r.end));   // the aggregate ends with the last run
+    const at = grid.map((x) => (x <= lastEnd ? runs.map((r) => curveAt(r, x)) : []));
     const color = expColor(exp);
     if (errMethod !== "none") {
       const band = at.map((xs) => {
