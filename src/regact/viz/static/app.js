@@ -597,12 +597,15 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
       });
     }
     if (_graph.perRun.has(exp))
-      for (const run of runs)
+      for (const run of runs) {
         s.append(svg("path", { class: "curve-run", stroke: color,
           d: steps(grid.map((x) => (x <= run.end ? curveAt(run, x) : null))) }));
+        s.append(svg("circle", { class: "curve-end run", cx: xOf(run.end), cy: yOf(curveAt(run, run.end)), r: 2.5, fill: color }));
+      }
     const line = svg("path", { class: "curve-line", stroke: color, d: steps(at.map((xs) => (xs.length ? agg(xs) : null))) });
     line.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${runs.length} run${runs.length > 1 ? "s" : ""}`)));
     s.append(line);
+    s.append(svg("circle", { class: "curve-end", cx: xOf(lastEnd), cy: yOf(agg(runs.map((r) => curveAt(r, lastEnd)))), r: 4, fill: color }));   // where it stops
   }
   return { chart: s, hasRef: ref.length > 0 };
 }
