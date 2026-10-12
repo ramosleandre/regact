@@ -360,6 +360,34 @@ def test_api_games_scopes_to_a_subtree(tmp_path: Path) -> None:
     assert len(scoped) == 1 and scoped[0]["name"] == "bench/claude_arc/2026_10/ft09"
 
 
+def test_api_games_parses_a_run_once_until_its_files_change(tmp_path: Path, monkeypatch) -> None:
+    """A big root is slow to parse, so a run's entry is reused, also by a restarted viewer, until
+    one of the run's files changes."""
+    from fastapi.testclient import TestClient
+
+    from regact.viz import reader
+    from regact.viz.app import build_app
+
+    run = tmp_path / "bench/claude_arc/2026_10/ft09"
+    (run / "logs").mkdir(parents=True)
+    state = run / "logs" / "experiment_state.json"
+    state.write_text('{"task_name": "x", "duration_s": 1}')
+    (run / "config.json").write_text("{}")
+    loads: list[str] = []
+    real = reader.load_game
+    monkeypatch.setattr(reader, "load_game", lambda root, name: loads.append(name) or real(root, name))
+
+    client = TestClient(build_app(str(tmp_path)))
+    first = client.get("/api/games").json()
+    assert client.get("/api/games").json() == first and len(loads) == 1
+    restarted = TestClient(build_app(str(tmp_path)))
+    assert restarted.get("/api/games").json() == first and len(loads) == 1  # read from disk
+
+    state.write_text('{"task_name": "x", "duration_s": 22}')
+    changed = restarted.get("/api/games").json()["games"][0]
+    assert len(loads) == 2 and changed["state"]["duration_s"] == 22
+
+
 def test_game_lookup_is_direct_and_rejects_path_escape(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 

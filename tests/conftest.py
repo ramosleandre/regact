@@ -28,6 +28,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.fixture(autouse=True)
+def _viz_cache_in_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory):
+    """The viewer keeps run summaries on disk; tests must not write them under the real home."""
+    monkeypatch.setenv("REGACT_VIZ_CACHE_DIR", str(tmp_path_factory.mktemp("viz_cache")))
+
+
+@pytest.fixture(autouse=True)
 def _closed_env_clients(monkeypatch: pytest.MonkeyPatch):
     """Close every EnvClient a test builds.
 

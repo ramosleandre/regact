@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,41 @@ def _settings_dir() -> Path:
     )
 
 
+def _cache_dir() -> Path:
+    # One small JSON per run: its entry in /api/games, reused while the run's files are unchanged.
+    return Path(os.environ.get("REGACT_VIZ_CACHE_DIR") or (Path.home() / ".regact" / "viz_cache"))
+
+
+# What a run's summary is computed from. A finished run never changes these, a live one does.
+_SUMMARY_SOURCES = (
+    "config.json",
+    "logs/experiment_state.json",
+    "logs/transcript.jsonl",
+    "logs/events.jsonl",
+    "cwm/status.json",
+    "cwm/experience.sqlite3",
+    "workdir/submissions",
+)
+
+
+def _code_signature() -> str:
+    """Changes whenever regact's code does, so a summary computed by older code is not reused."""
+    package = Path(__file__).resolve().parents[1]
+    stamps = sorted((str(p), p.stat().st_mtime_ns) for p in package.rglob("*.py"))
+    return hashlib.sha1(repr(stamps).encode()).hexdigest()
+
+
+def _run_signature(run: Path) -> list[Any]:
+    out: list[Any] = []
+    for name in _SUMMARY_SOURCES:
+        try:
+            stat = (run / name).stat()
+            out.append([name, stat.st_mtime_ns, stat.st_size])
+        except OSError:
+            out.append([name, None, None])
+    return out
+
+
 def _settings_path(scope: str) -> Path:
     """Flat, traversal-safe filename for one interface's settings (the graph `under` scope)."""
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", scope) or "_root"
@@ -68,6 +104,8 @@ def build_app(experiment_dir: str) -> FastAPI:
     from regact.protocols.cwm.worker import WorkerError
 
     playback = cwm_viewer.Playback()
+    code_signature = _code_signature()
+    summaries: dict[str, tuple[list[Any], dict[str, Any]]] = {}
 
     def metrics(view: reader.GameView, name: str) -> dict[str, Any]:
         result = game_metrics(view)
@@ -116,25 +154,43 @@ def build_app(experiment_dir: str) -> FastAPI:
         names = reader.list_games(experiment_dir)
         if under:
             names = [n for n in names if n == under or n.startswith(under + "/")]
-        out = []
-        for name in names:
-            game = reader.load_game(experiment_dir, name)
-            out.append(
-                {
-                    "name": name,
-                    # Grouping keys for the cross-run graphs: an experiment is one agent+problem
-                    # config (config.experiment_name), and one experiment holds many runs of many
-                    # tasks (some tasks repeated across timestamps -> aggregated in the UI).
-                    "experiment": game.config.get("experiment_name") or _experiment_of(name),
-                    "agent": {
-                        key: (game.config.get("agent") or {}).get(key) for key in ("name", "model")
-                    },
-                    "task": game.state.get("task_name") or name.rsplit("/", 1)[-1],
-                    "state": game.state,
-                    "metrics": metrics(game, name),
-                }
-            )
-        return {"experiment": root.name, "games": out}
+        return {"experiment": root.name, "games": [summary(name) for name in names]}
+
+    def summary(name: str) -> dict[str, Any]:
+        """One run's entry in the games list. Parsing a run (its transcript, its store) takes a
+        fraction of a second, so a root of hundreds of runs is only parsed once: the entry is kept
+        in memory and on disk until one of the run's files, or regact's code, changes."""
+        run = (root / name).resolve()
+        signature = [code_signature, _run_signature(run)]
+        key = hashlib.sha1(f"{run}|{name}".encode()).hexdigest()  # the entry carries its name
+        if key in summaries and summaries[key][0] == signature:
+            return summaries[key][1]
+        path = _cache_dir() / (key + ".json")
+        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            if saved["signature"] == signature:
+                summaries[key] = (signature, saved["entry"])
+                return cast(dict[str, Any], saved["entry"])
+        game = reader.load_game(experiment_dir, name)
+        entry = {
+            "name": name,
+            # Grouping keys for the cross-run graphs: an experiment is one agent+problem
+            # config (config.experiment_name), and one experiment holds many runs of many
+            # tasks (some tasks repeated across timestamps -> aggregated in the UI).
+            "experiment": game.config.get("experiment_name") or _experiment_of(name),
+            "agent": {key: (game.config.get("agent") or {}).get(key) for key in ("name", "model")},
+            "task": game.state.get("task_name") or name.rsplit("/", 1)[-1],
+            "state": game.state,
+            "metrics": metrics(game, name),
+        }
+        entry = json.loads(json.dumps(entry))  # what a cached copy returns, for the first call too
+        summaries[key] = (signature, entry)
+        with contextlib.suppress(OSError):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"signature": signature, "entry": entry}), encoding="utf-8")
+            os.replace(tmp, path)
+        return entry
 
     def _require_game(name: str) -> None:
         # Validate this run directly: frame playback must not scan the experiment tree.
