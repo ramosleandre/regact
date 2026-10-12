@@ -759,6 +759,11 @@ async function graphsView(games, onlyExp, scope) {
     const displayExps = orderedExps(group.experiments);   // user order = left-to-right bar order
     clear(expBox);
     expBox.append(expSection(displayExps, expColor, redraw, group.experiments));
+    const scrolled = new Map();   // each chart's legend and chart keep their scroll position
+    for (const card of charts.children)
+      scrolled.set(card.dataset.key, [".chartlegend", ".chartscroll"].map((q) => {
+        const el = card.querySelector(q); return el ? [el.scrollTop, el.scrollLeft] : [0, 0];
+      }));
     clear(charts);
     const activeExps = displayExps.filter((e) => !_graph.hidden.has(e));  // hidden ones drop out
     const g2 = { experiments: activeExps.filter((e) => !_graph.muted.has(e)), tasks: group.tasks, byExp: group.byExp };
@@ -767,6 +772,7 @@ async function graphsView(games, onlyExp, scope) {
       if (!_graph.active.has(spec.key)) continue;
       any = true;
       const card = h("div", "chartcard", h("h3", null, spec.label));
+      card.dataset.key = spec.key;
       const scroll = h("div", "chartscroll");
       const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor, redraw));
       if (spec.curve) {
@@ -790,6 +796,10 @@ async function graphsView(games, onlyExp, scope) {
         card.append(body);
       }
       charts.append(card);
+      (scrolled.get(spec.key) || []).forEach(([top, left], i) => {
+        const el = card.querySelector([".chartlegend", ".chartscroll"][i]);
+        if (el) { el.scrollTop = top; el.scrollLeft = left; }
+      });
     }
     if (!any) charts.append(h("div", "muted", "no metric selected - pick some on the left"));
     if (save) saveSettings();
