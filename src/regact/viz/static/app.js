@@ -735,7 +735,7 @@ async function graphsView(games, onlyExp, scope) {
       any = true;
       const card = h("div", "chartcard", h("h3", null, spec.label));
       const scroll = h("div", "chartscroll");
-      const body = h("div", "chartbody", expLegend(activeExps, expColor), scroll);
+      const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor));
       if (spec.curve) {
         card.append(segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }));
         let hasRef = false;
