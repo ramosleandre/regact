@@ -4,6 +4,7 @@
 const app = document.getElementById("app");
 const crumb = document.getElementById("crumb");
 document.getElementById("brand").onclick = () => { location.hash = ""; };
+document.getElementById("goup").onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
 
 function h(tag, cls, ...kids) {
   const e = document.createElement(tag);
@@ -759,7 +760,11 @@ async function graphsView(games, onlyExp, scope) {
     const displayExps = orderedExps(group.experiments);   // user order = left-to-right bar order
     clear(expBox);
     expBox.append(expSection(displayExps, expColor, redraw, group.experiments));
-    const scrolled = new Map();   // each chart's legend and chart keep their scroll position
+    // A redraw empties the panel for an instant, which would let the browser move the page: the
+    // panel keeps its height meanwhile and the page, each legend and each chart keep their scroll.
+    const pageY = typeof window !== "undefined" && window.scrollY ? window.scrollY : 0;
+    charts.style.minHeight = (charts.offsetHeight || 0) + "px";
+    const scrolled = new Map();
     for (const card of charts.children)
       scrolled.set(card.dataset.key, [".chartlegend", ".chartscroll"].map((q) => {
         const el = card.querySelector(q); return el ? [el.scrollTop, el.scrollLeft] : [0, 0];
@@ -802,6 +807,8 @@ async function graphsView(games, onlyExp, scope) {
       });
     }
     if (!any) charts.append(h("div", "muted", "no metric selected - pick some on the left"));
+    charts.style.minHeight = "";
+    if (pageY) window.scrollTo(0, pageY);
     if (save) saveSettings();
   };
   const sidebar = h("div", "gsidebar", metricControls(specs, redraw), expBox);
