@@ -305,6 +305,7 @@ def test_build_tree_names_each_rung_of_the_hierarchy(tmp_path: Path) -> None:
         f"bench/claude_arc/{s1}/ft09",  # bench holds two experiments -> a benchmark
         f"bench/claude_arc/{s1}/ls20",
         f"bench/codex_arc/{s2}/tn36",
+        f"bench/codex_arc/{s2}-2/tn36",  # a second run started in the same second
         f"solo/{s1}/mg01",  # solo holds runs directly -> a bare experiment
     ]
     for p in paths:
@@ -314,7 +315,8 @@ def test_build_tree_names_each_rung_of_the_hierarchy(tmp_path: Path) -> None:
     by_name = {n["name"]: n for n in tree}
     assert set(by_name) == {"bench", "solo"}
     assert by_name["bench"]["kind"] == "benchmark"
-    assert by_name["bench"]["n_children"] == 2 and by_name["bench"]["n_tasks"] == 3
+    assert by_name["bench"]["n_children"] == 2 and by_name["bench"]["n_tasks"] == 4
+    assert [c["kind"] for c in by_name["bench"]["children"][1]["children"]] == ["run", "run"]
     assert by_name["solo"]["kind"] == "experiment" and by_name["solo"]["n_children"] == 1
     claude = by_name["bench"]["children"][0]  # bench/claude_arc
     assert claude["kind"] == "experiment"

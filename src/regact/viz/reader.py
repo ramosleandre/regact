@@ -153,7 +153,8 @@ def list_games(experiment_dir: str) -> list[str]:
 # A run dir is stamped ``%Y-%m-%d_%H-%M-%S`` (experiment._STAMP_FORMAT). We name runs by this
 # pattern rather than by "its children are all tasks", because a repeated task nests an extra
 # ``<task>/attempt_N`` level (n_attempts_per_task) that would otherwise push every kind up one rung.
-_RUN_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
+# Runs started in the same second get a ``-N`` suffix.
+_RUN_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$")
 
 
 def build_tree(experiment_dir: str) -> list[dict[str, Any]]:
