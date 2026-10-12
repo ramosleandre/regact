@@ -155,6 +155,7 @@ h2.expsection { margin-top: 22px; font-size: 15px; }
 .chartlegend .leg { cursor: pointer; }
 .chartlegend .leg:hover, .chartlegend .leg.on { color: var(--fg); }
 .chartlegend .leg.on { font-weight: 700; }
+.chartlegend .leg.off { text-decoration: line-through; opacity: .55; }
 main:has(.graphs) { max-width: none; }
 .chart { display: block; }
 .chart .gridline { stroke: var(--line); stroke-width: 1; }

@@ -237,7 +237,7 @@ function saveSettings() {   // debounced PUT of the whole panel state for the cu
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
     order: _graph.order, colors: _graph.colors, curveX: _graph.curveX,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
-    perRun: [..._graph.perRun],
+    perRun: [..._graph.perRun], muted: [..._graph.muted],
   };
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
@@ -263,7 +263,8 @@ const _graph = {
   active: new Set(),  // set by applySettings: saved selection, else the Main metrics
   hidden: new Set(), colors: {}, order: [],
   known: [],   // metric keys offered when the selection was saved; a Main one added since is shown
-  perRun: new Set(),   // experiments whose individual runs are drawn (toggled in a chart's legend)
+  // A chart legend entry cycles: drawn -> not drawn (muted) -> drawn with each run (perRun) -> drawn.
+  muted: new Set(), perRun: new Set(),
 };
 
 // Apply a saved settings blob onto _graph for the current interface; a missing key falls back to the
@@ -279,6 +280,7 @@ function applySettings(s, specs) {
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
   _graph.perRun = new Set(Array.isArray(s.perRun) ? s.perRun : []);
+  _graph.muted = new Set(Array.isArray(s.muted) ? s.muted : []);
   _graph.known = specs.map((spec) => spec.key);
   if (Array.isArray(s.active)) {
     _graph.active = new Set(s.active);
@@ -649,15 +651,21 @@ function legend(items) {   // items: [{label, color}] — the static status lege
   for (const it of items) l.append(h("span", "leg", swatch(it.color), " " + it.label));
   return l;
 }
-// The experiments drawn in a chart, in bar order, beside it (scrolls when there are many). Clicking
-// one draws each of its runs on every chart: a tick per run on its bars, a faint line per run on
-// the curves.
+// The experiments of a chart, in bar order, beside it (scrolls when there are many). Clicking one
+// cycles it on every chart: drawn, not drawn, drawn with each of its runs (a tick per run on its
+// bars, a dashed line per run on the curves), then drawn again.
 function expLegend(experiments, expColor, redraw) {
   const l = h("div", "chartlegend");
   for (const exp of experiments) {
-    const row = h("div", "leg" + (_graph.perRun.has(exp) ? " on" : ""), swatch(expColor(exp)), expLeaf(exp));
-    row.title = exp + "\nclick to show / hide each run";
-    row.onclick = () => { _graph.perRun.has(exp) ? _graph.perRun.delete(exp) : _graph.perRun.add(exp); redraw(); };
+    const state = _graph.muted.has(exp) ? "off" : _graph.perRun.has(exp) ? "on" : "";
+    const row = h("div", "leg " + state, swatch(expColor(exp)), expLeaf(exp));
+    row.title = exp + "\nclick: " + (state === "off" ? "show each run" : state === "on" ? "back to the aggregate" : "hide");
+    row.onclick = () => {
+      _graph.muted.delete(exp); _graph.perRun.delete(exp);
+      if (state === "") _graph.muted.add(exp);
+      else if (state === "off") _graph.perRun.add(exp);
+      redraw();
+    };
     l.append(row);
   }
   return l;
@@ -748,7 +756,7 @@ async function graphsView(games, onlyExp, scope) {
     expBox.append(expSection(displayExps, expColor, redraw, group.experiments));
     clear(charts);
     const activeExps = displayExps.filter((e) => !_graph.hidden.has(e));  // hidden ones drop out
-    const g2 = { experiments: activeExps, tasks: group.tasks, byExp: group.byExp };
+    const g2 = { experiments: activeExps.filter((e) => !_graph.muted.has(e)), tasks: group.tasks, byExp: group.byExp };
     let any = false;
     for (const spec of specs) {
       if (!_graph.active.has(spec.key)) continue;
