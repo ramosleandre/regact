@@ -269,8 +269,12 @@ def test_build_alan_agent_forwards_sweep_settings(monkeypatch) -> None:
             "empty_response_retries": "3",
             "bash_timeout_ms": 240000,
             "compaction_threshold_percent": "95",
+            "carry_reasoning_until_call": "true",
+            "run_reasoning_closing_call": False,
         },
     )
+    assert captured["settings"]["carry_reasoning_until_call"] is True
+    assert captured["settings"]["run_reasoning_closing_call"] is False
     assert captured["settings"]["compaction_threshold_percent"] == 95
     assert captured["settings"]["persist_thinking"] is True  # string coerced
     assert captured["settings"]["empty_response_retries"] == 3  # int coerced
@@ -287,6 +291,7 @@ def test_build_alan_agent_omits_unset_sweep_settings(monkeypatch) -> None:
     assert "persist_thinking" not in captured.get("settings", {})
     assert "empty_response_retries" not in captured.get("settings", {})
     assert "bash_timeout_ms" not in captured.get("settings", {})
+    assert "carry_reasoning_until_call" not in captured.get("settings", {})
 
 
 def test_remote_agent_does_not_apply_unrequested_settings(monkeypatch) -> None:

@@ -132,6 +132,9 @@ def build_alan_agent(
         ("bash_timeout_ms", int),
         ("compaction_threshold_percent", int),
         ("vision", _as_bool),
+        ("stop_at_first_call", _as_bool),
+        ("run_reasoning_closing_call", _as_bool),
+        ("carry_reasoning_until_call", _as_bool),
     ):
         raw = args.get(name)
         if raw is None:
