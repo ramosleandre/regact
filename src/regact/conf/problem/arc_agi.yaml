@@ -7,3 +7,4 @@ seed: null              # ignored by deterministic ARC; here so the override com
 kwargs:
   operation_mode: offline
   environments_dir: environnement
+  max_levels: null       # N = every game has N levels: completing level N is the win, nothing exists after

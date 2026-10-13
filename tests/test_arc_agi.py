@@ -295,3 +295,55 @@ def test_trace_metrics_score_all_task_actions() -> None:
         "relative_env_actions": 1.0,
     }
     assert _problem().derived_trace_metrics("ls20", []) == {"rhae": 0.0, "lrhae_uncapped": 0.0}
+
+
+# The first 77 actions of a recorded ls20 run: level 1 is completed at action 32, level 2 at 77.
+_LS20_TWO_LEVELS = [
+    4, 4, 1, 3, 4, 4, 3, 4, 3, 2, 2, 3, 2, 1, 3, 2, 3, 1, 1, 3, 3, 3, 1, 1, 1, 1, 4, 4, 4, 1, 1, 1,
+    1, 4, 1, 1, 1, 1, 1, 4, 4, 4, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1,
+    3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2,
+]  # fmt: skip
+
+
+def test_max_levels_makes_every_part_see_a_shorter_game() -> None:
+    """With max_levels=N the game has N levels: baseline, prompt, reference and scores stop there."""
+    capped = ArcAgiProblem(environments_dir=_ENV_DIR, max_levels=2)
+    full = _problem()
+    assert full._task("ls20").win_levels == 7
+    task = capped._task("ls20")
+    assert task.win_levels == 2 and task.baseline_actions == full._task("ls20").baseline_actions[:2]
+    assert capped.progress_reference("ls20") == full.progress_reference("ls20")[:2]
+    assert "Levels to win: 2" in capped.build_prompt("ls20", info_mode=InfoMode.INFORMATIVE)
+
+    def info(levels: int) -> dict[str, object]:
+        return {"levels_completed": levels, "win_levels": 2, "state": "WIN" if levels == 2 else "X"}
+
+    human = task.baseline_actions
+    trace = [(human[0], info(1)), (human[0] + human[1], info(2))]
+    assert capped.derived_trace_metrics("ls20", trace)["rhae"] == 1.0  # both levels at human pace
+    assert capped.derived_trace_metrics("ls20", trace[:1])["rhae"] == round(1 / 3, 3)
+    won = capped.compute_episode_metrics(Obs(frame=[], available_actions=[], info=info(2)), steps=9)
+    assert capped.is_perfect(capped.aggregate_episode_metrics([won]))
+    with pytest.raises(ValueError, match="max_levels"):
+        ArcAgiProblem(environments_dir=_ENV_DIR, max_levels=0)
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("cap", [1, 2])
+def test_max_levels_ends_the_real_game_as_a_win(cap: int) -> None:
+    pytest.importorskip("arc_agi")
+    pytest.importorskip("arcengine")
+    native = ArcAgiProblem(environments_dir=_ENV_DIR, max_levels=cap).make_env("ls20")
+    native.reset()
+    for step, action in enumerate(_LS20_TWO_LEVELS, start=1):
+        _obs, reward, done, _, info = native.step(action)
+        assert info["win_levels"] == cap
+        if done:
+            break
+    assert step == {1: 32, 2: 77}[cap] and reward == 1.0
+    assert info["state"] == "WIN" and info["levels_completed"] == cap
+    env = SimpleNamespace(
+        last_obs=SimpleNamespace(info=info),
+        prev_obs=SimpleNamespace(info={"levels_completed": cap - 1}),
+    )
+    assert _milestone_detector(env) == [f"level completed ({cap}/{cap})", "game won"]

@@ -13,6 +13,7 @@ RESET is a level reset), guarded by ``SingleInstancePolicy`` — not here.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 from collections.abc import Iterable
@@ -94,10 +95,11 @@ class _ArcGymShim:
     mapped to a native ``GameAction`` here, so the conversion stays server-side.
     """
 
-    def __init__(self, arc_env: Any) -> None:
+    def __init__(self, arc_env: Any, *, max_levels: int | None = None) -> None:
         from arcengine import GameAction, GameState
 
         self._env = arc_env
+        self._max_levels = max_levels  # the game is won at this level; None = the game's own end
         self._GameAction = GameAction
         self._GameState = GameState
         self._last: Any = getattr(arc_env, "_last_response", None)
@@ -175,20 +177,29 @@ class _ArcGymShim:
     def _outcome(self, obs: Any) -> tuple[float, bool]:
         if obs is None:
             return 0.0, False
-        if obs.state == self._GameState.WIN:
+        if obs.state == self._GameState.WIN or self._capped_win(obs):
             return 1.0, True
         if obs.state == self._GameState.GAME_OVER:
             return 0.0, True
         return 0.0, False
 
+    def _capped_win(self, obs: Any) -> bool:
+        return self._max_levels is not None and getattr(obs, "levels_completed", 0) >= self._max_levels
+
     def _info(self, obs: Any) -> dict[str, Any]:
         if obs is None:
             return {}
+        state = obs.state.name if getattr(obs, "state", None) is not None else None
+        levels, total = getattr(obs, "levels_completed", 0), getattr(obs, "win_levels", 0)
+        if self._max_levels is not None:  # the game has max_levels levels and nothing after
+            total = min(total, self._max_levels) if total else self._max_levels
+            if self._capped_win(obs):
+                state, levels = self._GameState.WIN.name, total
         return {
             "available_actions": list(getattr(obs, "available_actions", [])),
-            "state": obs.state.name if getattr(obs, "state", None) is not None else None,
-            "levels_completed": getattr(obs, "levels_completed", 0),
-            "win_levels": getattr(obs, "win_levels", 0),
+            "state": state,
+            "levels_completed": levels,
+            "win_levels": total,
         }
 
 
@@ -346,9 +357,15 @@ class ArcAgiProblem(BaseProblem):
         *,
         environments_dir: str = _DEFAULT_DIR,
         operation_mode: str = "offline",
+        max_levels: int | None = None,
     ) -> None:
+        if max_levels is not None and int(max_levels) < 1:
+            raise ValueError("max_levels must be a positive integer or null")
         self._dir = environments_dir
         self._operation_mode = operation_mode
+        # Every game is treated as having at most this many levels: completing the last one is
+        # the win, and the baseline, the scores and the prompt know no level after it.
+        self._max_levels = int(max_levels) if max_levels is not None else None
         self._arcade: Any = None
         if self._is_online:
             # Online (Kaggle gateway): no local metadata — the served arcade
@@ -367,6 +384,15 @@ class ArcAgiProblem(BaseProblem):
                 environments_dir,
                 operation_mode,
             )
+        if self._max_levels is not None:
+            self._tasks = {
+                key: dataclasses.replace(
+                    task,
+                    win_levels=min(task.win_levels or self._max_levels, self._max_levels),
+                    baseline_actions=(task.baseline_actions or ())[: self._max_levels] or None,
+                )
+                for key, task in self._tasks.items()
+            }
 
     @property
     def _is_online(self) -> bool:
@@ -403,7 +429,7 @@ class ArcAgiProblem(BaseProblem):
                 ErrorCategory.ENV_RUNTIME,
                 f"Arcade.make({task.game_id!r}) returned None (check environments_dir)",
             )
-        return _ArcGymShim(arc_env)
+        return _ArcGymShim(arc_env, max_levels=self._max_levels)
 
     def get_task_names(self) -> list[str]:
         return list(self._tasks)
