@@ -136,6 +136,7 @@ def build_prompt(
         INITIAL_GUIDANCE=initial_guidance,
         PROTOCOL_STEPS=(workflow_steps if workflow_steps is not None else _render("vanilla_steps.md")).strip(),
         LIFECYCLE=lifecycle_instructions(config, problem),
+        OBJECTIVE_NOTE=" " + config.objective_note if config.objective_note else "",
     )
     return PromptBuilder().assemble_system_prompt(
         [

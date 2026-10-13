@@ -165,3 +165,40 @@ def test_text_only_agent_is_never_offered_images(name, tmp_path):
     )
     for f in files:
         assert "save_image" not in f.content and "image-reading tool" not in f.content, f.relpath
+
+
+def test_objective_note_is_appended_identically_to_both_protocols():
+    problem = ArcAgiProblem(
+        environments_dir=str(Path(__file__).resolve().parents[1] / "environnement")
+    )
+    note = "Your score depends on the number of game actions: fewer is better."
+    objective = {}
+    for name in ("vanilla", "cwm"):
+        for text in (None, note):
+            config = RunConfig(
+                AgentConfig(AgentName.CLAUDE, vision=True),
+                ProblemConfig(problem.name),
+                protocol=ProtocolConfig(name),
+                objective_note=text,
+            )
+            protocol = build_protocol(config)
+            commands = (
+                enabled_commands(protocol.options) if name == "cwm" else {"RunController": ""}
+            )
+            prompt = protocol.build_system_prompt(
+                problem,
+                "ls20",
+                tool_protocol="client_cli",
+                tool_names=[*commands, *reset_commands(config, problem)],
+                verbalize_variant="off",
+            )
+            assert not re.search(r"__[A-Z_]+__", prompt)
+            (line,) = [ln for ln in prompt.splitlines() if ln.startswith("- **Final objective.**")]
+            objective[name, text] = line
+    assert objective["vanilla", note] == objective["cwm", note]
+    assert objective["vanilla", note] == objective["vanilla", None] + " " + note
+    assert note not in objective["cwm", None]
+
+    blocked = RunConfig(AgentConfig(AgentName.SCRIPTED), ProblemConfig("fake"), objective_note=note)
+    with pytest.raises(ValueError, match="objective_note"):
+        build_protocol(blocked).validate()

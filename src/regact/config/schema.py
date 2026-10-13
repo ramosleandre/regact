@@ -147,6 +147,9 @@ class RunConfig:
     # so a run collects several attempts per task to aggregate over. 1 = each task once.
     n_attempts_per_task: int = 1
     first_obs_in_prompt: bool = False  # render the first observation into the first message
+    # Text appended to the "Final objective" of the vanilla and CWM prompts, the same for both
+    # (e.g. what is scored). None = the prompt as it is.
+    objective_note: str | None = None
     # When a tool call is flagged (sandbox/security rule), inject a one-off warning to the agent
     # after tools (CLI: next outer turn), up to this many times per task. 0 disables messages.
     flagging_warning_cap: int = 3
