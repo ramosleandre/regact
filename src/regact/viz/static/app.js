@@ -564,18 +564,20 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
   }
   for (const f of [0, 0.25, 0.5, 0.75, 1])
     s.append(svg("text", { class: "xlab", x: xOf(xMax * f), y: H - padB + 16, "text-anchor": "middle" }, txt(X.fmt(Math.round(xMax * f)))));
-  const steps = (ys) => {   // step-after path through (grid[i], ys[i]); null = no run there
+  const steps = (ys, xs = grid) => {   // step-after path through (xs[i], ys[i]); null = no run there
     let d = "", pen = false;
-    grid.forEach((x, i) => {
+    xs.forEach((x, i) => {
       if (ys[i] == null) { pen = false; return; }
       d += pen ? ` V${yOf(ys[i])}` : ` M${xOf(x)},${yOf(ys[i])}`;
       pen = true;
-      if (i + 1 < grid.length) d += ` H${xOf(grid[i + 1])}`;
+      if (i + 1 < xs.length) d += ` H${xOf(xs[i + 1])}`;
     });
     return d;
   };
   if (ref.length) {
-    const path = svg("path", { class: "curve-ref", d: steps(grid.map((x) => curveAt({ pts: ref }, x))) });
+    // On its own points: the runs' grid would move each of its steps to the next run event.
+    const refXs = [0, ...ref.map((q) => q[0]).filter((x) => x < xMax), xMax];
+    const path = svg("path", { class: "curve-ref", d: steps(refXs.map((x) => curveAt({ pts: ref }, x)), refXs) });
     path.append(svg("title", {}, txt("reference player")));
     s.append(path);
   }
