@@ -165,6 +165,8 @@ class PolicySearchProtocol(ExperimentProtocol):
         self.features = build_features(config.features)
 
     def validate(self) -> None:
+        if self.config.objective_note:
+            raise ValueError("objective_note applies to the vanilla and cwm protocols only")
         if self.config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE and (
             self.controller.evaluates_on_env
             or any(feature.evaluates_on_env for feature in self.features)
