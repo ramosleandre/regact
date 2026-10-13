@@ -18,6 +18,8 @@
 #   N_EPISODES            default `1` (controller eval episodes per submission)
 #   CONTEXT_WINDOW        default `30000` (agent.args.context_window)
 #   TOOL_CALL_FORMAT      default empty = native; e.g. `hermes` to force text format
+#   OBJECTIVE_NOTE        default empty. A sentence appended to the prompt's "Final objective"
+#                         (vanilla / cwm), e.g. what is scored; passed as objective_note.
 #   CONCURRENCY           default `4`. Tasks run against the shared endpoint this many
 #                         at a time (1 = sequential). SimpleLM serializes generation
 #                         under a lock, so this does NOT batch decode; the win is that
@@ -107,6 +109,9 @@ EXTRA_ARGS=("++agent.args.context_window=${CONTEXT_WINDOW}")
 # Per-run hydra overrides forwarded from the sbatch (max_output_tokens, escalated_max_tokens,
 # tool_protocol, sandbox_opts.*, limits.*); space-separated, word-split into the arg array.
 [ -n "${EXTRA_HYDRA:-}" ] && EXTRA_ARGS+=(${EXTRA_HYDRA})
+# A sentence cannot go through EXTRA_HYDRA (word-split), so the objective note has its own
+# variable. One argument, double-quoted for Hydra (colons, commas), its own " escaped.
+[ -n "${OBJECTIVE_NOTE:-}" ] && EXTRA_ARGS+=("objective_note=\"${OBJECTIVE_NOTE//\"/\\\"}\"")
 
 IFS=',' read -ra TASKS <<< "${TASK_NAMES}"
 WORK_DIR="$(mktemp -d)"  # per-task exit codes + unique Hydra run dirs (outside experiments/)
