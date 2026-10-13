@@ -542,11 +542,12 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
     .filter((sr) => sr.runs.length);
   if (!series.length) return null;
   const all = series.flatMap((sr) => sr.runs);
-  const ref = xName === "env actions"
-    ? ((((group.byExp.get(series[0].exp) || new Map()).get(task) || []).find((m) => m.progress) || {}).progress || {}).reference || []
-    : [];
+  // The reference player is known in env actions only, but its top value sets the y axis for every
+  // x, so the same run reads at the same height whichever x is chosen.
+  const reference = ((((group.byExp.get(series[0].exp) || new Map()).get(task) || []).find((m) => m.progress) || {}).progress || {}).reference || [];
+  const ref = xName === "env actions" ? reference : [];
   const xMax = Math.max(1, ...all.map((r) => r.end));
-  const yMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[1])), ...ref.map((q) => q[1]));
+  const yMax = Math.max(1, ...all.flatMap((r) => r.pts.map((q) => q[1])), ...reference.map((q) => q[1]));
   // Each run also gets a point just after its end, so it leaves the aggregate there and not at
   // whichever point of another run comes next.
   const eps = xMax / 2000;

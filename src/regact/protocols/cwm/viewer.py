@@ -71,7 +71,8 @@ def progress(
 
 
 def _timestamps(path: Path, key: str, wanted: tuple[str, ...]) -> list[tuple[float, str]]:
-    """``(UNIX time, name)`` of the lines of a JSON-lines log whose ``key`` is in ``wanted``."""
+    """``(UNIX time, name)`` of the lines of a JSON-lines log whose ``key`` is in ``wanted``
+    (every line when ``wanted`` is empty)."""
     out: list[tuple[float, str]] = []
     if not path.is_file():
         return out
@@ -79,7 +80,7 @@ def _timestamps(path: Path, key: str, wanted: tuple[str, ...]) -> list[tuple[flo
         for line in handle:
             try:
                 item = json.loads(line)
-                if item.get(key) in wanted:
+                if not wanted or item.get(key) in wanted:
                     out.append((datetime.fromisoformat(item["ts"]).timestamp(), item[key]))
             except (ValueError, KeyError, TypeError):
                 continue
@@ -98,13 +99,15 @@ def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]
                 reached.setdefault(int(step), float(at))
     calls = [at for at, _ in _timestamps(task / "logs/transcript.jsonl", "type", ("ToolCall",))]
     sessions: list[list[float]] = []  # [start, end] of each stretch the agent worked
-    for at, name in _timestamps(
-        task / "logs/events.jsonl", "event", ("session_start", "session_end")
-    ):
+    seen = 0.0
+    for at, name in _timestamps(task / "logs/events.jsonl", "event", ()):
         if name == "session_start":
+            if sessions and sessions[-1][1] == float("inf"):
+                sessions[-1][1] = seen  # it died without a session_end: it worked until its last event
             sessions.append([at, float("inf")])
-        elif sessions:
+        elif name == "session_end" and sessions:
             sessions[-1][1] = at
+        seen = at
     points: list[dict[str, Any]] = []
     best = 0.0
     for step, (actions, info) in enumerate(trace, start=1):
