@@ -214,9 +214,12 @@ const AGGREGATORS = {
   min: (xs) => Math.min(...xs),
   max: (xs) => Math.max(...xs),
 };
-// A run "finished" iff it ended cleanly: it has an exit_reason and no error category. Crashed /
-// unfinished runs (agent_api, eval_harness, loop_crash, still-running…) are dropped when masking.
-const isValidRun = (m) => !m.last_error_category && !!m.exit_reason;
+// A run "finished" iff it ended for a reason of the task itself (solved, a budget, gave up...).
+// Dropped when masking: a run still going or whose process died (no exit_reason), and one that
+// ended on something outside the task - the exits regact can resume. An error the run recovered
+// from (last_error_category) does not count: it went on and finished.
+const _CRASH_EXITS = new Set(["agent_api", "loop_crash", "interrupted", "usage_limit"]);
+const isValidRun = (m) => !!m.exit_reason && !_CRASH_EXITS.has(m.exit_reason);
 // Panel settings persist PER INTERFACE server-side (~/.regact via /api/settings, keyed by the graph
 // `under` scope), so they survive sessions/browsers and viz updates. Checked-in per-model defaults
 // (colors + order) live in static/model_defaults.json. Precedence: saved override > model default >

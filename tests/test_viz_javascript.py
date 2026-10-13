@@ -71,6 +71,11 @@ vm.runInContext(String.raw`
   const grid = {metrics: {main_metrics: ['success_rate'], success_rate: 1, final_aggregate: {}}};
   if (!metricSpecs([grid]).find((s) => s.key === 'success_rate').main) throw Error('MiniGrid success');
   if (FRAMEWORK_METRICS.some((s) => 'main' in s)) throw Error('shared spec mutated');
+  const ended = (exit_reason, last_error_category) => isValidRun({exit_reason, last_error_category});
+  if (!ended('walltime_limit', 'agent_api')) throw Error('a run that recovered and finished is masked');
+  if (!ended('solved') || !ended('no_tool_progress')) throw Error('a finished run is masked');
+  for (const crash of ['agent_api', 'loop_crash', 'interrupted', 'usage_limit', null])
+    if (ended(crash)) throw Error('a crashed or unfinished run is kept: ' + crash);
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
