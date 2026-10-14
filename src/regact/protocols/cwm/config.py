@@ -52,6 +52,7 @@ class CwmConfig:
     max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
+    one_command_per_tool_call: bool = True
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
@@ -77,7 +78,7 @@ class CwmConfig:
                     validate(value, prefix + key + ".")
                 elif key.startswith("max_") and value is None:
                     continue
-                elif key in ("workspace_helpers_enabled", "enabled"):
+                elif key in ("workspace_helpers_enabled", "one_command_per_tool_call", "enabled"):
                     if type(value) is not bool:
                         raise ValueError(f"{prefix}{key} must be a boolean")
                 elif key == "n_tmp_images_saved_per_exploration":

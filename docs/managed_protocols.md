@@ -172,6 +172,7 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 | `protocol.max_seconds_per_initial_collection` | `30` | Initial collection wall time |
 | `protocol.max_actions_per_RunController` | `2500` | Real actions in one `RunController` |
 | `protocol.n_tmp_images_saved_per_exploration` | `0` | Maximum automatic previews per call; above `0` requires `agent.vision=true` |
+| `protocol.one_command_per_tool_call` | `true` | Each agent tool call may issue one framework command of each name (one `RunController`, one reset, one `UpdateCodeWorldModel`); a repeat inside the same call, from a shell loop or a background process, is refused with an explanation and not executed. A command the framework cannot attribute to any tool call runs |
 | `protocol.execution.max_seconds_per_call` | `5` | One isolated callback/startup, including communication and serialization |
 | `protocol.execution.max_seconds_per_RunController` | `90` | Time spent in submitted code during one `RunController`: CWM and controller callbacks plus their module imports. Environment steps, the experience store and framework checks are not charged |
 | `protocol.execution.max_memory_mb` | `2048` | MiB per isolated submitted-code process |

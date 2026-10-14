@@ -514,6 +514,7 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
 async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOutcome) -> None:
     """Route one event: execute framework tools, record backend errors, else observe."""
     if isinstance(event, ToolCall):
+        ctx.protocol.tool_call_started(event.id)
         outcome.pending_tools.add(event.id)
         outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
         ctx.experiment.tool_calls_total += 1
@@ -527,8 +528,10 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
                 ctx.transcript.write(UserMessage(notice))
                 await ctx.agent.inject(notice)
             outcome.pending_tools.discard(event.id)
+            ctx.protocol.tool_call_finished(event.id)
     elif isinstance(event, ToolResult):
         outcome.pending_tools.discard(event.id)
+        ctx.protocol.tool_call_finished(event.id)
         if not event.executed:  # never ran (e.g. cut at the output cap): refund its budget
             ctx.experiment.tool_calls_total -= 1
         await _flag_blocked_result(event, ctx)  # the OS sandbox denied an op (file/network)

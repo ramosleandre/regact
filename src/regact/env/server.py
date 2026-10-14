@@ -173,7 +173,7 @@ class EnvServer:
             tool = tools_by_name.get(name)
             if tool is None:
                 raise HTTPException(status_code=404, detail=f"unknown tool {name!r}")
-            detail = {}
+            detail = {"channel": "control"}
             if token := request.headers.get("X-Regact-Request-ID"):
                 detail["request_id"] = token
             output = await tool.call(body.get("input") or {}, ToolContext(cwd=cwd, detail=detail))

@@ -25,6 +25,7 @@ class VanillaConfig:
     max_seconds_per_initial_collection: float | None = 30
     max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
+    one_command_per_tool_call: bool = True
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     data_api: DataApiConfig = field(default_factory=DataApiConfig)
@@ -46,6 +47,9 @@ class VanillaConfig:
                     check(value)
                 elif key.startswith("max_") and value is None:
                     continue
+                elif key == "one_command_per_tool_call":
+                    if type(value) is not bool:
+                        raise ValueError(f"{key} must be a boolean")
                 elif (
                     isinstance(value, bool)
                     or not isinstance(value, (int, float))

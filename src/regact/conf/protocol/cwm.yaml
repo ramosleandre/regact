@@ -16,6 +16,8 @@ planner:
   max_cwm_calls_per_planner_call: 10000
   max_nodes_per_planner_call: 10000
   max_depth_per_planner_call: 100
+# A second command of the same name in one agent tool call is refused.
+one_command_per_tool_call: true
 execution:
   max_seconds_per_call: 5
   max_seconds_per_UpdateCodeWorldModel: 90  # seconds of submitted code per validation, at least

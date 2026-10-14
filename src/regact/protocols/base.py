@@ -91,6 +91,13 @@ class ProtocolSession(ABC):
         """Release protocol resources on every exit, including dry runs."""
         return None
 
+    def tool_call_started(self, call_id: str) -> None:
+        """The agent began a tool call (any tool), as read from its event stream."""
+        return None
+
+    def tool_call_finished(self, call_id: str) -> None:
+        return None
+
     def resume_notice(self) -> str:
         """Where the task stands, added to the message a resumed agent receives."""
         return ""

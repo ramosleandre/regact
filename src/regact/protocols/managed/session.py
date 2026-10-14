@@ -38,6 +38,7 @@ from regact.protocols.cwm.store import (
 )
 from regact.protocols.cwm.validation import differences
 from regact.protocols.cwm.worker import Worker, WorkerError
+from regact.protocols.managed.grants import GRANT_WAIT_LOGGED_SECONDS, CommandGrants
 from regact.protocols.managed.prompting import reset_commands
 from regact.protocols.managed.resume import rebuild_environment
 from regact.security.runtime import SandboxRuntime
@@ -111,6 +112,7 @@ class ManagedCoordinator:
         self.closed = False
         self.episode: int | None = None
         self.active_request: int | None = None
+        self.grants = CommandGrants()
         self.initial: dict[str, Any] = {}
         self.initial_id = 0
         self.initial_collection: dict[str, Any] | None = None
@@ -1046,6 +1048,11 @@ class ManagedCoordinator:
             self.persist()
             return response
 
+    def note_grant(self, name: str, outcome: str, waited: float) -> None:
+        with self.lock:
+            if not self.closed:
+                self.event(f"command_{outcome}", command=name, waited_seconds=round(waited, 3))
+
     async def shutdown(self, reason: str | None) -> None:
         # Signal active workers before waiting for the coordinator lock. A disconnected
         # HTTP client must not leave real exploration running until its ordinary deadline.
@@ -1150,6 +1157,37 @@ class ManagedTool(Tool):
         internal_args: dict[str, Any] = {}
         if context.detail.get("request_id"):
             internal_args["request_id"] = context.detail["request_id"]
+        # Only shell-issued commands can be multiplied inside one tool call.
+        if (
+            context.detail.get("channel") == "control"
+            and self.coordinator.options.one_command_per_tool_call
+        ):
+            outcome, waited = await self.coordinator.grants.claim(
+                self.name, internal_args.get("request_id")
+            )
+            if outcome != "granted" or waited >= GRANT_WAIT_LOGGED_SECONDS:
+                await asyncio.to_thread(
+                    self.coordinator.note_grant,
+                    self.name,
+                    "delayed" if outcome == "granted" else outcome,
+                    waited,
+                )
+            if outcome == "refused":
+                return ToolOutput(
+                    data=format_feedback(
+                        {
+                            "status": "Refused",
+                            "message": (
+                                f"Only one {self.name} is accepted per tool call, and one was "
+                                f"already issued since your last tool call started. This "
+                                f"{self.name} was NOT executed. To run it, issue {self.name} "
+                                "again in a new tool call. Commands issued by a loop or a "
+                                "background process are refused the same way."
+                            ),
+                        }
+                    ),
+                    is_error=True,
+                )
         job = asyncio.create_task(
             asyncio.to_thread(self.coordinator.tool, self.name, internal_args)
         )
@@ -1188,6 +1226,12 @@ class ManagedSession(ProtocolSession):
 
     def task_metrics(self) -> dict[str, Any] | None:
         return self.coordinator.task_metrics()
+
+    def tool_call_started(self, call_id: str) -> None:
+        self.coordinator.grants.call_started(call_id)
+
+    def tool_call_finished(self, call_id: str) -> None:
+        self.coordinator.grants.call_finished(call_id)
 
     def reminder(self, reminders: int) -> str:
         phase = self.coordinator.phase
