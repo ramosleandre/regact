@@ -11,25 +11,9 @@ import pytest
 from regact.config.schema import AgentName
 from regact.protocols.cwm.feedback import present
 from regact.protocols.cwm.session import CwmTool
-from regact.protocols.cwm.validation import differences
 from regact.tools.base import ToolContext
 from test_cwm_protocol import accept, exploration
 from test_cwm_protocol import rig as rig
-
-
-def test_structural_differences_count_omissions_without_losing_shape_changes():
-    expected = {"frame": [[1, 2], [3]], "info": {"a": 1}}
-    observed = {"frame": [[9], [4, 5], [6]], "info": {"b": 2}}
-    full = differences(expected, observed, 100)
-    assert "differences_omitted" not in full
-    paths = [d["path"] for d in full["differences"]]
-    assert "frame.length" in paths and "frame[0].length" in paths
-    assert "frame[1].length" in paths and "frame[0][0]" in paths
-    short = differences(expected, observed, 2)
-    assert short["differences"] == full["differences"][:2]
-    assert short["differences_omitted"] == len(full["differences"]) - 2
-    assert differences(0, 0.0, 1)["differences"][0]["path"] == "type"
-    assert differences({"frame": [1]}, {"frame": 1}, 1)["differences"][0]["path"] == "frame.type"
 
 
 @pytest.mark.integration

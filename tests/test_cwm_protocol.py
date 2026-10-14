@@ -354,7 +354,7 @@ def test_bad_reconstruction_and_compression_are_rejected(rig):
     assert not result["accepted"] and result["complete"]
     # The episode's first screen is not reproduced, so the episode stops there.
     assert result["failures"] == {"reconstruction_mismatch": 1}
-    assert result["counterexamples"][0]["diagnostic_id"]
+    assert result["counterexamples"][0]["full_data"].startswith("data_api.load_diagnostic(")
     model(c.workdir)
     c.options.threshold_max_state_obs_size_ratio = 0.01
     assert "compression_ratio" in c.tool("UpdateCodeWorldModel", {})["failures"]

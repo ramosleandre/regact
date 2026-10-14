@@ -104,6 +104,8 @@ class Coordinator(ManagedCoordinator):
             self.running = self.current_state = None
             raise ModelMismatch("prediction_mismatch", predicted, obs, public_evidence(evidence))
         self.current_state = self.next_state
+        if "explained_until" in self.accepted:
+            self.accepted["explained_until"] = evidence["event_id"]
         self._check_size(self.current_state, obs, evidence["after_obs_id"])
         if self.single_instance:
             self.running = {"state": self.current_state, "hash": evidence["history_hash"]}
@@ -175,6 +177,8 @@ class Coordinator(ManagedCoordinator):
                 self.store,
                 self.options,
                 live_episode=self.episode if self.single_instance else None,
+                progress=self.step_progress,
+                explained_until=(self.accepted or {}).get("explained_until"),
             )
         record = {
             "bundle": bundle.name,
@@ -194,6 +198,8 @@ class Coordinator(ManagedCoordinator):
                 "bundle": bundle.name,
                 "dataset_version": self.store.version,
                 "validation": summary,
+                # The last step event this version predicted: every one recorded so far.
+                "explained_until": self.store.last_step_event_id(),
             }
             self.running = live
             self.state_sizes = {

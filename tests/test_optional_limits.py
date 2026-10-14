@@ -12,7 +12,8 @@ from regact.orchestration.loop import _decide_stop
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.ids import expand_id_ranges
 from regact.protocols.cwm.limits import truncate_error
-from regact.protocols.cwm.validation import differences
+from regact.protocols.cwm.config import FeedbackConfig
+from regact.protocols.cwm.differences import summarize
 from test_cwm_protocol import exploration, model
 from test_cwm_protocol import rig as rig
 
@@ -30,7 +31,7 @@ def test_every_protocol_max_parameter_accepts_null():
     assert asdict(cfg) == raw
     assert cfg.n_unique_observations_in_initial_collection == 20
     assert expand_id_ranges("[1:250]", max_items=None) == list(range(1, 251))
-    assert len(differences([1, 2], [3, 4, 5], None)["differences"]) == 3
+    assert len(summarize({"v": [{}, {}, {}]}, {"v": [1, 2, 3]}, FeedbackConfig(max_diff_items=None))["v"]) == 3
     for invalid in (-1, 0, True, float("inf")):
         with pytest.raises(ValueError):
             CwmConfig.from_mapping({"execution": {"max_seconds_per_call": invalid}})

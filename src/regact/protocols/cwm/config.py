@@ -33,7 +33,10 @@ class ExecutionConfig:
 @dataclass
 class FeedbackConfig:
     max_counterexamples: int | None = 5
-    max_diff_items: int | None = 6
+    max_diff_items: int | None = 6  # values listed per field
+    max_diff_regions: int | None = 4  # regions listed per grid
+    max_diff_changes: int | None = 4  # colour changes listed per region
+    max_crop_cells: int | None = 64  # largest region shown as a crop
     max_error_chars: int | None = 1000
 
 

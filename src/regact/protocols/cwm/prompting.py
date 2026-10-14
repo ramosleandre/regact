@@ -19,6 +19,7 @@ _DOCS = {
     "CWM_modeling_phase.md": "docs/CWM_modeling_phase.md",
     "active_exploration_phase.md": "docs/active_exploration_phase.md",
     "plan_in_CWM.md": "docs/plan_in_CWM.md",
+    "reading_differences.md": "docs/reading_differences.md",
 }
 _DESCRIPTIONS = {
     "docs/CWM_modeling_phase.md": "how to implement, validate and repair the CWM",
@@ -85,6 +86,8 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "MEMORY_MB": options.execution.max_memory_mb,
         "COUNTEREXAMPLES": options.feedback.max_counterexamples,
         "DIFF_ITEMS": options.feedback.max_diff_items,
+        "DIFF_REGIONS": options.feedback.max_diff_regions,
+        "DIFF_CHANGES": options.feedback.max_diff_changes,
         "ERROR_CHARS": options.feedback.max_error_chars,
         "DATA_ITEMS": options.data_api.max_items,
         "DATA_BYTES": options.data_api.max_response_bytes,

@@ -226,9 +226,10 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             "diagnostic_id",
             "counterexample",
             "differences",
-            "differences_omitted",
             "new_milestones",
         ):
+            if key == "diagnostic_id" and "counterexample" in r:
+                continue  # the counterexample names the call that loads it
             if key in r and (key != "new_milestones" or r[key]):
                 out[key] = r[key]
         if r.get("new_milestones"):

@@ -26,7 +26,10 @@ execution:
   max_memory_mb: 2048
 feedback:
   max_counterexamples: 5
-  max_diff_items: 6
+  max_diff_items: 6  # values listed per field
+  max_diff_regions: 4  # regions listed per grid
+  max_diff_changes: 4  # colour changes listed per region
+  max_crop_cells: 64  # largest region shown as a crop
   max_error_chars: 1000
 data_api:
   max_items: 100

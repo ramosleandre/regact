@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.config import CwmConfig
+from regact.protocols.cwm.differences import summarize
 from regact.protocols.cwm.store import ExperienceStore, canonical
 from regact.protocols.cwm.worker import Worker, WorkerError
 
@@ -27,45 +29,6 @@ def check_observation(obs: Any) -> dict[str, Any]:
         raise WorkerError("render returned invalid observation fields")
     canonical(obs)
     return obs
-
-
-def differences(expected: Any, actual: Any, limit: int | None, path: str = "") -> dict[str, Any]:
-    """Bounded structural evidence plus the exact count of omitted evidence entries.
-
-    A changed list length is one entry; shared elements are compared separately.
-    This works for unequal/ragged shapes without broadcasting or padding grids.
-    """
-    out: list[dict[str, Any]] = []
-    total = 0
-
-    def add(p: str, a: Any, b: Any) -> None:
-        nonlocal total
-        total += 1
-        if not budgets.reached(len(out), limit):
-            out.append({"path": p, "predicted": str(a)[:120], "observed": str(b)[:120]})
-
-    def visit(a: Any, b: Any, p: str) -> None:
-        if type(a) is dict and type(b) is dict:
-            for key in sorted(set(a) | set(b)):
-                if key not in a or key not in b:
-                    add(f"{p}.{key}".lstrip("."), a.get(key, "<missing>"), b.get(key, "<missing>"))
-                else:
-                    visit(a[key], b[key], f"{p}.{key}".lstrip("."))
-        elif type(a) is list and type(b) is list:
-            if len(a) != len(b):
-                add(f"{p}.length".lstrip("."), len(a), len(b))
-            for i, (x, y) in enumerate(zip(a, b)):
-                visit(x, y, f"{p}[{i}]")
-        elif type(a) is not type(b):
-            add(f"{p}.type".lstrip("."), type(a).__name__, type(b).__name__)
-        elif canonical(a) != canonical(b):
-            add(p, a, b)
-
-    visit(expected, actual, path)
-    result: dict[str, Any] = {"differences": out}
-    if total > len(out):
-        result["differences_omitted"] = total - len(out)
-    return result
 
 
 def add_state_size(summary: dict[str, Any], oid: int, state: Any, obs: Any) -> None:
@@ -104,10 +67,19 @@ _REPEAT_EVERY = 10  # repeatability is checked on episode starts and every 10th 
 
 
 def validate(
-    worker: Worker, store: ExperienceStore, config: CwmConfig, *, live_episode: int | None = None
+    worker: Worker,
+    store: ExperienceStore,
+    config: CwmConfig,
+    *,
+    live_episode: int | None = None,
+    progress: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    explained_until: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Replay every recorded episode in time order: get_initial_state on its first observation,
     then step carries the State, and render is checked against every recorded observation.
+
+    ``progress`` names the problem's progress at an observation, for counterexamples.
+    ``explained_until`` is the last step event the previously accepted version predicted.
 
     Returns the summary and, when the live episode was predicted to its end, the running state
     there (``{"state", "hash"}``) for single_instance exploration to continue from.
@@ -147,15 +119,18 @@ def validate(
                 return
             examples.pop(replace)
         entry = {"kind": kind, **data}
+        if progress is not None and "from_observation_id" in data:
+            entry.update(progress(store.observation(data["from_observation_id"])))
+        diagnostic = None
         if predicted is not None:
-            entry.update(differences(predicted, actual, config.feedback.max_diff_items))
-            entry["diagnostic_id"] = store.diagnostic(
-                {"predicted": predicted, "observed": actual, **entry}
-            )
+            entry["differences"] = summarize(predicted, actual, config.feedback)
+            diagnostic = store.diagnostic({"predicted": predicted, "observed": actual, **entry})
         elif outputs is not None:
-            entry["diagnostic_id"] = store.diagnostic(
+            diagnostic = store.diagnostic(
                 {**entry, "first_output": outputs[0], "second_output": outputs[1]}
             )
+        if diagnostic is not None:
+            entry["full_data"] = f"data_api.load_diagnostic({diagnostic})"
         examples.append(entry)
 
     def call(op: str, repeat: bool, where: dict[str, Any], **args: Any) -> Any:
@@ -205,10 +180,12 @@ def validate(
                     state,
                     explains(state, start, "reconstruction_mismatch", where, True),
                 )
+            before = episode["initial_obs_id"]
             for item in store.episode_steps(episode_id) if alive else []:
                 summary["steps_checked"] += 1
                 if item["history_hash"] in validated:
                     state = validated[item["history_hash"]]
+                    before = item["after_obs_id"]
                     continue
                 if item["history_hash"] in diverged:
                     alive = False
@@ -216,9 +193,16 @@ def validate(
                 where = {
                     "episode_id": episode_id,
                     "step": item["step_index"] + 1,
+                    "from_observation_id": before,
+                    "action": item["action"],
                     "observation_id": item["after_obs_id"],
                     "transition_id": item["transition_id"],
                 }
+                if explained_until is not None:
+                    where["explained_by_previous_version"] = (
+                        item["step_event_id"] <= explained_until
+                    )
+                before = item["after_obs_id"]
                 repeat = item["step_index"] % _REPEAT_EVERY == 0
                 state = call("step", repeat, where, state=state, action=item["action"])
                 observed = store.observation(item["after_obs_id"])

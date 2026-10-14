@@ -26,6 +26,7 @@ from regact.protocols.base import ProtocolContext, ProtocolSession
 from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.bundle import description, snapshot
 from regact.protocols.cwm.config import CwmConfig
+from regact.protocols.cwm.differences import summarize
 from regact.protocols.cwm.ids import expand_id_ranges
 from regact.protocols.cwm.images import clear_images, save_preview, select_preview_ids
 from regact.protocols.cwm.store import (
@@ -36,7 +37,6 @@ from regact.protocols.cwm.store import (
     info_trace,
     regact_commit,
 )
-from regact.protocols.cwm.validation import differences
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.grants import GRANT_WAIT_LOGGED_SECONDS, CommandGrants
 from regact.protocols.managed.prompting import reset_commands
@@ -370,6 +370,12 @@ class ManagedCoordinator:
                 "seconds": round(time.monotonic() - self.started, 1) if self.started else 0.0,
             }
         )
+
+    def step_progress(self, obs: dict[str, Any]) -> dict[str, Any]:
+        """The problem's progress at ``obs``, keyed by its label (``levels_completed``)."""
+        label = self.problem.progress_label
+        value = self.problem.progress_value(obs.get("info") or {}) if label else None
+        return {} if value is None else {label.lower().replace(" ", "_"): value}
 
     def _step(self, action: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         if self._limit():
@@ -812,13 +818,21 @@ class ManagedCoordinator:
                     **({"cwm_version": self.accepted["cwm_version"]} if self.accepted else {}),
                     **exc.evidence,
                 }
+                if "transition_id" in exc.evidence:
+                    t = self.store.transition(exc.evidence["transition_id"])
+                    diagnostic.update(
+                        from_observation_id=t["before_obs_id"],
+                        action=t["action"],
+                        **self.step_progress(t["o"]),
+                    )
                 result["diagnostic_id"] = self.store.diagnostic(diagnostic)
                 result["counterexample"] = {
-                    k: v for k, v in diagnostic.items() if k not in ("predicted", "observed")
+                    **{k: v for k, v in diagnostic.items() if k not in ("predicted", "observed")},
+                    "full_data": f"data_api.load_diagnostic({result['diagnostic_id']})",
                 }
                 if exc.predicted is not None:
-                    result.update(
-                        differences(exc.predicted, exc.actual, self.options.feedback.max_diff_items)
+                    result["differences"] = summarize(
+                        exc.predicted, exc.actual, self.options.feedback
                     )
                 self.change_phase(MODELING, reason, diagnostic_id=result["diagnostic_id"])
             except (WorkerError, InvalidActionError) as exc:

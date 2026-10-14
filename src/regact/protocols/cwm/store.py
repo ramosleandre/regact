@@ -365,12 +365,16 @@ class ExperienceStore:
         return [
             {**dict(row), "action": json.loads(row["action"])}
             for row in self.db.execute(
-                "SELECT s.step_index,s.transition_id,t.after_id after_obs_id,s.history_hash,"
-                "a.payload action FROM step_events s JOIN transitions t ON t.id=s.transition_id "
+                "SELECT s.id step_event_id,s.step_index,s.transition_id,t.after_id after_obs_id,"
+                "s.history_hash,a.payload action FROM step_events s JOIN transitions t ON "
+                "t.id=s.transition_id "
                 "JOIN actions a ON a.id=t.action_id WHERE s.episode_id=? ORDER BY s.step_index",
                 (episode_id,),
             )
         ]
+
+    def last_step_event_id(self) -> int:
+        return int(self.db.execute("SELECT COALESCE(MAX(id),0) FROM step_events").fetchone()[0])
 
     def repeated_histories(self) -> set[str]:
         """History hashes reached more than once: the only points where a replay can reuse work."""

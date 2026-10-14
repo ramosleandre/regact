@@ -67,7 +67,7 @@ def test_a_different_game_is_refused_at_the_first_difference(hidden_rig):
         rebuild_environment(c.store, env, seed=0, single_instance=True)
     # The first screen is the same; the first action already lands one screen further.
     assert failure.value.where["episode_id"] == 1 and failure.value.where["step"] == 1
-    assert failure.value.differences["differences"]
+    assert failure.value.differences["frame"]
     env.close()
 
 

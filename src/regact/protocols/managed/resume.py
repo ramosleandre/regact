@@ -12,7 +12,8 @@ from typing import Any
 
 from regact.env.session import EnvSession
 from regact.protocols.cwm.store import ExperienceStore, canonical
-from regact.protocols.cwm.validation import differences
+from regact.protocols.cwm.config import FeedbackConfig
+from regact.protocols.cwm.differences import summarize
 
 _RESETS = {"reset_level": "level", "reset_environment": "environment"}
 
@@ -22,7 +23,7 @@ class RebuildMismatch(Exception):
 
     def __init__(self, where: dict[str, Any], replayed: Any, recorded: Any) -> None:
         self.where, self.replayed, self.recorded = where, replayed, recorded
-        self.differences = differences(replayed, recorded, 6)
+        self.differences = summarize(replayed, recorded, FeedbackConfig())
         super().__init__(
             f"replayed observation differs from the recorded one at episode "
             f"{where['episode_id']}, step {where['step']} (observation {where['observation_id']})"
