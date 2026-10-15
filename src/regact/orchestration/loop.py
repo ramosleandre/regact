@@ -516,8 +516,9 @@ async def _dispatch_event(event: AgentEvent, ctx: _LoopContext, outcome: _TurnOu
     if isinstance(event, ToolCall):
         ctx.protocol.tool_call_started(event.id)
         outcome.pending_tools.add(event.id)
-        outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
-        ctx.experiment.tool_calls_total += 1
+        if not event.synthetic:  # an example call the framework inserted is not the agent's
+            outcome.saw_tool_call = True  # any call = progress (feeds the doom-loop breaker)
+            ctx.experiment.tool_calls_total += 1
         await _flag_suspicious_call(event, ctx)  # observe-and-log every call (never blocks)
         tool = ctx.tools_by_name.get(event.name)
         if tool is not None:  # a framework tool: the loop owns its execution

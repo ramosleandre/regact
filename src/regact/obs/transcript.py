@@ -98,6 +98,8 @@ def event_to_json(event: AgentEvent) -> dict[str, object]:
             payload.pop("images", None)
         if event.executed:
             payload.pop("executed", None)
+    if isinstance(event, ToolCall) and not event.synthetic:
+        payload.pop("synthetic", None)
     if isinstance(event, AgentError):
         payload["category"] = event.category.value
     return {"type": type(event).__name__, **payload}

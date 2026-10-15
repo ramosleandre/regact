@@ -414,3 +414,19 @@ def test_main_metrics_come_from_the_problem(tmp_path: Path) -> None:
     )
     main = game_metrics(load_game(exp, "ls20"))["main_metrics"]
     assert main == ["rhae", "lrhae_uncapped", "relative_env_actions"]
+
+
+def test_an_inserted_example_call_is_shown_but_not_counted(tmp_path: Path) -> None:
+    transcript = [
+        {"type": "ToolCall", "id": "e", "name": "Bash", "input": {"command": "ls"}, "synthetic": True},
+        {"type": "ToolResult", "id": "e", "output": "files", "is_error": False},
+        {"type": "ToolCall", "id": "a", "name": "Bash", "input": {"command": "ls"}},
+        {"type": "ToolResult", "id": "a", "output": "files", "is_error": False},
+    ]
+    game = tmp_path / "exp" / "g"
+    (game / "logs").mkdir(parents=True)
+    (game / "logs" / "experiment_state.json").write_text("{}")
+    (game / "logs" / "transcript.jsonl").write_text("\n".join(json.dumps(e) for e in transcript))
+    view = load_game(str(tmp_path / "exp"), "g")
+    assert [c.synthetic for turn in view.turns for c in turn.tools] == [True, False]
+    assert game_metrics(view)["n_tool_calls"] == 1

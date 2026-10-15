@@ -38,6 +38,7 @@ class ToolCallView:
     flags: list[str] = field(default_factory=list)  # why a call was tagged "cheat" (the reasons)
     started: float | None = None  # UNIX seconds of the call and of its result, when recorded
     ended: float | None = None
+    synthetic: bool = False  # inserted by the agent framework; not counted as the agent's
 
 
 @dataclass
@@ -355,6 +356,7 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
                 name=str(event.get("name", "")),
                 input=event.get("input") or {},
                 started=_epoch(event.get("ts")),
+                synthetic=bool(event.get("synthetic")),
             )
             current.items.append(TurnItem("tool", tool=call))
             by_id[call.id] = call

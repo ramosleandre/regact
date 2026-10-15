@@ -34,6 +34,7 @@ class ToolCall:
     id: str
     name: str
     input: dict[str, Any]
+    synthetic: bool = False  # inserted by the agent framework, not chosen by the model
 
 
 @dataclass

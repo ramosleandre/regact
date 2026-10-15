@@ -134,9 +134,11 @@ def progress(
     }
 
 
-def _timestamps(path: Path, key: str, wanted: tuple[str, ...]) -> list[tuple[float, str]]:
+def _timestamps(
+    path: Path, key: str, wanted: tuple[str, ...], unless: str | None = None
+) -> list[tuple[float, str]]:
     """``(UNIX time, name)`` of the lines of a JSON-lines log whose ``key`` is in ``wanted``
-    (every line when ``wanted`` is empty)."""
+    (every line when ``wanted`` is empty), skipping lines where ``unless`` is true."""
     out: list[tuple[float, str]] = []
     if not path.is_file():
         return out
@@ -144,7 +146,7 @@ def _timestamps(path: Path, key: str, wanted: tuple[str, ...]) -> list[tuple[flo
         for line in handle:
             try:
                 item = json.loads(line)
-                if not wanted or item.get(key) in wanted:
+                if (not wanted or item.get(key) in wanted) and not (unless and item.get(unless)):
                     out.append((datetime.fromisoformat(item["ts"]).timestamp(), item[key]))
             except (ValueError, KeyError, TypeError):
                 continue
@@ -161,7 +163,10 @@ def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]
         ):
             if step is not None:
                 reached.setdefault(int(step), float(at))
-    calls = [at for at, _ in _timestamps(task / "logs/transcript.jsonl", "type", ("ToolCall",))]
+    calls = [
+        at
+        for at, _ in _timestamps(task / "logs/transcript.jsonl", "type", ("ToolCall",), "synthetic")
+    ]
     sessions: list[list[float]] = []  # [start, end] of each stretch the agent worked
     seen = 0.0
     for at, name in _timestamps(task / "logs/events.jsonl", "event", ()):

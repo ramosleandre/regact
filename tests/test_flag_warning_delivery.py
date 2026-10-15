@@ -280,3 +280,14 @@ async def test_a_backend_with_an_after_tool_channel_gets_the_warning_there(monke
     assert not ctx.pending_warnings and not agent.injected  # not held for the next send
     assert ctx.logger.log.call_args.kwargs["delivery"] == "after_tool"
     assert isinstance(ctx.transcript.write.call_args.args[0], UserMessage)
+
+
+async def test_a_synthetic_call_is_not_counted_as_the_agents():
+    ctx = context()
+    outcome = _TurnOutcome()
+    example = ToolCall("e", "Bash", {"command": "ls -la"}, synthetic=True)
+    await _dispatch_event(example, ctx, outcome)
+    await _dispatch_event(ToolResult("e", "listing"), ctx, outcome)
+    assert ctx.experiment.tool_calls_total == 0 and not outcome.saw_tool_call
+    await _dispatch_event(ToolCall("c", "Bash", {"command": "ls"}), ctx, outcome)
+    assert ctx.experiment.tool_calls_total == 1 and outcome.saw_tool_call

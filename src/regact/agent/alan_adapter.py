@@ -135,6 +135,7 @@ def build_alan_agent(
         ("stop_at_first_call", _as_bool),
         ("run_reasoning_closing_call", _as_bool),
         ("carry_reasoning_until_call", _as_bool),
+        ("inserted_example_bash_use", _as_bool),  # needs alancode >= 1.3.30
     ):
         raw = args.get(name)
         if raw is None:
@@ -179,6 +180,7 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
         if getattr(native, "hide_in_api", False):
             return []
         texts: list[str] = []
+        synthetic = getattr(native, "model", None) == "<synthetic>"  # alancode's own example turn
         for block in getattr(native, "content", []) or []:
             bkind = type(block).__name__
             if bkind == "TextBlock":
@@ -196,6 +198,7 @@ def map_alan_events(native: Any) -> list[AgentEvent]:
                         id=getattr(block, "id", ""),
                         name=getattr(block, "name", ""),
                         input=getattr(block, "input", {}) or {},
+                        synthetic=synthetic,
                     )
                 )
         # One completion = one iteration: close every assembled message with an IterationComplete

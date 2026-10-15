@@ -61,8 +61,10 @@ class AssistantMessage:
         error_details: str | None = None,
         hide_in_api: bool = False,
         usage=None,
+        model: str | None = None,
     ) -> None:
         self.content = content
+        self.model = model
         self.is_api_error_message = is_api_error_message
         self.error_details = error_details
         self.api_error = None
@@ -271,8 +273,10 @@ def test_build_alan_agent_forwards_sweep_settings(monkeypatch) -> None:
             "compaction_threshold_percent": "95",
             "carry_reasoning_until_call": "true",
             "run_reasoning_closing_call": False,
+            "inserted_example_bash_use": "true",
         },
     )
+    assert captured["settings"]["inserted_example_bash_use"] is True
     assert captured["settings"]["carry_reasoning_until_call"] is True
     assert captured["settings"]["run_reasoning_closing_call"] is False
     assert captured["settings"]["compaction_threshold_percent"] == 95
@@ -378,3 +382,12 @@ def test_the_real_alancode_accepts_the_vision_wiring(tmp_path) -> None:
         close = getattr(agent, "close", None)
         if callable(close):
             close()
+
+
+def test_alans_inserted_example_call_is_marked_synthetic() -> None:
+    """alancode's example turn (model '<synthetic>') is not a call the model chose."""
+    example = AssistantMessage([ToolUseBlock("e", "Bash", {"command": "ls"})], model="<synthetic>")
+    chosen = AssistantMessage([ToolUseBlock("c", "Bash", {"command": "ls"})], model="qwen")
+    (inserted,) = [e for e in map_alan_events(example) if isinstance(e, ToolCall)]
+    (own,) = [e for e in map_alan_events(chosen) if isinstance(e, ToolCall)]
+    assert inserted.synthetic and not own.synthetic

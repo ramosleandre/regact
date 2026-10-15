@@ -94,7 +94,8 @@ def _tool_histogram(game: GameView) -> dict[str, int]:
     hist: dict[str, int] = {}
     for turn in game.turns:
         for call in turn.tools:
-            hist[call.name] = hist.get(call.name, 0) + 1
+            if not call.synthetic:
+                hist[call.name] = hist.get(call.name, 0) + 1
     return dict(sorted(hist.items(), key=lambda kv: kv[1], reverse=True))
 
 
