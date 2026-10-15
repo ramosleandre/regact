@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from regact.agent.events import ToolCall, ToolResult, tool_result_images
 from regact.obs.transcript import TranscriptWriter, event_to_json
+from regact.protocols.cwm.feedback import format_feedback
 from regact.protocols.cwm.session import CwmSession, CwmTool
 from regact.tools.base import ToolContext
 from regact.viz.reader import _group_turns
@@ -22,7 +23,7 @@ async def call(c, name, token=None):
     output = await CwmTool(name, c).call({}, context)
     json_text = output.data[output.data.index("{") :]
     value = json.loads(json_text)
-    assert json_text == json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)
+    assert json_text == format_feedback(value)
     return value, value.get("phase_change")
 
 

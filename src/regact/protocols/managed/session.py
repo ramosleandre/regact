@@ -26,9 +26,14 @@ from regact.protocols.base import ProtocolContext, ProtocolSession
 from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.bundle import description, snapshot
 from regact.protocols.cwm.config import CwmConfig
-from regact.protocols.cwm.differences import summarize
+from regact.protocols.cwm.differences import describe, summarize
 from regact.protocols.cwm.ids import expand_id_ranges
-from regact.protocols.cwm.images import clear_images, save_preview, select_preview_ids
+from regact.protocols.cwm.images import (
+    clear_images,
+    save_image_file,
+    save_preview,
+    select_preview_ids,
+)
 from regact.protocols.cwm.store import (
     ExperienceStore,
     atomic_json,
@@ -37,6 +42,7 @@ from regact.protocols.cwm.store import (
     info_trace,
     regact_commit,
 )
+from regact.protocols.cwm.validation import diagnostic_pointer
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.grants import GRANT_WAIT_LOGGED_SECONDS, CommandGrants
 from regact.protocols.managed.prompting import reset_commands
@@ -46,6 +52,7 @@ from regact.tools.base import Tool, ToolContext, ToolOutput
 
 MODELING = "CWM Modeling"
 EXPLORATION = "Active Exploration"
+MISMATCHES = ("prediction_mismatch", "reconstruction_mismatch")  # comparisons of two observations
 
 MODEL_FILES = [
     f"world_model/model_{part}.py" for part in ("state", "initial_state", "render", "transition")
@@ -371,6 +378,35 @@ class ManagedCoordinator:
             }
         )
 
+    def comparison_image(self, diagnostic_id: int) -> bytes:
+        from regact.protocols.cwm.viewer import comparison_png
+
+        record = self.store.get_diagnostic(diagnostic_id)
+        if not all(isinstance(record.get(k), dict) for k in ("predicted", "observed")):
+            raise ValueError(f"diagnostic {diagnostic_id} does not compare two observations")
+        previous = record.get("from_observation_id")
+        return comparison_png(
+            self.problem,
+            self.store.observation(previous) if previous else None,
+            record["predicted"],
+            record["observed"],
+        )
+
+    def save_diagnostic_images(self, examples: list[dict[str, Any]]) -> None:
+        """With vision, save each mismatch's comparison image and name it in its counterexample."""
+        if not self.config.agent.vision:
+            return
+        for example in examples:
+            if example.get("kind") not in MISMATCHES or "diagnostic_id" not in example:
+                continue
+            name = f"diagnostic_{example['diagnostic_id']}.png"
+            try:
+                save_image_file(self.workdir, name, self.comparison_image(example["diagnostic_id"]))
+            except (OSError, ValueError) as exc:
+                self.event("image_preview_error", error=str(exc)[:300])
+                continue
+            example["image"] = f"tmp/images/{name}"
+
     def step_progress(self, obs: dict[str, Any]) -> dict[str, Any]:
         """The problem's progress at ``obs``, keyed by its label (``levels_completed``)."""
         label = self.problem.progress_label
@@ -559,6 +595,12 @@ class ManagedCoordinator:
                 }
             elif op == "diagnostic":
                 value = self.store.get_diagnostic(int(body["id"]))
+            elif op == "describe_diagnostic":
+                did = int(body["id"])
+                options = body.get("options") or {}
+                value = describe(
+                    self.store.get_diagnostic(did), did, self.options.feedback, options
+                )
             elif op == "image":
                 sources = [
                     key
@@ -576,10 +618,12 @@ class ManagedCoordinator:
                 which = body.get("which")
                 if source == "diagnostic_id":
                     which = which or "observed"
-                    if which not in ("observed", "predicted"):
-                        raise ValueError("diagnostic image side must be observed or predicted")
+                    if which not in ("observed", "predicted", "comparison"):
+                        raise ValueError(
+                            "diagnostic image side must be observed, predicted or comparison"
+                        )
                     diagnostic = self.store.get_diagnostic(identifier)
-                    obs = diagnostic.get(which)
+                    obs = diagnostic.get("observed" if which == "comparison" else which)
                     if not isinstance(obs, dict) or "frame" not in obs:
                         raise ValueError(
                             f"diagnostic {identifier} has no {which} observation to render; use load_diagnostic to inspect its evidence"
@@ -598,7 +642,12 @@ class ManagedCoordinator:
                     obs = transition["o" if which == "before" else "o_next"]
                 from regact.protocols.cwm.viewer import png
 
-                value = {"png_base64": base64.b64encode(png(self.problem, obs)).decode()}
+                image = (
+                    self.comparison_image(identifier)
+                    if source == "diagnostic_id" and which == "comparison"
+                    else png(self.problem, obs)
+                )
+                value = {"png_base64": base64.b64encode(image).decode()}
             else:
                 raise ValueError("unknown data operation")
             # Keep individual records/images readable; the byte guard bounds bulk queries.
@@ -825,15 +874,22 @@ class ManagedCoordinator:
                         action=t["action"],
                         **self.step_progress(t["o"]),
                     )
-                result["diagnostic_id"] = self.store.diagnostic(diagnostic)
-                result["counterexample"] = {
-                    **{k: v for k, v in diagnostic.items() if k not in ("predicted", "observed")},
-                    "full_data": f"data_api.load_diagnostic({result['diagnostic_id']})",
-                }
                 if exc.predicted is not None:
-                    result["differences"] = summarize(
+                    diagnostic["differences"] = summarize(
                         exc.predicted, exc.actual, self.options.feedback
                     )
+                result["diagnostic_id"] = self.store.diagnostic({**diagnostic, **exc.states})
+                result["counterexample"] = {
+                    **{
+                        k: v
+                        for k, v in diagnostic.items()
+                        if k not in ("predicted", "observed", "differences")
+                    },
+                    **diagnostic_pointer(result["diagnostic_id"]),
+                }
+                if "differences" in diagnostic:
+                    result["differences"] = diagnostic["differences"]
+                self.save_diagnostic_images([result["counterexample"]])
                 self.change_phase(MODELING, reason, diagnostic_id=result["diagnostic_id"])
             except (WorkerError, InvalidActionError) as exc:
                 reason = (
@@ -1126,9 +1182,17 @@ def _public_transition(t: dict[str, Any]) -> dict[str, Any]:
 
 
 class ModelMismatch(Exception):
-    def __init__(self, kind: str, predicted: Any, actual: Any, evidence: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        kind: str,
+        predicted: Any,
+        actual: Any,
+        evidence: dict[str, Any],
+        states: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(kind)
         self.kind, self.predicted, self.actual, self.evidence = kind, predicted, actual, evidence
+        self.states = states or {}  # the model's States, kept in the diagnostic only
 
 
 class ManagedTool(Tool):

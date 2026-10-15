@@ -185,9 +185,18 @@ def load_history(episode_id: int, step: int | None = None) -> tuple[list[dict[st
     return [by_id[i] for i in ids], history["actions"]
 
 
+def describe_diagnostic(diagnostic_id: int, **options: int | None) -> dict[str, Any]:
+    """One diagnostic returned by a framework command, readable and bounded: where it happened,
+    the differences between predicted and observed (see docs/reading_differences.md), and the
+    model's States before and after the step. options raise or lower the display limits:
+    max_diff_items, max_diff_regions, max_diff_changes, max_crop_cells, max_state_chars
+    (None = no limit). Print it with json.dumps(..., indent=2)."""
+    return _query("describe_diagnostic", id=diagnostic_id, options=options)
+
+
 def load_diagnostic(diagnostic_id: int) -> dict[str, Any]:
-    """One diagnostic returned by a framework command. kind names the failed check; observation
-    comparisons hold predicted and observed dictionaries plus their differences."""
+    """The complete diagnostic record, including the full predicted and observed observations;
+    it can be very large. describe_diagnostic is the readable version."""
     return _query("diagnostic", id=diagnostic_id)
 '''
 SAVE_IMAGE = '''
@@ -198,7 +207,8 @@ def save_image(path, *, observation_id=None, transition_id=None, diagnostic_id=N
     Supply EXACTLY ONE source:
       observation_id: its frame (omit which).
       transition_id: which="before" or "after"; default "after".
-      diagnostic_id: which="predicted" or "observed"; default "observed".
+      diagnostic_id: which="predicted", "observed" or "comparison" (both with the step's previous
+        observation and the differences); default "observed".
     Examples:
       save_image("obs.png", observation_id=1)
       save_image("before.png", transition_id=2, which="before")

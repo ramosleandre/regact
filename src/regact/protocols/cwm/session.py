@@ -101,8 +101,11 @@ class Coordinator(ManagedCoordinator):
 
     def check_prediction(self, predicted, obs, evidence):
         if canonical(predicted) != canonical(obs):
+            states = {"state_before": self.current_state, "state": self.next_state}
             self.running = self.current_state = None
-            raise ModelMismatch("prediction_mismatch", predicted, obs, public_evidence(evidence))
+            raise ModelMismatch(
+                "prediction_mismatch", predicted, obs, public_evidence(evidence), states
+            )
         self.current_state = self.next_state
         if "explained_until" in self.accepted:
             self.accepted["explained_until"] = evidence["event_id"]
@@ -144,7 +147,13 @@ class Coordinator(ManagedCoordinator):
         rendered = check_observation(worker.call("render", state=state))
         if canonical(rendered) != canonical(obs):
             self.running = None
-            raise ModelMismatch("reconstruction_mismatch", rendered, obs, {"observation_id": oid})
+            raise ModelMismatch(
+                "reconstruction_mismatch",
+                rendered,
+                obs,
+                {"observation_id": oid},
+                {"state_before": None, "state": state},
+            )
         self._check_size(state, obs, oid)
         return state
 
@@ -180,6 +189,7 @@ class Coordinator(ManagedCoordinator):
                 progress=self.step_progress,
                 explained_until=(self.accepted or {}).get("explained_until"),
             )
+        self.save_diagnostic_images(summary["counterexamples"])
         record = {
             "bundle": bundle.name,
             "manifest": manifest,

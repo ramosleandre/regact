@@ -49,9 +49,13 @@ def clear_images(workdir: Path) -> None:
 
 
 def save_preview(workdir: Path, observation_id: int, png: bytes) -> None:
+    save_image_file(workdir, f"obs_id_{observation_id}.png", png)
+
+
+def save_image_file(workdir: Path, name: str, png: bytes) -> None:
     with image_directory(workdir) as folder:
         fd = os.open(
-            f"obs_id_{observation_id}.png",
+            name,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
             0o600,
             dir_fd=folder,

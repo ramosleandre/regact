@@ -38,6 +38,70 @@ def png(problem: BaseProblem, obs: dict[str, Any]) -> bytes:
     return stream.getvalue()
 
 
+_PANEL_LABEL_PX = 16
+_BACKGROUND = (128, 128, 128)  # empty panel space and the dimmed part of the differences panel
+_OUTLINE = (255, 0, 0)
+
+
+def comparison_png(
+    problem: BaseProblem,
+    previous: dict[str, Any] | None,
+    predicted: dict[str, Any],
+    observed: dict[str, Any],
+) -> bytes:
+    """One PNG of a mismatch: Previous and Differences above, Predicted and Observed below.
+
+    Differences is the observed image, dimmed where it matches the predicted one and outlined
+    where it does not; pixels are compared, so it works for any problem renderer.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    def draw(obs: dict[str, Any] | None) -> Any:
+        if obs is None:
+            return None
+        try:
+            frame = problem.render_frame(Obs.from_json(obs))
+        except Exception:  # a predicted observation can be malformed
+            return None
+        return None if frame is None else np.asarray(frame, dtype=np.uint8)[..., :3]
+
+    drawn = [draw(previous), draw(predicted), draw(observed)]
+    if drawn[2] is None:
+        raise ValueError("this problem has no image renderer")
+    h = max(a.shape[0] for a in drawn if a is not None)
+    w = max(a.shape[1] for a in drawn if a is not None)
+
+    def pad(a: Any) -> Any:
+        out = np.empty((h, w, 3), dtype=np.uint8)
+        out[:] = _BACKGROUND
+        if a is not None:
+            out[: a.shape[0], : a.shape[1]] = a
+        return out
+
+    before, pred, obs = map(pad, drawn)
+    differ = (pred != obs).any(axis=-1) if drawn[1] is not None else np.ones((h, w), bool)
+    diff = (obs * 0.3 + np.asarray(_BACKGROUND) * 0.7).astype(np.uint8)
+    diff[differ] = obs[differ]
+    grown = differ.copy()
+    for d in (1, 2):  # a 2-pixel outline around the differing pixels, clipped at the borders
+        grown[d:] |= differ[:-d]
+        grown[:-d] |= differ[d:]
+        grown[:, d:] |= differ[:, :-d]
+        grown[:, :-d] |= differ[:, d:]
+    diff[grown & ~differ] = _OUTLINE
+    panels = [("Previous", before), ("Differences", diff), ("Predicted", pred), ("Observed", obs)]
+    sheet = Image.new("RGB", (2 * w, 2 * (h + _PANEL_LABEL_PX)), (255, 255, 255))
+    pen = ImageDraw.Draw(sheet)
+    for i, (label, image) in enumerate(panels):
+        x, y = (i % 2) * w, (i // 2) * (h + _PANEL_LABEL_PX)
+        pen.text((x + 4, y + 2), label, fill=(0, 0, 0))
+        sheet.paste(Image.fromarray(image), (x, y + _PANEL_LABEL_PX))
+    stream = io.BytesIO()
+    sheet.save(stream, format="PNG")
+    return stream.getvalue()
+
+
 @contextmanager
 def database(task: Path) -> Iterator[sqlite3.Connection]:
     path = task / "cwm" / "experience.sqlite3"

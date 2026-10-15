@@ -60,9 +60,63 @@ REASONS = {
 }
 
 
+_SUMMARY_CHARS = 400
+_LINE_CHARS = 120  # a dict or list whose compact form fits on one line is printed on one line
+
+
 def format_feedback(value: dict[str, Any]) -> str:
-    """Readable tool text, shared by native delivery and the terminal bridge."""
-    return json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)
+    """Readable tool text, shared by native delivery and the terminal bridge: indented JSON
+    whose small parts stay on one line, so the text is short and still valid JSON."""
+    return _layout(value, 0)
+
+
+def _layout(value: Any, depth: int) -> str:
+    flat = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(", ", ": "))
+    if not isinstance(value, (dict, list)) or not value or 2 * depth + len(flat) <= _LINE_CHARS:
+        return flat
+    pad, inner = "  " * depth, "  " * (depth + 1)
+    if isinstance(value, dict):
+        items = [
+            f"{inner}{json.dumps(k, ensure_ascii=False)}: {_layout(v, depth + 1)}"
+            for k, v in value.items()
+        ]
+        return "{\n" + ",\n".join(items) + "\n" + pad + "}"
+    items = [inner + _layout(v, depth + 1) for v in value]
+    return "[\n" + ",\n".join(items) + "\n" + pad + "]"
+
+
+def _plain(value: Any) -> str:
+    """A value for a sentence inside a JSON string: no quotes to escape."""
+    return json.dumps(value, ensure_ascii=False, separators=(", ", ": ")).replace('"', "")
+
+
+def mismatch_summary(example: dict[str, Any], differences: dict[str, Any] | None) -> str:
+    """One sentence naming the step and what differs, for the message line agents read first."""
+    where = f"at step {example['step']}" if "step" in example else ""
+    if "action" in example:
+        where += f" (action {_plain(example['action'])})"
+    parts = []
+    for entries in (differences or {}).values():
+        for e in entries:
+            if "regions" in e:
+                n = len(e["regions"]) + (
+                    int(e["other_regions"].split()[0]) if "other_regions" in e else 0
+                )
+                parts.append(
+                    f"{e['where']} differs in {n} region{'s' * (n > 1)} "
+                    f"({e['cells_differing']} cells)"
+                )
+            elif "shape" in e:
+                parts.append(f"{e['where']} has the wrong shape")
+            elif "where" in e:
+                parts.append(
+                    f"{e['where']} predicted {_plain(e['predicted'])}, "
+                    f"observed {_plain(e['observed'])}"
+                )
+    text = where.strip()
+    if parts:
+        text += (": " if text else "") + "; ".join(parts)
+    return text[: _SUMMARY_CHARS - 3] + "..." if len(text) > _SUMMARY_CHARS else text
 
 
 def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | None:
@@ -170,6 +224,14 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         for key in ("failures", "counterexamples", "counterexamples_omitted"):
             if r.get(key):
                 out[key] = r[key]
+        first = (r.get("counterexamples") or [{}])[0]
+        if status == "Refused" and "differences" in first:
+            out["message"] += " First counterexample " + mismatch_summary(
+                first, first["differences"]
+            )
+            if first.get("explained_by_previous_version"):
+                out["message"] += "; your previously accepted CWM predicted this step"
+            out["message"] += "."
     elif name == "PlanInCWM":
         found = r.get("candidate_found", False)
         out = {"status": "Incomplete" if error else "Plan found" if found else "No plan found"}
@@ -232,6 +294,14 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 continue  # the counterexample names the call that loads it
             if key in r and (key != "new_milestones" or r[key]):
                 out[key] = r[key]
+        if reason == "prediction_mismatch" and "real_actions" in r:
+            n = r["real_actions"]
+            out["message"] = f"Reality contradicted a predicted observation after {n} action" + (
+                "s" * (n != 1)
+            )
+            if "differences" in r and "counterexample" in r:
+                out["message"] += ", " + mismatch_summary(r["counterexample"], r["differences"])
+            out["message"] += ". Inspect the counterexample."
         if r.get("new_milestones"):
             out["message"] = (
                 "New real milestones: "

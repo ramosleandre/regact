@@ -54,12 +54,11 @@ def test_mixed_or_irregular_small_regions_get_a_crop_instead_of_changes():
     after = paint(grid(), [(2, 4), (2, 5)], 12)
     (region,) = frame_regions(before, after)["regions"]
     assert region["where"] == "frame[0][2, 2:6]" and "changes" not in region
-    assert region["predicted"] == ["12 12  0  0"]
-    assert region["observed"] == [" 0  0 12 12"]
+    assert region["predicted | observed"] == ["12 12  0  0 |  0  0 12 12"]
     stair = paint(grid(), [(i, j) for i in range(5) for j in range(i + 1)], 4)
     (region,) = frame_regions(grid(), stair)["regions"]
     assert region["where"] == "within frame[0][0:5, 0:5]" and region["crop"] == "frame[0][0:5, 0:5]"
-    assert len(region["predicted"]) == 5
+    assert len(region["predicted | observed"]) == 5
 
 
 def test_large_mixed_regions_list_their_most_frequent_changes():
@@ -153,13 +152,14 @@ def test_a_contradiction_names_its_step_and_how_to_load_it(make_rig):  # noqa: F
         example["from_observation_id"]
         == c.store.transition(example["transition_id"])["before_obs_id"]
     )
-    assert example["full_data"] == f"data_api.load_diagnostic({result['diagnostic_id']})"
+    assert example["diagnostic_id"] == result["diagnostic_id"]
+    assert example["details"] == f"data_api.describe_diagnostic({result['diagnostic_id']})"
     assert result["differences"]["frame"][0]["where"] == "frame"
     refused = c.tool("UpdateCodeWorldModel", {})
     (failed,) = refused["counterexamples"]
     assert failed["transition_id"] == example["transition_id"]
     assert failed["explained_by_previous_version"] is False  # new evidence, never predicted
-    assert failed["full_data"].startswith("data_api.load_diagnostic(")
+    assert failed["details"] == f"data_api.describe_diagnostic({failed['diagnostic_id']})"
 
 
 @pytest.mark.integration
@@ -181,3 +181,86 @@ def test_the_reading_guide_is_in_the_agent_docs_with_the_run_budgets():
     guide = docs["docs/reading_differences.md"]
     assert "__" not in guide and "At most 3 regions" in guide
     assert "docs/reading_differences.md" in docs["docs/CWM_modeling_phase.md"]
+
+
+def test_feedback_layout_is_valid_json_with_small_parts_on_one_line():
+    from regact.protocols.cwm.feedback import format_feedback
+
+    value = {
+        "status": "Completed",
+        "metrics": {"steps": 3},
+        "rows": [f"{i} " * 40 for i in range(3)],
+    }
+    text = format_feedback(value)
+    assert json.loads(text) == value
+    assert '  "metrics": {"steps": 3},' in text.splitlines()
+    assert len(text.splitlines()) == 9  # braces, two short lines, the list with its 3 rows
+
+
+def _contradiction(c):
+    model(c.workdir, bad=True)
+    assert c.tool("UpdateCodeWorldModel", {}).get("accepted")
+    exploration(c, (1, 1))
+    return c.tool("RunController", {})
+
+
+@pytest.mark.integration
+def test_messages_summarize_the_step_and_what_differs(make_rig):  # noqa: F811
+    from regact.protocols.cwm.feedback import present
+
+    c = make_rig("cwm")
+    result = _contradiction(c)
+    shown = present("RunController", result, c.options, c.config.limits)
+    assert shown["message"].startswith(
+        f"Reality contradicted a predicted observation after {result['real_actions']} action"
+    )
+    assert ", at step " in shown["message"]
+    assert "(action 1): frame predicted" in shown["message"]
+    refused = present(
+        "UpdateCodeWorldModel", c.tool("UpdateCodeWorldModel", {}), c.options, c.config.limits
+    )
+    assert " First counterexample at step " in refused["message"]
+
+
+@pytest.mark.integration
+def test_diagnostics_have_one_shape_and_a_bounded_readable_description(make_rig):  # noqa: F811
+    c = make_rig("cwm")
+    result = _contradiction(c)
+    did = result["diagnostic_id"]
+    refused_did = c.tool("UpdateCodeWorldModel", {})["counterexamples"][0]["diagnostic_id"]
+    keys = {"differences", "predicted", "observed", "state_before", "state", "action"}
+    assert keys <= set(c.store.get_diagnostic(did)) and keys <= set(
+        c.store.get_diagnostic(refused_did)
+    )
+    described = c.data({"op": "describe_diagnostic", "id": did})
+    assert "predicted" not in described and described["differences"]["frame"]
+    assert described["state_before"] == {"State": {"n": 2}} and described["state"] == {
+        "State": {"n": 4}
+    }
+    short = c.data({"op": "describe_diagnostic", "id": did, "options": {"max_state_chars": 5}})
+    assert short["state"].endswith(f"data_api.load_diagnostic({did}) returns it whole)")
+    with pytest.raises(ValueError):
+        c.data({"op": "describe_diagnostic", "id": did, "options": {"max_regions": 2}})
+
+
+@pytest.mark.integration
+def test_vision_agents_get_a_comparison_image_per_mismatch(make_rig, monkeypatch):  # noqa: F811
+    import base64
+
+    import numpy as np
+
+    c = make_rig("cwm")
+    monkeypatch.setattr(c.config.agent, "vision", True)
+    monkeypatch.setattr(
+        c.problem,
+        "render_frame",
+        lambda obs: np.full((4, 30, 3), obs.frame[0] * 20, dtype=np.uint8),
+        raising=False,
+    )
+    example = _contradiction(c)["counterexample"]
+    assert example["image"] == f"tmp/images/diagnostic_{example['diagnostic_id']}.png"
+    assert (c.workdir / example["image"]).read_bytes().startswith(b"\x89PNG")
+    on_demand = c.data(
+        {"op": "image", "diagnostic_id": example["diagnostic_id"], "which": "comparison"}
+    )
+    assert base64.b64decode(on_demand["png_base64"]).startswith(b"\x89PNG")

@@ -6,6 +6,7 @@ is summarized as regions of touching differing cells; other values are listed by
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections import Counter
 from typing import Any
@@ -139,6 +140,7 @@ def _grid(path: str, p: list, o: list, config: FeedbackConfig) -> dict[str, Any]
     out: dict[str, Any] = {
         "where": path,
         "cells_differing": len(cells),
+        "cells_total": len(p) * len(p[0]),
         "regions": [_region(path, region, p, o, config) for region in shown],
     }
     if len(regions) > len(shown):
@@ -205,13 +207,66 @@ def _region(
         width = max(
             len(_text(g[y][x])) for g in (p, o) for y in range(r0, r1) for x in range(c0, c1)
         )
-        for name, g in (("predicted", p), ("observed", o)):
-            out[name] = [
-                " ".join(_text(g[y][x]).rjust(width) for x in range(c0, c1)) for y in range(r0, r1)
-            ]
+
+        def row(g: list, y: int) -> str:
+            return " ".join(_text(g[y][x]).rjust(width) for x in range(c0, c1))
+
+        out["predicted | observed"] = [f"{row(p, y)} | {row(o, y)}" for y in range(r0, r1)]
         return out
     top = changes.most_common(config.max_diff_changes)
     out["changes"] = dict(top)
     if len(changes) > len(top):
         out["changes"]["other changes"] = len(cells) - sum(n for _, n in top)
     return out
+
+
+_STATE_CHARS = 2000  # describe_diagnostic prints each State up to this many characters
+_BULKY = ("predicted", "observed", "state_before", "state", "first_output", "second_output")
+_OVERRIDES = ("max_diff_items", "max_diff_regions", "max_diff_changes", "max_crop_cells")
+
+
+def describe(
+    record: dict[str, Any], diagnostic_id: int, config: FeedbackConfig, options: dict[str, Any]
+) -> dict[str, Any]:
+    """A diagnostic as the agent reads it: bounded differences and States, no full frames."""
+    unknown = set(options) - {*_OVERRIDES, "max_state_chars"}
+    if unknown:
+        raise ValueError(
+            f"unknown options {sorted(unknown)}; use {[*_OVERRIDES, 'max_state_chars']}"
+        )
+    for key, value in options.items():
+        if value is not None and (type(value) is not int or value < 1):
+            raise ValueError(f"{key} must be a positive integer or None")
+    budgets_ = dataclasses.replace(config, **{k: options[k] for k in _OVERRIDES if k in options})
+    out = {k: v for k, v in record.items() if k not in (*_BULKY, "differences")}
+    p, o = record.get("predicted"), record.get("observed")
+    if isinstance(p, dict) and isinstance(o, dict):
+        out["differences"] = summarize(p, o, budgets_)
+    limit = options.get("max_state_chars", _STATE_CHARS)
+    for key in _BULKY[2:]:
+        if key in record:
+            out[key] = _bounded(_readable(record[key]), limit, diagnostic_id)
+    return out
+
+
+def _readable(value: Any) -> Any:
+    """A State as its fields: instances become {"ClassName": fields}, tuples lists."""
+    if isinstance(value, list):
+        return [_readable(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    if "@tuple" in value:
+        return [_readable(v) for v in value["@tuple"]]
+    if "@class" in value:
+        return {value["@class"].rsplit(":", 1)[-1]: _readable(value["fields"])}
+    return {k: _readable(v) for k, v in value.items()}
+
+
+def _bounded(value: Any, limit: int | None, diagnostic_id: int) -> Any:
+    text = json.dumps(value, separators=(", ", ": "))
+    if limit is None or len(text) <= limit:
+        return value
+    return (
+        text[:limit] + f"... ({len(text)} characters; "
+        f"data_api.load_diagnostic({diagnostic_id}) returns it whole)"
+    )

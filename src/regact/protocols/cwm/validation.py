@@ -31,6 +31,14 @@ def check_observation(obs: Any) -> dict[str, Any]:
     return obs
 
 
+def diagnostic_pointer(diagnostic_id: int) -> dict[str, Any]:
+    """How a counterexample names its diagnostic record."""
+    return {
+        "diagnostic_id": diagnostic_id,
+        "details": f"data_api.describe_diagnostic({diagnostic_id})",
+    }
+
+
 def add_state_size(summary: dict[str, Any], oid: int, state: Any, obs: Any) -> None:
     """Accumulate bytes and representative extremes without retaining extra states."""
     state_bytes = len(canonical(state).encode())
@@ -106,6 +114,7 @@ def validate(
         predicted: Any = None,
         actual: Any = None,
         outputs: tuple[Any, Any] | None = None,
+        states: dict[str, Any] | None = None,
     ) -> None:
         summary["failures"][kind] = summary["failures"].get(kind, 0) + 1
         examples = summary["counterexamples"]
@@ -124,13 +133,15 @@ def validate(
         diagnostic = None
         if predicted is not None:
             entry["differences"] = summarize(predicted, actual, config.feedback)
-            diagnostic = store.diagnostic({"predicted": predicted, "observed": actual, **entry})
+            diagnostic = store.diagnostic(
+                {**entry, "predicted": predicted, "observed": actual, **(states or {})}
+            )
         elif outputs is not None:
             diagnostic = store.diagnostic(
                 {**entry, "first_output": outputs[0], "second_output": outputs[1]}
             )
         if diagnostic is not None:
-            entry["full_data"] = f"data_api.load_diagnostic({diagnostic})"
+            entry.update(diagnostic_pointer(diagnostic))
         examples.append(entry)
 
     def call(op: str, repeat: bool, where: dict[str, Any], **args: Any) -> Any:
@@ -143,10 +154,12 @@ def validate(
                 )
         return value
 
-    def explains(state: Any, obs: Any, kind: str, where: dict[str, Any], repeat: bool) -> bool:
+    def explains(
+        state: Any, obs: Any, kind: str, where: dict[str, Any], repeat: bool, before: Any = None
+    ) -> bool:
         rendered = check_observation(call("render", repeat, where, state=state))
         if canonical(rendered) != canonical(obs):
-            failure(kind, where, rendered, obs)
+            failure(kind, where, rendered, obs, states={"state_before": before, "state": state})
             return False
         add_state_size(sizes, where["observation_id"], state, obs)
         return True
@@ -204,9 +217,10 @@ def validate(
                     )
                 before = item["after_obs_id"]
                 repeat = item["step_index"] % _REPEAT_EVERY == 0
+                before_state = state
                 state = call("step", repeat, where, state=state, action=item["action"])
                 observed = store.observation(item["after_obs_id"])
-                ok = explains(state, observed, "prediction_mismatch", where, repeat)
+                ok = explains(state, observed, "prediction_mismatch", where, repeat, before_state)
                 if not reached(item["history_hash"], state, ok):
                     alive = False  # the rest of this episode cannot be predicted from here
                     break

@@ -50,6 +50,9 @@ _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images
 _DIAGNOSTIC_IMAGES = """ `save_image(diagnostic_id=..., which="observed", path=...)` and `which="predicted"` help compare images, when the diagnostic contains them. Size errors and code exceptions may have no image; inspect their structured data."""
 
 
+_DIAGNOSTIC_IMAGE = """\n- `image`: a picture of the mismatch with four panels: Previous (the observation the step started from), Predicted, Observed, and Differences (the observed picture, dimmed where it matches the prediction and outlined in red where it does not). Open it with your image-reading tool. `save_image(path, diagnostic_id=..., which="comparison")` saves the same picture for any diagnostic."""
+
+
 def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str) -> str:
     """Render only named markers; Python braces inside Markdown remain literal."""
     planner = "PlanInCWM" in enabled_commands(options)
@@ -60,6 +63,7 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         if vision and options.n_tmp_images_saved_per_exploration
         else "",
         "DIAGNOSTIC_IMAGES": _DIAGNOSTIC_IMAGES if vision else "",
+        "DIAGNOSTIC_IMAGE": _DIAGNOSTIC_IMAGE if vision else "",
         "PLANNING_WORKFLOW": (
             "- **Optional planning.** In Active Exploration, define a goal in `goal.py` and "
             "use `PlanInCWM` to find an action list in the accepted CWM. You can then use "
