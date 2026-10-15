@@ -180,6 +180,17 @@ vm.runInContext(String.raw`
     return drawn.by('ylab').length;
   });
   if (new Set(heights).size !== 1 || heights[0] !== 4) throw Error('y axis differs: ' + heights);
+
+  // A zoom on [100, 300] maps those x to the plot's edges, labels that range, and clips every line.
+  _graph.zoom = {'env actions': [100, 300]};
+  const zoomed = draw([game('A', a1), game('A', a2)], 'env actions', ['A']);
+  const W = Number(zoomed.chart.attrs.width), z = (v) => 44 + (W - 60) * (v - 100) / 200;
+  const labels = zoomed.by('xlab').map((t) => t.kids[0].text);
+  if (labels[0] !== '100' || labels[4] !== '300') throw Error('zoomed labels ' + labels);
+  if (!has(zoomed.by('curve-line')[0].attrs.d, z(300))) throw Error('zoomed step at 300 misplaced');
+  const lines = ['curve-line', 'curve-run', 'curve-ref', 'curve-end'].flatMap((c) => zoomed.by(c));
+  if (!lines.length || lines.some((k) => !String(k.attrs['clip-path']).startsWith('url(#'))) throw Error('unclipped line');
+  _graph.zoom = {};
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

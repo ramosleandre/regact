@@ -269,6 +269,7 @@ const _graph = {
   known: [],   // metric keys offered when the selection was saved; a Main one added since is shown
   // A chart legend entry cycles: drawn -> not drawn (muted) -> drawn with each run (perRun) -> drawn.
   muted: new Set(), perRun: new Set(),
+  zoom: {},   // x measure -> [from, to] shown by the progress charts (not saved: drag to set)
 };
 
 // Apply a saved settings blob onto _graph for the current interface; a missing key falls back to the
@@ -539,7 +540,8 @@ function curveRuns(exp, task, group, mask, X) {
   return runs;
 }
 const curveAt = (run, x) => { let v = 0; for (const [px, pv] of run.pts) if (px <= x) v = pv; return v; };
-function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
+let _clipIds = 0;
+function progressChart(task, group, expColor, aggName, errMethod, mask, xName, onZoom) {
   const X = CURVE_X[xName], agg = AGGREGATORS[aggName];
   const series = group.experiments.map((exp) => ({ exp, runs: curveRuns(exp, task, group, mask, X) }))
     .filter((sr) => sr.runs.length);
@@ -559,15 +561,23 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
   // As wide as the window leaves beside the two sidebars (metrics/experiments, and this chart's legend).
   const room = (typeof window !== "undefined" && window.innerWidth) || 0;
   const padL = 44, padR = 16, padT = 10, padB = 30, W = Math.max(620, Math.min(1700, room - 500)), H = W > 900 ? 340 : 270;
-  const xOf = (x) => padL + (W - padL - padR) * Math.min(1, x / xMax);
+  // A zoom shows [x0, x1] of the same curves; what falls outside is clipped, not recomputed.
+  const span = _graph.zoom[xName];
+  const x0 = span ? span[0] : 0, x1 = span ? Math.max(span[1], span[0] + 1e-9) : xMax;
+  const xOf = (x) => padL + (W - padL - padR) * (span ? (x - x0) / (x1 - x0) : Math.min(1, x / xMax));
   const yOf = (v) => padT + (H - padT - padB) * (1 - Math.max(0, Math.min(1, v / yMax)));
   const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const clipId = `curveclip${++_clipIds}`;
+  const clip = svg("clipPath", { id: clipId });
+  clip.append(svg("rect", { x: padL, y: 0, width: W - padL - padR, height: H }));
+  s.append(clip);
+  const clipped = (el) => { el.setAttribute("clip-path", `url(#${clipId})`); return el; };
   for (let v = 0; v <= yMax; v++) {
     s.append(svg("line", { class: "gridline", x1: padL, y1: yOf(v), x2: W - padR, y2: yOf(v) }));
     s.append(svg("text", { class: "ylab", x: padL - 6, y: yOf(v) + 3, "text-anchor": "end" }, txt(String(v))));
   }
   for (const f of [0, 0.25, 0.5, 0.75, 1])
-    s.append(svg("text", { class: "xlab", x: xOf(xMax * f), y: H - padB + 16, "text-anchor": "middle" }, txt(X.fmt(Math.round(xMax * f)))));
+    s.append(svg("text", { class: "xlab", x: xOf(x0 + (x1 - x0) * f), y: H - padB + 16, "text-anchor": "middle" }, txt(X.fmt(Math.round(x0 + (x1 - x0) * f)))));
   const steps = (ys, xs = grid) => {   // step-after path through (xs[i], ys[i]); null = no run there
     let d = "", pen = false;
     xs.forEach((x, i) => {
@@ -583,7 +593,7 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
     const refXs = [0, ...ref.map((q) => q[0]).filter((x) => x < xMax), xMax];
     const path = svg("path", { class: "curve-ref", d: steps(refXs.map((x) => curveAt({ pts: ref }, x)), refXs) });
     path.append(svg("title", {}, txt("reference player")));
-    s.append(path);
+    s.append(clipped(path));
   }
   for (const { exp, runs } of series) {
     const lastEnd = Math.max(...runs.map((r) => r.end));   // the aggregate ends with the last run
@@ -600,21 +610,51 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName) {
       grid.forEach((x, i) => {
         if (!band[i] || i + 1 >= grid.length) return;
         const yh = yOf(band[i][1]), yl = yOf(band[i][0]);
-        s.append(svg("rect", { class: "curve-band", x: xOf(x), y: yh, width: xOf(grid[i + 1]) - xOf(x), height: yl - yh, fill: color }));
+        s.append(clipped(svg("rect", { class: "curve-band", x: xOf(x), y: yh, width: xOf(grid[i + 1]) - xOf(x), height: yl - yh, fill: color })));
       });
     }
     if (_graph.perRun.has(exp))
       for (const run of runs) {
-        s.append(svg("path", { class: "curve-run", stroke: color,
-          d: steps(grid.map((x) => (x <= run.end ? curveAt(run, x) : null))) }));
-        s.append(svg("circle", { class: "curve-end run", cx: xOf(run.end), cy: yOf(curveAt(run, run.end)), r: 2.5, fill: color }));
+        s.append(clipped(svg("path", { class: "curve-run", stroke: color,
+          d: steps(grid.map((x) => (x <= run.end ? curveAt(run, x) : null))) })));
+        s.append(clipped(svg("circle", { class: "curve-end run", cx: xOf(run.end), cy: yOf(curveAt(run, run.end)), r: 2.5, fill: color })));
       }
     const line = svg("path", { class: "curve-line", stroke: color, d: steps(at.map((xs) => (xs.length ? agg(xs) : null))) });
     line.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${runs.length} run${runs.length > 1 ? "s" : ""}`)));
-    s.append(line);
-    s.append(svg("circle", { class: "curve-end", cx: xOf(lastEnd), cy: yOf(agg(runs.map((r) => curveAt(r, lastEnd)))), r: 4, fill: color }));   // where it stops
+    s.append(clipped(line));
+    s.append(clipped(svg("circle", { class: "curve-end", cx: xOf(lastEnd), cy: yOf(agg(runs.map((r) => curveAt(r, lastEnd)))), r: 4, fill: color })));   // where it stops
   }
+  if (onZoom) zoomByDrag(s, W, padL, padR, padT, H - padB, (px) => x0 + (x1 - x0) * Math.max(0, Math.min(1, (px - padL) / (W - padL - padR))), onZoom);
   return { chart: s, hasRef: ref.length > 0 };
+}
+
+// Drag across a chart to show only that x range; a double-click shows the whole run again.
+function zoomByDrag(s, W, padL, padR, top, bottom, toX, onZoom) {
+  let from = null, band = null;
+  s.style.cursor = "crosshair";
+  const at = (e) => { const r = s.getBoundingClientRect(); return Math.max(padL, Math.min(W - padR, (e.clientX - r.left) * (W / r.width))); };
+  s.onmousedown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    from = at(e);
+    band = svg("rect", { class: "zoom-band", x: from, y: top, width: 0, height: bottom - top });
+    s.append(band);
+  };
+  s.onmousemove = (e) => {
+    if (from == null) return;
+    const to = at(e);
+    band.setAttribute("x", Math.min(from, to));
+    band.setAttribute("width", Math.abs(to - from));
+  };
+  const finish = (e, keep) => {
+    if (from == null) return;
+    const to = at(e), a = Math.min(from, to), b = Math.max(from, to);
+    from = null; band.remove(); band = null;
+    if (keep && b - a > 4) onZoom([toX(a), toX(b)]);
+  };
+  s.onmouseup = (e) => finish(e, true);
+  s.onmouseleave = (e) => finish(e, false);
+  s.ondblclick = () => onZoom(null);
 }
 
 // Status is categorical: per (task, experiment) a full-height bar stacked by exit-reason share,
@@ -787,10 +827,16 @@ async function graphsView(games, onlyExp, scope) {
       const scroll = h("div", "chartscroll");
       const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor, redraw));
       if (spec.curve) {
-        card.append(segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }));
+        const zoomed = _graph.zoom[_graph.curveX];
+        const setZoom = (span) => { if (span) _graph.zoom[_graph.curveX] = span; else delete _graph.zoom[_graph.curveX]; redraw(); };
+        const reset = h("button", "aggbtn", "show all");
+        reset.onclick = () => setZoom(null);
+        card.append(h("div", "zoomrow",
+          segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }),
+          zoomed ? reset : h("span", "muted zoomhint", "drag across a chart to zoom")));
         let hasRef = false;
         for (const task of g2.tasks) {
-          const drawn = progressChart(task, g2, expColor, _graph.agg, _graph.err, _graph.mask, _graph.curveX);
+          const drawn = progressChart(task, g2, expColor, _graph.agg, _graph.err, _graph.mask, _graph.curveX, setZoom);
           if (!drawn) continue;
           hasRef = hasRef || drawn.hasRef;
           if (g2.tasks.length > 1) scroll.append(h("div", "muted", shortTask(task)));

@@ -221,5 +221,8 @@ main:has(.graphs) { max-width: none; }
 .chart .runtick { stroke: var(--fg); stroke-width: 1.6; }
 .chart .curve-ref { fill: none; stroke: var(--fg); opacity: .6; stroke-width: 1.4; stroke-dasharray: 5 4; }
 .curve-note { font-size: 11px; margin-top: 4px; }
+.chart .zoom-band { fill: var(--accent, #58a6ff); opacity: .18; pointer-events: none; }
+.zoomrow { display: flex; align-items: center; gap: 12px; }
+.zoomhint { font-size: 11px; }
 .totop { position: fixed; right: 18px; bottom: 18px; z-index: 20; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); color: var(--fg); cursor: pointer; }
 .totop:hover { color: var(--accent); }
