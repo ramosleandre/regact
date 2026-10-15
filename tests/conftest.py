@@ -34,6 +34,13 @@ def _viz_cache_in_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.
 
 
 @pytest.fixture(autouse=True)
+def _no_claude_run_token(monkeypatch: pytest.MonkeyPatch):
+    # A token in the developer's environment would switch the Claude adapter's auth mode.
+    monkeypatch.delenv("REGACT_CLAUDE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _closed_env_clients(monkeypatch: pytest.MonkeyPatch):
     """Close every EnvClient a test builds.
 
