@@ -207,6 +207,8 @@ _RESUME_MAY_CHANGE = frozenset(
         "n_attempts_per_task",
     }
 )
+# Where the model is served, not which model: a resumed run may reach it on another port.
+_RESUME_MAY_CHANGE_AGENT = ("base_url", "api_key")
 
 
 def _build_server(
@@ -325,10 +327,16 @@ async def run_task(
         # config.json stays the record of what the task started with.
         with open(os.path.join(output_dir, "config.json"), encoding="utf-8") as handle:
             original = json.load(handle)
+        def identity(cfg: dict[str, Any], key: str) -> Any:
+            value = cfg.get(key)
+            if key == "agent" and isinstance(value, dict):
+                return {k: v for k, v in value.items() if k not in _RESUME_MAY_CHANGE_AGENT}
+            return value
+
         changed = [
             key
             for key in sorted(set(original) | set(recorded))
-            if key not in _RESUME_MAY_CHANGE and original.get(key) != recorded.get(key)
+            if key not in _RESUME_MAY_CHANGE and identity(original, key) != identity(recorded, key)
         ]
         if changed:
             raise RuntimeError(

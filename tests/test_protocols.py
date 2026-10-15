@@ -392,7 +392,9 @@ async def test_an_interrupted_task_is_resumed_in_place_and_a_finished_one_is_ski
     assert first.keep_session
     (tmp_path / "workdir/toy.py").write_text("# the agent's edit\n")
 
-    resumed = dataclasses.replace(config, resume=out)
+    # Served elsewhere (another port of a packed node): still the same experiment.
+    served = dataclasses.replace(config.agent, base_url="http://127.0.0.1:8083/v1", api_key="k")
+    resumed = dataclasses.replace(config, resume=out, agent=served)
     original = (tmp_path / "config.json").read_text()
     other_seed = dataclasses.replace(
         resumed, problem=dataclasses.replace(config.problem, seed=(config.problem.seed or 0) + 1)
