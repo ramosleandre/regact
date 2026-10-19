@@ -19,7 +19,6 @@ _DOCS = {
     "CWM_modeling_phase.md": "docs/CWM_modeling_phase.md",
     "active_exploration_phase.md": "docs/active_exploration_phase.md",
     "plan_in_CWM.md": "docs/plan_in_CWM.md",
-    "reading_differences.md": "docs/reading_differences.md",
 }
 _DESCRIPTIONS = {
     "docs/CWM_modeling_phase.md": "how to implement, validate and repair the CWM",

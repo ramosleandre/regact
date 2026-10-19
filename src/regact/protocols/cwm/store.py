@@ -296,10 +296,16 @@ class ExperienceStore:
         )
         return summary
 
+    def unknown(self, table: str, label: str, value: Any) -> str:
+        """An unknown-ID error that names the IDs that exist."""
+        last = int(self.db.execute(f"SELECT COALESCE(MAX(id),0) FROM {table}").fetchone()[0])
+        known = f"{label} IDs are 1 to {last}" if last else f"no {label} is recorded yet"
+        return f"unknown {label} ID {value!r}: {known}"
+
     def observation(self, oid: int) -> dict[str, Any]:
         row = self.db.execute("SELECT payload FROM observations WHERE id=?", (oid,)).fetchone()
         if row is None:
-            raise ValueError(f"unknown observation ID {oid}")
+            raise ValueError(self.unknown("observations", "observation", oid))
         return cast(dict[str, Any], json.loads(row[0]))
 
     def observation_ids(self) -> list[int]:
@@ -317,7 +323,7 @@ class ExperienceStore:
             (tid,),
         ).fetchone()
         if row is None:
-            raise ValueError(f"unknown transition ID {tid}")
+            raise ValueError(self.unknown("transitions", "transition", tid))
         return {
             "transition_id": tid,
             "before_obs_id": row["before_id"],
@@ -341,7 +347,7 @@ class ExperienceStore:
             "SELECT initial_obs_id FROM episodes WHERE id=?", (episode_id,)
         ).fetchone()
         if row is None:
-            raise ValueError(f"unknown episode ID {episode_id}")
+            raise ValueError(self.unknown("episodes", "episode", episode_id))
         rows = self.db.execute(
             "SELECT s.transition_id,t.after_id FROM step_events s JOIN transitions t "
             "ON t.id=s.transition_id WHERE s.episode_id=? ORDER BY s.step_index",
@@ -430,7 +436,7 @@ class ExperienceStore:
     def get_diagnostic(self, did: int) -> dict[str, Any]:
         row = self.db.execute("SELECT payload FROM diagnostics WHERE id=?", (did,)).fetchone()
         if row is None:
-            raise ValueError(f"unknown diagnostic ID {did}")
+            raise ValueError(self.unknown("diagnostics", "diagnostic", did))
         return cast(dict[str, Any], json.loads(row[0]))
 
     def request_result(self, rid: str, payload: Any) -> dict[str, Any] | None:

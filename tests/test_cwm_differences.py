@@ -1,4 +1,4 @@
-"""The predicted-versus-observed difference summary agents read (docs/reading_differences.md)."""
+"""The difference summary agents read (docs/active_exploration_phase.md)."""
 
 import json
 
@@ -172,15 +172,17 @@ def test_a_refusal_says_when_the_edit_broke_an_explained_step(make_rig):  # noqa
     assert refused["counterexamples"][0]["explained_by_previous_version"] is True
 
 
-def test_the_reading_guide_is_in_the_agent_docs_with_the_run_budgets():
+def test_the_exploration_page_explains_differences_with_the_run_budgets():
     from regact.protocols.cwm.config import CwmConfig
     from regact.protocols.cwm.prompting import workspace_docs
 
     options = CwmConfig.from_mapping({"feedback": {"max_diff_regions": 3, "max_diff_items": None}})
     docs = {f.relpath: f.content for f in workspace_docs(options, vision=False)}
-    guide = docs["docs/reading_differences.md"]
-    assert "__" not in guide and "At most 3 regions" in guide
-    assert "docs/reading_differences.md" in docs["docs/CWM_modeling_phase.md"]
+    assert set(docs) == {"docs/CWM_modeling_phase.md", "docs/active_exploration_phase.md"}
+    page = docs["docs/active_exploration_phase.md"]
+    assert "### Reading a contradiction" in page and "At most 3 regions" in page
+    assert "__" not in page
+    assert "Reading a contradiction" in docs["docs/CWM_modeling_phase.md"]
 
 
 def test_feedback_layout_is_valid_json_with_small_parts_on_one_line():
@@ -264,3 +266,47 @@ def test_vision_agents_get_a_comparison_image_per_mismatch(make_rig, monkeypatch
         {"op": "image", "diagnostic_id": example["diagnostic_id"], "which": "comparison"}
     )
     assert base64.b64decode(on_demand["png_base64"]).startswith(b"\x89PNG")
+
+
+def test_a_state_that_is_not_json_names_its_field_and_the_fix(monkeypatch, tmp_path):
+    from regact.protocols.cwm import worker_entry
+    from regact.protocols.cwm.worker_entry import encode
+
+    monkeypatch.setattr(worker_entry, "BUNDLE", tmp_path, raising=False)
+
+    class Array:
+        def tolist(self):
+            return []
+
+    expected = r"state\['grid'\]\[1\] is a .*Array: .* Convert it with \.tolist\(\)"
+    with pytest.raises(ValueError, match=expected):
+        encode({"grid": [0, Array()]})
+    with pytest.raises(ValueError, match=r"state has the key 3"):
+        encode({3: 0})
+
+
+@pytest.mark.integration
+def test_data_api_errors_name_what_was_given_and_what_exists(make_rig):  # noqa: F811
+    c = make_rig()
+    with pytest.raises(ValueError, match=r"IDs start at 1\); got 0"):
+        c.data({"op": "observations", "ids": [0]})
+    with pytest.raises(ValueError, match=r"unknown observation ID 999: observation IDs are 1 to"):
+        c.data({"op": "observations", "ids": [999]})
+    with pytest.raises(ValueError, match=r"not a dict; list_episodes\(\) returns dictionaries"):
+        c.data({"op": "history", "episode_id": {"episode_id": 1}})
+
+
+def test_a_failed_callback_shows_its_error_under_the_message():
+    from regact.config.schema import LimitsConfig
+    from regact.protocols.cwm.config import CwmConfig
+    from regact.protocols.cwm.feedback import present
+
+    failed = {
+        "stop_reason": "controller_error",
+        "error": "MemoryError: ",
+        "error_type": "code_error",
+        "error_context": {"callback": "controller_init"},
+    }
+    shown = present("RunController", failed, CwmConfig(), LimitsConfig())
+    assert list(shown)[:3] == ["status", "message", "error"]
+    assert "at most 2048 MiB" in shown["error"]["message"]

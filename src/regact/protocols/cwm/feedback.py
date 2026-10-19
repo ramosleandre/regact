@@ -210,20 +210,26 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             out["cwm_version" if status == "Accepted" else "previously_accepted_cwm_version"] = r[
                 "cwm_version"
             ]
-        if r.get("state_obs_size_ratio") is not None:
+        if "compression_ratio" in r.get("failures", {}):
             out["state_size"] = {
                 "state_bytes": r["state_bytes"],
                 "observation_bytes": r["observation_bytes"],
-                "ratio": r["state_obs_size_ratio"],
+                "ratio": round(r["state_obs_size_ratio"], 3),
                 "required_below": c.threshold_max_state_obs_size_ratio,
             }
-            if "compression_ratio" in r.get("failures", {}):
-                for key in ("smallest_state", "largest_state", "largest_ratio_state"):
-                    if key in r:
-                        out["state_size"][key] = r[key]
+            for key in ("smallest_state", "largest_state", "largest_ratio_state"):
+                if key in r:
+                    out["state_size"][key] = {
+                        k: round(v, 3) if k == "ratio" else v for k, v in r[key].items()
+                    }
         for key in ("failures", "counterexamples", "counterexamples_omitted"):
             if r.get(key):
                 out[key] = r[key]
+        if "counterexamples" in out:
+            out["counterexamples"] = [
+                {k: round(v, 3) if k == "ratio" else v for k, v in e.items()}
+                for e in out["counterexamples"]
+            ]
         first = (r.get("counterexamples") or [{}])[0]
         if status == "Refused" and "differences" in first:
             out["message"] += " First counterexample " + mismatch_summary(
@@ -342,6 +348,16 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             error = f"CWM {callback} failed: {error}"
         elif callback in ("act", "is_done", "controller_init"):
             error = f"Exploration controller {callback} failed: {error}"
+        if callback and "MemoryError" in error:
+            error = error.rstrip().rstrip(":") + (
+                f". Each submitted-code process may use at most {c.execution.max_memory_mb} MiB "
+                "(protocol.execution.max_memory_mb)."
+            )
+        elif callback and ("ConnectError" in error or "Connection refused" in error):
+            error = error.rstrip().rstrip(".") + (
+                ". Submitted code runs isolated: it cannot use data_api, the network or the "
+                "framework commands. Give it what it needs as constants or files in its folder."
+            )
         out["error"] = {
             "type": "execution_stopped"
             if r.get("error_type") == "worker_exit"
@@ -365,13 +381,15 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         if reason == "interrupted":
             out["message"] = "Operation interrupted; partial results are not an acceptance verdict."
     if r.get("phase_change"):
-        out["phase_change"] = r["phase_change"]
+        out["phase_change"] = f"{r['phase_change']['from']} -> {r['phase_change']['to']}"
     if r.get("error_type") == "request_conflict":
         # Retry identifiers and conflicts belong to transport logs, not agent work.
         out = {
             "status": "Incomplete",
             "message": "The command could not be started because of an internal delivery error. No new execution occurred.",
         }
+    if "error" in out:  # right under the message, where output cut by head still shows it
+        out = {k: out[k] for k in ("status", "message", "error") if k in out} | out
     return out
 
 

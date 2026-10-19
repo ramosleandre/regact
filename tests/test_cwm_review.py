@@ -33,7 +33,7 @@ async def test_acceptance_notice_and_retry_are_separate_and_not_duplicated(rig):
     model(c.workdir)
     result, change = await call(c, "UpdateCodeWorldModel", "stable-request")
     assert result["status"] == "Accepted"
-    assert (change["from"], change["to"]) == ("CWM Modeling", "Active Exploration")
+    assert change == "CWM Modeling -> Active Exploration"
     assert (
         not {
             "phase",
@@ -76,7 +76,7 @@ async def test_http_notice_and_retry_id_are_transport_metadata(rig):
     output = json.loads(first["output"])  # one JSON document, nothing printed after it
     assert output["status"] == "Accepted" and "messages" not in first
     assert first["output"].startswith('{\n  "status": "Accepted",')
-    assert output["phase_change"]["next_step"] == c.phase_description()
+    assert output["phase_change"] == "CWM Modeling -> Active Exploration"
     session = CwmSession(coordinator=c, tools=[])
     for reminder_count in (0, 1, 10):
         assert session.reminder(reminder_count) == (
@@ -152,7 +152,7 @@ async def test_milestone_survives_contradiction_and_is_not_announced_again(rig):
     assert result["new_milestones"][0]["name"] == "checkpoint"
     assert result["new_milestones"][0]["kind"] == "progress"
     assert "New real milestones" in result["message"]
-    assert change["next_step"] == c.phase_description()
+    assert change == "Active Exploration -> CWM Modeling"
     assert CwmSession(coordinator=c, tools=[]).reminder(2).endswith(c.phase_description())
     render = c.workdir / "world_model/model_render.py"
     render.write_text(

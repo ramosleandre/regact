@@ -520,8 +520,14 @@ class ManagedCoordinator:
             ids = body.get("ids", [])
             if isinstance(ids, str):
                 ids = expand_id_ranges(ids, max_items=self.options.data_api.max_items)
-            if not isinstance(ids, list) or any(type(i) is not int or i < 1 for i in ids):
-                raise ValueError("ids must be a list of positive integers")
+            if not isinstance(ids, list):
+                raise ValueError(
+                    f"ids must be a list of positive integers, not a {type(ids).__name__}"
+                )
+            if bad := [i for i in ids if type(i) is not int or i < 1]:
+                raise ValueError(
+                    f"ids must be positive integers (IDs start at 1); got {bad[0]!r}"
+                )
             limit = body.get("limit", self.options.data_api.max_items)
             after_id = body.get("after_id", 0)
             if (
@@ -581,13 +587,24 @@ class ManagedCoordinator:
             elif op == "history":
                 episode = body.get("episode_id")
                 upto = body.get("step")
-                if type(episode) is not int or (upto is not None and type(upto) is not int):
-                    raise ValueError("episode_id must be an integer, and step an integer or null")
+                if type(episode) is not int:
+                    hint = (
+                        "; list_episodes() returns dictionaries: pass episode['episode_id']"
+                        if isinstance(episode, dict)
+                        else ""
+                    )
+                    raise ValueError(
+                        f"episode_id must be an integer, not a {type(episode).__name__}{hint}"
+                    )
+                if upto is not None and type(upto) is not int:
+                    raise ValueError(
+                        f"step must be an integer or None, not a {type(upto).__name__}"
+                    )
                 start = next(
                     (e for e in self.store.episodes() if e["episode_id"] == episode), None
                 )
                 if start is None:
-                    raise ValueError(f"unknown episode ID {episode}")
+                    raise ValueError(self.store.unknown("episodes", "episode", episode))
                 steps = self.store.episode_steps(episode)[:upto]
                 value = {
                     "observation_ids": [start["initial_obs_id"], *(i["after_obs_id"] for i in steps)],
@@ -1057,7 +1074,9 @@ class ManagedCoordinator:
                     response = self.explore()
                 else:
                     raise ValueError(
-                        f"{name} is unavailable during {self.phase}. Build or repair world_model/ and call UpdateCodeWorldModel first."
+                        f"{name} is unavailable during {self.phase}: the CWM in world_model/ "
+                        "must first be accepted by UpdateCodeWorldModel. If you submitted it in "
+                        "the same command, its result says why it was not accepted."
                     )
             except (WorkerError, ValueError, ImportError, SyntaxError, FileNotFoundError) as exc:
                 response = {

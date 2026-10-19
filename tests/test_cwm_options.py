@@ -52,7 +52,8 @@ def test_planner_registration_refusal_and_shared_notices(rig):
     change = accepted["phase_change"]
     assert (change["from"], change["to"]) == ("CWM Modeling", "Active Exploration")
     notice = change["next_step"]
-    assert present("UpdateCodeWorldModel", accepted, c.options, c.config.limits)["phase_change"] == change
+    shown = present("UpdateCodeWorldModel", accepted, c.options, c.config.limits)["phase_change"]
+    assert shown == "CWM Modeling -> Active Exploration"
     reminder = CwmSession(coordinator=c, tools=[]).reminder(1)
     assert notice == c.phase_description()
     assert reminder.endswith(c.phase_description())

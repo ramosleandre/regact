@@ -53,7 +53,7 @@ Counterexamples include evidence IDs and one of these failure types:
 - `compression_ratio`: States are too large on average or for one State; size feedback includes the smallest/largest State and their observation IDs.
 - `non_deterministic_model`: identical callback inputs produced different outputs.
 
-`failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. `docs/reading_differences.md` explains how to read their `differences`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
+`failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during exploration, described in "Reading a contradiction" in `docs/active_exploration_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
 Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs. To see what happened in order, use `data_api.list_episodes()` and `data_api.load_history(episode_id)`. To reproduce a counterexample locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then for each action `state = step(state, action)` and compare `render(state)` with the next observation.__DIAGNOSTIC_IMAGES__
 

@@ -28,32 +28,46 @@ def agent(fn: Callable[..., Any], *args: Any) -> Any:
         spent += _now() - started
 
 
-def encode(value: Any) -> Any:
+def encode(value: Any, path: str = "state") -> Any:
     if value is None or type(value) in (bool, int, float, str):
         if isinstance(value, float) and not math.isfinite(value):
-            raise ValueError("state contains a non-finite number")
+            raise ValueError(f"{path} is {value}: State numbers must be finite")
         return value
     if type(value) is list:
-        return [encode(v) for v in value]
+        return [encode(v, f"{path}[{i}]") for i, v in enumerate(value)]
     if type(value) is tuple:
-        return {"@tuple": [encode(v) for v in value]}
+        return {"@tuple": [encode(v, f"{path}[{i}]") for i, v in enumerate(value)]}
     if type(value) is dict:
-        if any(not isinstance(k, str) or k.startswith("@") for k in value):
-            raise ValueError("state dictionary keys must be strings not starting with @")
-        return {k: encode(v) for k, v in value.items()}
+        for k in value:
+            if not isinstance(k, str) or k.startswith("@"):
+                raise ValueError(
+                    f"{path} has the key {k!r}: State dictionary keys must be strings "
+                    "not starting with @"
+                )
+        return {k: encode(v, f"{path}[{k!r}]") for k, v in value.items()}
     cls = type(value)
     module = importlib.import_module(cls.__module__)
     file = getattr(module, "__file__", "")
     if not file or not Path(file).resolve().is_relative_to(BUNDLE):
+        hint = " Convert it with .tolist()." if hasattr(value, "tolist") else ""
         raise ValueError(
-            "State fields must be JSON values, tuples, or classes from the submitted bundle"
+            f"{path} is a {cls.__module__}.{cls.__qualname__}: State fields must be JSON values "
+            "(numbers, strings, booleans, None, lists, dictionaries with string keys), tuples, "
+            f"or instances of classes defined in world_model/.{hint}"
         )
-    fields = (
-        {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
-        if dataclasses.is_dataclass(value)
-        else vars(value)
-    )
-    return {"@class": cls.__module__ + ":" + cls.__qualname__, "fields": encode(fields)}
+    if dataclasses.is_dataclass(value):
+        fields = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+    elif hasattr(value, "__dict__"):
+        fields = vars(value)
+    else:
+        raise ValueError(
+            f"{path} is a {cls.__qualname__} without instance attributes (__slots__?): "
+            "use a dataclass or a plain class"
+        )
+    return {
+        "@class": cls.__module__ + ":" + cls.__qualname__,
+        "fields": {k: encode(v, f"{path}.{k}") for k, v in fields.items()},
+    }
 
 
 def decode(value: Any) -> Any:

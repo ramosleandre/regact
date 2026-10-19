@@ -56,23 +56,20 @@ async def test_planner_reports_saved_length_and_independent_warnings(rig):
 
 
 @pytest.mark.integration
-def test_state_size_extremes_only_appear_when_ratio_is_not_respected(rig):
+def test_state_size_is_shown_only_when_size_caused_the_refusal(rig):
     c, _ = rig
     accept(c)
     result = c.tool("UpdateCodeWorldModel", {})
-    public = present("UpdateCodeWorldModel", result, c.options, c.config.limits)
-    size = public["state_size"]
-    assert size["ratio"] == size["state_bytes"] / size["observation_bytes"]
-    assert "smallest_state" not in size and "largest_state" not in size
-    # Keep full diagnostics internally; unrelated refusals do not expose the extremes.
+    assert "state_size" not in present("UpdateCodeWorldModel", result, c.options, c.config.limits)
+    # Keep full diagnostics internally; other refusals do not show the size either.
     assert "smallest_state" in result and "largest_state" in result
     refused = present("UpdateCodeWorldModel", {
         **result, "accepted": False, "failures": {"reconstruction_mismatch": 1}
     }, c.options, c.config.limits)
-    assert "smallest_state" not in refused["state_size"]
-    assert "largest_state" not in refused["state_size"]
+    assert "state_size" not in refused
+    ratio = result["state_obs_size_ratio"]
     # The threshold is strict: equality must also return useful size witnesses.
-    c.options.threshold_max_state_obs_size_ratio = size["ratio"]
+    c.options.threshold_max_state_obs_size_ratio = ratio
     rejected = c.tool("UpdateCodeWorldModel", {})
     public = present("UpdateCodeWorldModel", rejected, c.options, c.config.limits)
     assert public["status"] == "Refused" and public["failures"]["compression_ratio"]
@@ -81,7 +78,7 @@ def test_state_size_extremes_only_appear_when_ratio_is_not_respected(rig):
     for key in ("smallest_state", "largest_state"):
         item = size[key]
         assert c.store.observation(item["observation_id"])
-        assert item["ratio"] == item["state_bytes"] / item["observation_bytes"]
+        assert item["ratio"] == round(item["state_bytes"] / item["observation_bytes"], 3)
 
 
 @pytest.mark.integration

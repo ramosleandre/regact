@@ -1,4 +1,5 @@
-"""Predicted-versus-observed differences as the agent reads them (docs/reading_differences.md).
+"""Predicted-versus-observed differences as the agent reads them ("Reading a contradiction" in
+the agent's docs/active_exploration_phase.md).
 
 Every top-level field that differs is listed with its own budget. Any 2-D grid inside a field
 is summarized as regions of touching differing cells; other values are listed by path.
