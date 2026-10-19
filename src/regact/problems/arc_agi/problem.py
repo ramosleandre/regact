@@ -499,10 +499,6 @@ class ArcAgiProblem(BaseProblem):
     def secret_modules(self) -> tuple[str, ...]:
         return ("arcengine", "arc_agi")
 
-    def settled_observation(self, obs: dict[str, Any]) -> dict[str, Any]:
-        frame = obs.get("frame")
-        return {**obs, "frame": frame[-1:]} if isinstance(frame, list) and len(frame) > 1 else obs
-
     def render_frame(self, obs: Obs) -> Any | None:
         """Colorize the current 64x64 grid into an upscaled RGB frame for video."""
         grid = _current_grid(obs.frame)

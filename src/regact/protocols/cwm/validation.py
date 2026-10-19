@@ -82,14 +82,12 @@ def validate(
     live_episode: int | None = None,
     progress: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     explained_until: int | None = None,
-    view: Callable[[dict[str, Any]], dict[str, Any]] = lambda obs: obs,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Replay every recorded episode in time order: get_initial_state on its first observation,
     then step carries the State, and render is checked against every recorded observation.
 
     ``progress`` names the problem's progress at an observation, for counterexamples.
     ``explained_until`` is the last step event the previously accepted version predicted.
-    ``view`` turns a recorded observation into the one the CWM receives and predicts.
 
     Returns the summary and, when the live episode was predicted to its end, the running state
     there (``{"state", "hash"}``) for single_instance exploration to continue from.
@@ -188,7 +186,7 @@ def validate(
             elif episode["start_hash"] in diverged:
                 state, alive = None, False
             else:
-                start = view(store.observation(episode["initial_obs_id"]))
+                start = store.observation(episode["initial_obs_id"])
                 state = call("get_initial_state", True, where, obs=start)
                 alive = reached(
                     episode["start_hash"],
@@ -221,7 +219,7 @@ def validate(
                 repeat = item["step_index"] % _REPEAT_EVERY == 0
                 before_state = state
                 state = call("step", repeat, where, state=state, action=item["action"])
-                observed = view(store.observation(item["after_obs_id"]))
+                observed = store.observation(item["after_obs_id"])
                 ok = explains(state, observed, "prediction_mismatch", where, repeat, before_state)
                 if not reached(item["history_hash"], state, ok):
                     alive = False  # the rest of this episode cannot be predicted from here

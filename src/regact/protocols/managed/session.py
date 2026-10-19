@@ -407,10 +407,6 @@ class ManagedCoordinator:
                 continue
             example["image"] = f"tmp/images/{name}"
 
-    def cwm_view(self, obs: dict[str, Any]) -> dict[str, Any]:
-        """An observation as a CWM receives and predicts it."""
-        return obs
-
     def step_progress(self, obs: dict[str, Any]) -> dict[str, Any]:
         """The problem's progress at ``obs``, keyed by its label (``levels_completed``)."""
         label = self.problem.progress_label
@@ -575,8 +571,6 @@ class ManagedCoordinator:
                 value = self.store.transition_ids(int(body.get("after_id") or 0), limit)
             elif op == "observations":
                 value = [self.store.observation(int(i)) for i in ids]
-            elif op == "cwm_observations" and self.uses_model:
-                value = [self.cwm_view(self.store.observation(int(i))) for i in ids]
             elif op == "transitions":
                 value = [_public_transition(self.store.transition(int(i))) for i in ids]
             elif op == "episodes":
@@ -675,14 +669,7 @@ class ManagedCoordinator:
                 raise ValueError("unknown data operation")
             # Keep individual records/images readable; the byte guard bounds bulk queries.
             if (
-                op
-                in (
-                    "observations",
-                    "cwm_observations",
-                    "transitions",
-                    "list_observation_ids",
-                    "list_transition_ids",
-                )
+                op in ("observations", "transitions", "list_observation_ids", "list_transition_ids")
                 and len(value) > 1
                 and self.options.data_api.max_response_bytes is not None
                 and len(canonical(value).encode()) > self.options.data_api.max_response_bytes

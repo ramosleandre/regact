@@ -15,7 +15,7 @@ If framework tools are available directly, invoke them by name. Otherwise use th
 
 Use normal workspace imports, e.g. `from world_model.model_state import State` or `from world_model.model_transition import step`; Regact makes the workspace root importable in scripts and submitted code. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
 
-The complete observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. Preserve all of them, including nested metadata, frame shape and list order. JSON dictionary key order is irrelevant. Read data dictionaries rather than inferring all fields from PNGs. `obs["info"]["milestones"]` lists events produced by the action leading to this observation; an empty list means no event. The list is not cumulative.__CWM_OBSERVATIONS__
+The complete observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. Preserve all of them, including nested metadata, frame shape and list order. JSON dictionary key order is irrelevant. Read data dictionaries rather than inferring all fields from PNGs. `obs["info"]["milestones"]` lists events produced by the action leading to this observation; an empty list means no event. The list is not cumulative.
 
 ## How the State is carried
 
@@ -55,7 +55,7 @@ Counterexamples include evidence IDs and one of these failure types:
 
 `failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during exploration, described in "Reading a contradiction" in `docs/active_exploration_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
-Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs. To see what happened in order, use `data_api.list_episodes()` and `data_api.load_history(episode_id)`. To reproduce a counterexample locally: `observations, actions = __LOAD_HISTORY__(episode_id)`, `state = get_initial_state(observations[0])`, then for each action `state = step(state, action)` and compare `render(state)` with the next observation.__DIAGNOSTIC_IMAGES__
+Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs. To see what happened in order, use `data_api.list_episodes()` and `data_api.load_history(episode_id)`. To reproduce a counterexample locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then for each action `state = step(state, action)` and compare `render(state)` with the next observation.__DIAGNOSTIC_IMAGES__
 
 ## Code execution rules
 

@@ -85,8 +85,6 @@ An episode stops at its first divergence, since the State after it is unreliable
 
 Equality covers the **complete observation**: `frame`, `reward`, `is_done`, `available_actions` and `info`, including nested values, dimensions and list order. JSON dictionary key order does not matter. A correct-looking image can still have incorrect reward or metadata.
 
-The CWM sees each observation through `problem.settled_observation`: what is only visible during an action is dropped (ARC with `obs_mode=raw`: the animation frames before the last). `get_initial_state` receives that view, `render` must reproduce it, and compactness is measured on it; the agent still sees every frame through `data_api`, and `cwm_observations`/`cwm_history` in `framework/cwm_env.py` load the CWM's view. `protocol.check_animation_frames=true` checks the full observations instead.
-
 The compactness condition is:
 
 ```text
@@ -177,7 +175,6 @@ For shared collection, execution, data, feedback and task settings, see the [com
 | Full parameter | Default | Meaning |
 |---|---|---|
 | `protocol.threshold_max_state_obs_size_ratio` | `0.5` | Strict upper bound on aggregate serialized State/observation size ratio |
-| `protocol.check_animation_frames` | `false` | Check the CWM on full observations, animation frames included, instead of `problem.settled_observation` |
 | `protocol.workspace_helpers_enabled` | `true` | Supply the local environment helper `framework/cwm_env.py` |
 | `protocol.execution.max_seconds_per_UpdateCodeWorldModel` | `90` | Time spent in submitted code during one validation: world-model callbacks plus their module imports. Store reads and comparisons are not charged |
 | `protocol.execution.max_seconds_per_UpdateCodeWorldModel_per_1000_steps` | `30` | The same budget per 1,000 recorded steps; a validation gets the larger of the two, so long runs are not refused for length |

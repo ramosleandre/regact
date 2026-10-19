@@ -135,18 +135,6 @@ def test_docs_show_run_values_and_have_no_unresolved_markers():
     assert not re.search(r"__[A-Z_]+__", "\n".join(docs.values()))
 
 
-def test_docs_say_the_cwm_predicts_the_last_frame_unless_all_frames_are_checked():
-    def modeling(**options):
-        docs = workspace_docs(CwmConfig.from_mapping(options), vision=False)
-        return next(f.content for f in docs if f.relpath == "docs/CWM_modeling_phase.md")
-
-    assert "only the last one" in modeling() and "cwm_history(episode_id)" in modeling()
-    assert "cwm_history" not in modeling(workspace_helpers_enabled=False)
-    assert "only the last one" in modeling(workspace_helpers_enabled=False)
-    assert "only the last one" not in modeling(check_animation_frames=True)
-    assert "data_api.load_history(episode_id)`, `state" in modeling(check_animation_frames=True)
-
-
 def test_game_prompt_minimal_mode_uses_dictionary_fields():
     problem = ArcAgiProblem(
         environments_dir=str(Path(__file__).resolve().parents[1] / "environnement")

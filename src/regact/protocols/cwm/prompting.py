@@ -43,12 +43,6 @@ _LOCAL_HELPERS = """
 Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
 
-_CWM_OBSERVATIONS = " When an observation's `frame` holds several frames (an animation during the action), your CWM receives and predicts it with only the last one: `frame` keeps a single frame."
-_CWM_OBSERVATIONS_HELPERS = (
-    _CWM_OBSERVATIONS
-    + " `cwm_observations(ids)` and `cwm_history(episode_id)` in `framework/cwm_env.py` load observations exactly as your CWM receives them; compare `render` with those."
-)
-
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at every new submission, including a refused one; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
 
 """
@@ -106,14 +100,6 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "PLANNER_NODES": options.planner.max_nodes_per_planner_call,
         "PLANNER_DEPTH": options.planner.max_depth_per_planner_call,
         "LOCAL_HELPERS": _LOCAL_HELPERS if options.workspace_helpers_enabled else "",
-        "CWM_OBSERVATIONS": ""
-        if options.check_animation_frames
-        else _CWM_OBSERVATIONS_HELPERS
-        if options.workspace_helpers_enabled
-        else _CWM_OBSERVATIONS,
-        "LOAD_HISTORY": "cwm_history"
-        if options.workspace_helpers_enabled and not options.check_animation_frames
-        else "data_api.load_history",
         **extra,
     }
     text = (_PROMPTS / name).read_text(encoding="utf-8")

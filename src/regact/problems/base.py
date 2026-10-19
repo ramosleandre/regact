@@ -75,11 +75,6 @@ class BaseProblem(ABC):
         """Classify an event for CWM notices; unknown events are not assumed successes."""
         return "event"
 
-    def settled_observation(self, obs: dict[str, Any]) -> dict[str, Any]:
-        """The observation without what is only visible during an action (ARC: the animation
-        frames before the last one). A CWM receives and predicts this view."""
-        return obs
-
     def helper_templates(
         self,
         task_name: str,

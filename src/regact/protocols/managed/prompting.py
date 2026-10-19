@@ -175,7 +175,7 @@ def reset_commands(config, problem):
 
 def lifecycle_instructions(config, problem):
     if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
-        start = "RunController continues from the current live observation, including where initial random collection stopped."
+        start = "RunController continues from the current live observation."
     else:
         start = "Each RunController starts a fresh environment from the initial state."
     resets = "".join(
