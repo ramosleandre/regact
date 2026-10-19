@@ -226,3 +226,5 @@ main:has(.graphs) { max-width: none; }
 .zoomhint { font-size: 11px; }
 .totop { position: fixed; right: 18px; bottom: 18px; z-index: 20; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); color: var(--fg); cursor: pointer; }
 .totop:hover { color: var(--accent); }
+.panelnav .exportbtn { margin-left: auto; }
+.panelnav .snapnote { margin-left: auto; font-size: 12px; }

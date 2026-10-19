@@ -220,3 +220,40 @@ vm.runInContext(String.raw`
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
+
+
+def test_an_exported_page_reads_only_what_it_carries():
+    """In an exported page every request is answered from the embedded snapshot, and images
+    come from it too; anything not embedded fails instead of reaching for a server."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = Path(__file__).parents[1] / "src/regact/viz/static/app.js"
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const el = (tag) => ({tag, attrs: {}, kids: [], style: {}, dataset: {},
+  setAttribute(k, v) { this.attrs[k] = String(v); }, append(...k) { this.kids.push(...k); }});
+let fetched = 0;
+const snapshot = {under: 'b', exported: 't', zoom: {}, images: {'static/i.png': 'data:image/png;base64,AA'},
+  responses: {'/api/games?under=b': {games: [{name: 'g'}]}}};
+const sandbox = {document: {getElementById: () => ({}), createElementNS: (_, t) => el(t),
+    createElement: (t) => el(t), createTextNode: (t) => ({text: t})},
+  window: {addEventListener: () => {}, innerWidth: 1500, __REGACT_SNAPSHOT__: snapshot},
+  AbortController, DOMException, Intl, URL, fetch: async () => { fetched += 1; return {ok: true, json: async () => ({})}; }};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$/, ''), sandbox);
+vm.runInContext(String.raw`
+  (async () => {
+    const data = await api('/api/games?under=b');
+    if (data.games[0].name !== 'g') throw Error('embedded data not returned');
+    let refused = false;
+    try { await api('/api/game?name=g'); } catch (e) { refused = /not included/.test(e.message); }
+    if (!refused) throw Error('a request outside the snapshot was not refused');
+    if (asset('static/i.png') !== 'data:image/png;base64,AA' || asset('static/x.png') !== 'static/x.png')
+      throw Error('images are not taken from the snapshot');
+  })().catch((e) => { console.error(e); process.exit(1); });
+`, sandbox);
+setTimeout(() => { if (fetched) { console.error('fetched', fetched); process.exit(1); } }, 50);
+"""
+    subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

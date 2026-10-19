@@ -27,6 +27,11 @@ const aggLine = (agg) =>
     .map(([k, v]) => `${k} ${fmtMetric(v)}`)
     .join(" · ") || "—";
 
+// An exported page (exportPage) carries its data, settings and images; it never calls a server.
+const SNAPSHOT = (typeof window !== "undefined" && window.__REGACT_SNAPSHOT__) || null;
+const _responses = {};   // path -> last response, what an export embeds
+const asset = (src) => (SNAPSHOT && SNAPSHOT.images[src]) || src;
+
 let navigation = new AbortController();
 let pageCleanups = [];
 function checkNavigation(token) {
@@ -34,6 +39,10 @@ function checkNavigation(token) {
 }
 async function api(path, opts = {}) {
   const token = navigation;
+  if (SNAPSHOT) {
+    if (!(path in SNAPSHOT.responses)) throw new Error("not included in this exported page");
+    return JSON.parse(JSON.stringify(SNAPSHOT.responses[path]));
+  }
   const r = await fetch(path, {cache: "no-store", signal: token.signal, ...opts});
   if (!r.ok) {
     const text = await r.text();
@@ -43,6 +52,7 @@ async function api(path, opts = {}) {
   }
   const data = await r.json();
   checkNavigation(token);
+  _responses[path] = data;
   return data;
 }
 
@@ -236,13 +246,17 @@ async function loadModelDefaults() {
 async function loadSettings(scope) {
   try { return await api("/api/settings?scope=" + encodeURIComponent(scope)); } catch (e) { if (e.name === "AbortError") throw e; return {}; }
 }
-function saveSettings() {   // debounced PUT of the whole panel state for the current interface
-  const body = {
+function currentSettings() {
+  return {
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
     order: _graph.order, colors: _graph.colors, curveX: _graph.curveX,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
     perRun: [..._graph.perRun], muted: [..._graph.muted],
   };
+}
+function saveSettings() {   // debounced PUT of the whole panel state for the current interface
+  if (SNAPSHOT) return;
+  const body = currentSettings();
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     fetch("/api/settings?scope=" + encodeURIComponent(_scope),
@@ -796,6 +810,7 @@ async function graphsView(games, onlyExp, scope) {
   const shown = onlyExp ? games.filter((g) => g.experiment === onlyExp) : games;
   const specs = metricSpecs(shown);
   applySettings(await loadSettings(_scope), specs);
+  if (SNAPSHOT) _graph.zoom = JSON.parse(JSON.stringify(SNAPSHOT.zoom || {}));
   const group = groupByExpTask(shown);
   const expColor = makeExpColor(group.experiments);   // saved > per-model default > palette
   const charts = h("div", "charts");
@@ -877,7 +892,71 @@ async function renderGraphs(under = "") {
   const body = await graphsView(data.games, null, under);
   checkNavigation(token);
   clear(app);
-  app.append(panelNav("graphs", under), body);
+  const nav = panelNav("graphs", under);
+  if (SNAPSHOT) {
+    for (const a of nav.querySelectorAll("a")) a.removeAttribute("href");
+    nav.append(h("span", "muted snapnote", `exported ${SNAPSHOT.exported}; navigation is off`));
+  } else {
+    const exp = h("button", "aggbtn exportbtn", "export");
+    exp.title = "Save this page, with its data and current settings, as one HTML file";
+    exp.onclick = () => exportPage(under, exp);
+    nav.append(exp);
+  }
+  app.append(nav, body);
+}
+
+// One self-contained HTML file of the current Graphs page: code, styles, data, settings, images.
+async function exportPage(under, button) {
+  button.disabled = true;
+  button.textContent = "exporting...";
+  try {
+    const text = async (url) => (await fetch(url, { cache: "no-store" })).text();
+    const [js, css] = await Promise.all([text("static/app.js"), text("static/style.css")]);
+    const images = {};
+    for (const img of document.querySelectorAll("img")) {
+      const src = img.getAttribute("src");
+      if (!src || !src.startsWith("static/") || src in images) continue;
+      const blob = await (await fetch(src)).blob();
+      images[src] = await new Promise((done) => {
+        const reader = new FileReader();
+        reader.onload = () => done(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    }
+    const games = "/api/games" + (under ? "?under=" + encodeURIComponent(under) : "");
+    const responses = { [games]: _responses[games] };   // this page's data only
+    for (const path of ["static/model_defaults.json", "static/viz_icons.json"])
+      if (path in _responses) responses[path] = _responses[path];
+    responses["/api/settings?scope=" + encodeURIComponent(_scope)] = currentSettings();
+    const exported = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const snapshot = { under, exported, responses, images, zoom: _graph.zoom };
+    const safe = (t) => t.replace(/<\/(script)/gi, "<\\/$1");
+    const title = "regact graphs - " + (under.split("/").pop() || "all");
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${title.replace(/[<&]/g, "")}</title>
+<style>${safe(css)}</style>
+</head>
+<body>
+<header><span id="brand">regact</span><span id="crumb"></span><button id="goup" title="Back to the top of the page">&uarr; go up</button></header>
+<main id="app">loading...</main>
+<script>window.__REGACT_SNAPSHOT__ = ${JSON.stringify(snapshot).replace(/</g, "\\u003c")};</script>
+<script>${safe(js)}</script>
+</body>
+</html>`;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    link.download = title.replace(/[^A-Za-z0-9._-]+/g, "_") + ".html";
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } finally {
+    button.disabled = false;
+    button.textContent = "export";
+  }
 }
 
 // The per-game "Graphs" tab: the same charts but for THIS run's experiment only (scoped to the
@@ -984,7 +1063,7 @@ function iconBadge(name, size, text = _badgeText(name)) {   // registry may supp
   return b;
 }
 function iconImg(src, size, alt) {
-  const img = h("img", "vicon"); img.src = src; img.width = img.height = size; img.alt = alt || "";
+  const img = h("img", "vicon"); img.src = asset(src); img.width = img.height = size; img.alt = alt || "";
   // Appearance belongs to the asset registry, independently of agent/model identity.
   const style = _icons.icon_styles?.[src] || {};
   if (style.background) img.style.backgroundColor = style.background;
@@ -1023,7 +1102,7 @@ function longArrow() {
   return s;
 }
 function taskThumb(task, size) {
-  const img = h("img", "taskthumb"); img.src = taskIconSrc(task);
+  const img = h("img", "taskthumb"); img.src = asset(taskIconSrc(task));
   img.width = img.height = size; img.alt = task; img.title = task;
   img.addEventListener("error", () => img.replaceWith(iconBadge(shortTask(task), size)));
   return img;
@@ -1567,6 +1646,7 @@ async function route() {
   for (const key of Object.keys(_cache)) delete _cache[key];
   for (const key of Object.keys(_gamesCache)) delete _gamesCache[key];
   try {
+    if (SNAPSHOT) return await renderGraphs(SNAPSHOT.under);
     const parts = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean);
     if (!parts.length) return await renderBrowse();
     if (parts[0] === "graphs") return await renderGraphs(parts[1] ? decodeURIComponent(parts[1]) : "");
