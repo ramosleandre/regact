@@ -17,7 +17,7 @@ The coding agent's tool calls and real environment actions are different counts:
 
 ### 1. Create the environment and collect initial data
 
-Regact records the reset observation, then runs a random policy before starting the agent. It targets `protocol.n_unique_observations_in_initial_collection=20` distinct complete observations, counting the reset observation. It stops earlier on `protocol.max_actions_per_initial_collection`, `protocol.max_seconds_per_initial_collection`, a task/episode limit, no available actions, or environment termination.
+Regact records the reset observation before starting the agent. By default (`protocol.n_unique_observations_in_initial_collection=1`) nothing else is collected: the agent's first actions are its own, and every action is counted in its scores. With a larger value, a random policy plays until it has seen that many distinct complete observations, counting the reset observation; those random actions count too. It stops earlier on `protocol.max_actions_per_initial_collection`, `protocol.max_seconds_per_initial_collection`, a task/episode limit, no available actions, or environment termination.
 
 The action sampler uses `problem.seed` (0 when unspecified). Environment seeding still follows the problem's own `problem.seed` behavior; a seeded action sampler alone does not guarantee identical environments. Collection never silently resets a terminated game. Its actions count against task and episode action budgets. If collection solves the game, the task can finish before the agent acts.
 
@@ -167,7 +167,7 @@ These are repository defaults from [vanilla.yaml](../src/regact/conf/protocol/va
 
 | Full parameter | Default | Scope |
 |---|---|---|
-| `protocol.n_unique_observations_in_initial_collection` | `20` | Initial collection target, including reset observation |
+| `protocol.n_unique_observations_in_initial_collection` | `1` | Initial collection target, including reset observation; 1 = no random actions |
 | `protocol.max_actions_per_initial_collection` | `1000` | Initial random steps |
 | `protocol.max_seconds_per_initial_collection` | `30` | Initial collection wall time |
 | `protocol.max_actions_per_RunController` | `2500` | Real actions in one `RunController` |

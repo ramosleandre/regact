@@ -27,13 +27,17 @@ from regact.envclient.client import EnvClient
 # Placeholder baked into a scripted run's workdir; that backend never calls it.
 _IN_PROCESS_URL = "http://127.0.0.1:0"
 
-def _free(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError:
-            return False
-    return True
+
+def _listening_socket(port: int | None) -> socket.socket:
+    """A loopback socket bound to ``port``, or to an ephemeral port if that one is taken. Binding
+    here rather than in uvicorn leaves no gap in which another process could take the port."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", port or 0))
+    except OSError:
+        sock.bind(("127.0.0.1", 0))
+    return sock
 
 
 # How long to wait for the uvicorn thread to bind its port before giving up.
@@ -83,16 +87,13 @@ async def _running_uvicorn(server: EnvServer, port: int | None = None) -> AsyncI
     """
     import uvicorn
 
-    if port and not _free(port):
-        port = None
-    config = uvicorn.Config(
-        server.app, host="127.0.0.1", port=port or 0, log_level="warning", ws="none"
-    )
+    sock = _listening_socket(port)
+    config = uvicorn.Config(server.app, log_level="warning", ws="none")
     uv_server = uvicorn.Server(config)
-    thread = threading.Thread(target=uv_server.run, daemon=True)
+    thread = threading.Thread(target=uv_server.run, kwargs={"sockets": [sock]}, daemon=True)
     thread.start()
     try:
-        # Wait for startup, but fail fast if the thread dies (uvicorn swallows a bind
+        # Wait for startup, but fail fast if the thread dies (uvicorn swallows a startup
         # error inside it, so a dead thread that never set `started` is the signal) or
         # a timeout elapses — otherwise this loop would spin forever.
         deadline = asyncio.get_event_loop().time() + _STARTUP_TIMEOUT_S
@@ -103,8 +104,8 @@ async def _running_uvicorn(server: EnvServer, port: int | None = None) -> AsyncI
                 uv_server.should_exit = True
                 raise TimeoutError(f"env server did not start within {_STARTUP_TIMEOUT_S}s")
             await asyncio.sleep(0.02)
-        port = uv_server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
+        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
     finally:
         uv_server.should_exit = True
         await asyncio.to_thread(thread.join, 5)
+        sock.close()

@@ -103,6 +103,13 @@ def test_renderer_last_frame_only_collapses_the_animation_stack() -> None:
     assert ArcRenderer(last_frame_only=False).render(native, {}).frame == [[[1]], [[2]], [[3]]]
 
 
+def test_settled_observation_keeps_the_last_frame() -> None:
+    animated = {"frame": [[[1]], [[2]], [[3]]], "is_done": False}
+    assert _problem().settled_observation(animated) == {"frame": [[[3]]], "is_done": False}
+    settled = {"frame": [[[3]]], "is_done": False}
+    assert _problem().settled_observation(settled) is settled
+
+
 def test_validated_click_data_guards_action6() -> None:
     from regact.problems.arc_agi.problem import _validated_click_data
 

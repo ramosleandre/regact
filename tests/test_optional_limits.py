@@ -29,7 +29,7 @@ def test_every_protocol_max_parameter_accepts_null():
     raw = no_caps(asdict(CwmConfig()))
     cfg = CwmConfig.from_mapping(raw)
     assert asdict(cfg) == raw
-    assert cfg.n_unique_observations_in_initial_collection == 20
+    assert cfg.n_unique_observations_in_initial_collection == 1
     assert expand_id_ranges("[1:250]", max_items=None) == list(range(1, 251))
     assert len(summarize({"v": [{}, {}, {}]}, {"v": [1, 2, 3]}, FeedbackConfig(max_diff_items=None))["v"]) == 3
     for invalid in (-1, 0, True, float("inf")):

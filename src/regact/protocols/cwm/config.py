@@ -48,10 +48,11 @@ class DataApiConfig:
 
 @dataclass
 class CwmConfig:
-    n_unique_observations_in_initial_collection: int = 20
+    n_unique_observations_in_initial_collection: int = 1  # 1 = no random actions
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
     threshold_max_state_obs_size_ratio: float = 0.5
+    check_animation_frames: bool = False  # False: the CWM sees and predicts settled observations
     max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
@@ -81,7 +82,12 @@ class CwmConfig:
                     validate(value, prefix + key + ".")
                 elif key.startswith("max_") and value is None:
                     continue
-                elif key in ("workspace_helpers_enabled", "one_command_per_tool_call", "enabled"):
+                elif key in (
+                    "workspace_helpers_enabled",
+                    "one_command_per_tool_call",
+                    "check_animation_frames",
+                    "enabled",
+                ):
                     if type(value) is not bool:
                         raise ValueError(f"{prefix}{key} must be a boolean")
                 elif key == "n_tmp_images_saved_per_exploration":

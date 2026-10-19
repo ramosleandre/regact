@@ -186,6 +186,11 @@ _RESUME_MESSAGE = (
     "data and the game's position are as you left them. A command that was running when the "
     "interruption happened did not complete, and scripts you had left running were stopped."
 )
+_ADDRESS_MOVED = (
+    "The framework's server moved from http://127.0.0.1:{old} to http://127.0.0.1:{new}: the "
+    "files under framework/ use the new address, but scripts of yours that copied the old one "
+    "must be updated."
+)
 _TAKE_OVER_MESSAGE = (
     "You are taking over a task that another agent session started and that was interrupted. "
     "That session's conversation is lost; its files in your working directory and the recorded "
@@ -209,6 +214,13 @@ _RESUME_MAY_CHANGE = frozenset(
 )
 # Where the model is served, not which model: a resumed run may reach it on another port.
 _RESUME_MAY_CHANGE_AGENT = ("base_url", "api_key")
+
+
+def _address_notice(previous_port: int | None, port: int | None) -> str:
+    """For a resumed agent whose env server could not get its previous port back."""
+    if previous_port and port and previous_port != port:
+        return " " + _ADDRESS_MOVED.format(old=previous_port, new=port)
+    return ""
 
 
 def _build_server(
@@ -352,8 +364,11 @@ async def run_task(
     )
     in_process = config.agent.name is AgentName.SCRIPTED
 
-    port = previous.env_port if previous is not None else None
-    async with protocol, serve_env(server, task_name, in_process=in_process, port=port) as conn:
+    previous_port = previous.env_port if previous is not None else None
+    async with (
+        protocol,
+        serve_env(server, task_name, in_process=in_process, port=previous_port) as conn,
+    ):
         resuming = previous is not None
         with (
             TranscriptWriter(
@@ -641,6 +656,8 @@ async def run_task(
                         minutes=round(experiment.duration_s / 60),
                         notice=session.resume_notice(),
                     )
+                if continued or took_over:
+                    first_message += _address_notice(previous_port, experiment.env_port)
 
                 reason = await run_session(
                     agent,

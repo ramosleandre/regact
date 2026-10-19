@@ -54,3 +54,10 @@ async def test_a_resumed_server_keeps_its_port_when_free() -> None:
     async with serve_env(_server(), "g", in_process=False, port=port) as again:
         assert again.base_url == first.base_url
         assert again.client.reset().available_actions == [0, 1]
+
+
+def test_a_resumed_agent_is_told_when_the_server_address_changed() -> None:
+    from regact.orchestration.task import _address_notice
+
+    assert "from http://127.0.0.1:41000 to http://127.0.0.1:41007" in _address_notice(41000, 41007)
+    assert _address_notice(41000, 41000) == _address_notice(None, 41007) == ""

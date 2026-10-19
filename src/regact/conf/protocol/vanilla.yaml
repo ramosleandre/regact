@@ -1,6 +1,6 @@
 # Observation-driven managed-controller baseline. All max_* accept null.
 name: vanilla
-n_unique_observations_in_initial_collection: 20
+n_unique_observations_in_initial_collection: 1  # 1 = start from the first observation, no random actions
 max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
 max_actions_per_RunController: 2500

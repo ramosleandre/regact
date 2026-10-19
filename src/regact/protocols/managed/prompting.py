@@ -132,7 +132,13 @@ def build_prompt(
     workflow = _render(
         "workflow.md",
         PROTOCOL_INTRO=workflow_intro.strip() + "\n\n" if workflow_intro else "",
-        INITIAL_TARGET=options.n_unique_observations_in_initial_collection,
+        INITIAL_DATASET=(
+            "The dataset holds only the game's first observation: no action has been played yet."
+            if options.n_unique_observations_in_initial_collection <= 1
+            else "A random policy already prepared the dataset, targeting "
+            f"{options.n_unique_observations_in_initial_collection} unique observations "
+            "(possibly fewer if a collection limit was reached)."
+        ),
         INITIAL_GUIDANCE=initial_guidance,
         PROTOCOL_STEPS=(workflow_steps if workflow_steps is not None else _render("vanilla_steps.md")).strip(),
         LIFECYCLE=lifecycle_instructions(config, problem),

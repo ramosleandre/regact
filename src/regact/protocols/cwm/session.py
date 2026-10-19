@@ -11,7 +11,7 @@ from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.bundle import description, require_unchanged_model, snapshot, write_plan
 from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.planner import plan
-from regact.protocols.cwm.store import canonical
+from regact.protocols.cwm.store import canonical, digest
 from regact.protocols.cwm.validation import (
     add_state_size,
     check_observation,
@@ -81,10 +81,23 @@ class Coordinator(ManagedCoordinator):
             if k in summary
         }
 
+    def cwm_view(self, obs: dict[str, Any]) -> dict[str, Any]:
+        return obs if self.options.check_animation_frames else self.problem.settled_observation(obs)
+
+    def known_observation_hashes(self) -> set[str]:
+        """Recorded observations, as the CWM predicts them: what a plan counts as not novel."""
+        if self.options.check_animation_frames:
+            return self.store.observation_hashes()
+        return {
+            digest(self.cwm_view(self.store.observation(oid)))
+            for oid in self.store.observation_ids()
+        }
+
     def begin_exploration(self):
         self.current_state = self.next_state = None
 
     def controller_input(self, worker, obs):
+        obs = self.cwm_view(obs)
         if self.current_state is None:
             self.current_state = (
                 self.live_state(worker)
@@ -100,6 +113,7 @@ class Coordinator(ManagedCoordinator):
         return check_observation(worker.call("render", state=self.next_state))
 
     def check_prediction(self, predicted, obs, evidence):
+        obs = self.cwm_view(obs)
         if canonical(predicted) != canonical(obs):
             states = {"state_before": self.current_state, "state": self.next_state}
             self.running = self.current_state = None
@@ -129,7 +143,7 @@ class Coordinator(ManagedCoordinator):
         done = hashes.index(anchor) + 1 if anchor in hashes else None
         if done is None and anchor != episode["start_hash"]:
             oid = episode["initial_obs_id"]
-            start = self.store.observation(oid)
+            start = self.cwm_view(self.store.observation(oid))
             state = self._explained(
                 worker, worker.call("get_initial_state", obs=start), start, oid
             )
@@ -138,7 +152,7 @@ class Coordinator(ManagedCoordinator):
             state = self.running["state"]
         for item in steps[done or 0 :]:
             state = worker.call("step", state=state, action=item["action"])
-            after = self.store.observation(item["after_obs_id"])
+            after = self.cwm_view(self.store.observation(item["after_obs_id"]))
             state = self._explained(worker, state, after, item["after_obs_id"])
         self.running = {"state": state, "hash": position}
         return state
@@ -185,6 +199,7 @@ class Coordinator(ManagedCoordinator):
                 worker,
                 self.store,
                 self.options,
+                view=self.cwm_view,
                 live_episode=self.episode if self.single_instance else None,
                 progress=self.step_progress,
                 explained_until=(self.accepted or {}).get("explained_until"),
@@ -299,14 +314,14 @@ class Coordinator(ManagedCoordinator):
                 )
             )
             worker.deadline = goal_worker.deadline = deadline
-            start = (
+            start = self.cwm_view(
                 self.store.observation(self.current_id) if self.single_instance else self.initial
             )
             start_state = self.planning_start(worker, start)
             result = plan(
                 worker,
                 start,
-                self.store.observation_hashes(),
+                self.known_observation_hashes(),
                 self.options,
                 lambda obs: self.problem.enumerate_actions(Obs.from_json(obs)),
                 goal_worker=goal_worker,

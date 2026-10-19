@@ -1,7 +1,7 @@
 name: arc_agi
 tasks: []
 lifecycle: multi_instance
-obs_mode: raw_last_frame_only   # show only the settled final grid of each step (use `raw` for the full animation stack)
+obs_mode: raw   # every frame of each step's animation (`raw_last_frame_only` = only the settled final grid)
 info_mode: informative
 seed: null              # ignored by deterministic ARC; here so the override composes
 kwargs:

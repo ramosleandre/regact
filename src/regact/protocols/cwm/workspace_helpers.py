@@ -56,6 +56,23 @@ class EnvCWM:
         return self.observation() if self.obs_mode else self.state
 
 
+def cwm_observations(ids):
+    """data_api.load_observations(ids), as your CWM receives and renders them: when the game
+    shows animation frames, only each observation's final frame is kept."""
+    from framework import data_api
+    return data_api._load("cwm_observations", ids)
+
+
+def cwm_history(episode_id, step=None):
+    """data_api.load_history(episode_id, step), with observations as in cwm_observations."""
+    from framework import data_api
+    history = data_api._query("history", episode_id=episode_id, step=step)
+    ids = history["observation_ids"]
+    distinct = sorted(set(ids))
+    by_id = dict(zip(distinct, cwm_observations(distinct)))
+    return [by_id[i] for i in ids], history["actions"]
+
+
 def make_cwm_env(obs_mode=False, initial_state=None):
     """Create EnvCWM starting where the next RunController will start, unless a State is given.
 
@@ -69,9 +86,9 @@ def make_cwm_env(obs_mode=False, initial_state=None):
         from world_model import model_initial_state, model_transition
         summary = data_api.summary()
         if summary["lifecycle"] == "single_instance":
-            observations, actions = data_api.load_history(summary["episode_id"])
+            observations, actions = cwm_history(summary["episode_id"])
         else:
-            observations = data_api.load_observations([summary["initial_observation_id"]])
+            observations = cwm_observations([summary["initial_observation_id"]])
             actions = []
         initial_state = model_initial_state.get_initial_state(deepcopy(observations[0]))
         for action in actions:

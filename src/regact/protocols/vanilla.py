@@ -20,7 +20,7 @@ class ExecutionConfig:
 
 @dataclass
 class VanillaConfig:
-    n_unique_observations_in_initial_collection: int = 20
+    n_unique_observations_in_initial_collection: int = 1  # 1 = no random actions
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
     max_actions_per_RunController: int | None = 2500

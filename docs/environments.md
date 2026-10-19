@@ -75,6 +75,7 @@ A problem implements the [`BaseProblem`](../src/regact/problems/base.py) ABC.
 - `config_kwargs()` — kwargs to rebuild the problem for trusted-side eval.
 
 Optional hooks (each has a default): `milestone_detector`, `helper_templates`,
+`settled_observation` (the observation a CWM predicts, without transient animation frames),
 `secret_modules` (the packages that ARE the game — hidden from the sandbox),
 `render_frame` (obs → RGB frame for the video), `render_obs_text`,
 `derived_submission_metrics` and `derived_trace_metrics` (scores a game derives from its own

@@ -78,6 +78,19 @@ def test_managed_workspace_and_prompt_use_renamed_files(tmp_path, protocol_name,
         assert not (tmp_path / name).exists()
         assert name not in prompt
     assert "python framework/commands.py RunController" in prompt
+    assert "holds only the game's first observation" in prompt
+
+
+def test_prompt_describes_a_random_initial_collection():
+    config = RunConfig(
+        AgentConfig(AgentName.SCRIPTED),
+        ProblemConfig("fake"),
+        protocol=ProtocolConfig("cwm", {"n_unique_observations_in_initial_collection": 20}),
+    )
+    prompt = build_protocol(config).build_system_prompt(
+        Problem(), "counter", tool_protocol="client_cli", tool_names=[], verbalize_variant="off"
+    )
+    assert "random policy already prepared the dataset, targeting 20 unique observations" in prompt
 
 
 @pytest.fixture
@@ -255,6 +268,39 @@ def test_cwm_mismatch_preserves_position_and_repairs(make_rig):
     result = c.tool("RunController", {})
     assert result["real_actions"] == 1 and c.env.live.last_obs.frame[0] == 4
     assert c.episode == 1
+
+
+def test_cwm_starts_from_the_reset_observation_alone(make_rig):
+    c = make_rig("cwm", target=1)
+    assert c.initial_collection["real_actions"] == 0
+    assert c.store.summary()["n_total_transitions"] == 0
+    exploration(c, (1,))
+    assert c.tool("RunController", {})["real_actions"] == 1
+
+
+class AnimatedProblem(Problem):
+    def settled_observation(self, obs):
+        return {**obs, "frame": obs["frame"][-1:]}
+
+
+def test_cwm_predicts_settled_observations_unless_all_frames_are_checked(make_rig):
+    c = make_rig(
+        "cwm",
+        problem=AnimatedProblem(),
+        check_animation_frames=True,
+        threshold_max_state_obs_size_ratio=0.9,  # a State is large next to a one-cell frame
+    )
+    c.options.check_animation_frames = False
+    model(c.workdir)  # renders all 30 cells of the frame, where the CWM now sees only the last
+    assert not c.tool("UpdateCodeWorldModel", {}).get("accepted")
+    render = c.workdir / "world_model" / "model_render.py"
+    render.write_text(render.read_text().replace('"frame":[s.n]*30', '"frame":[s.n]'))
+    assert c.tool("UpdateCodeWorldModel", {}).get("accepted")
+    exploration(c, (1,))
+    result = c.tool("RunController", {})
+    assert result["real_actions"] == 1 and "prediction_mismatch" not in json.dumps(result)
+    assert c.data({"op": "cwm_observations", "ids": [1]})[0]["frame"] == [0]
+    assert len(c.data({"op": "observations", "ids": [1]})[0]["frame"]) == 30
 
 
 def test_vanilla_has_no_cwm_requirements_or_files(make_rig):
