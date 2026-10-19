@@ -249,7 +249,7 @@ async function loadSettings(scope) {
 function currentSettings() {
   return {
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
-    order: _graph.order, colors: _graph.colors, curveX: _graph.curveX,
+    order: _graph.order, colors: _graph.colors, curveX: _graph.curveX, lineStyles: _graph.lineStyles,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
     perRun: [..._graph.perRun], muted: [..._graph.muted],
   };
@@ -284,7 +284,9 @@ const _graph = {
   // A chart legend entry cycles: drawn -> not drawn (muted) -> drawn with each run (perRun) -> drawn.
   muted: new Set(), perRun: new Set(),
   zoom: {},   // x measure -> [from, to] shown by the progress charts (not saved: drag to set)
+  lineStyles: {},   // experiment -> a LINE_STYLES key for its progress curves (persisted)
 };
+const LINE_STYLES = { solid: "", dashed: "8 4", dotted: "2 3", "dash-dot": "8 3 2 3" };
 
 // Apply a saved settings blob onto _graph for the current interface; a missing key falls back to the
 // default (robust to viz updates, and resets cleanly when switching interfaces). `specs` seeds the
@@ -297,6 +299,7 @@ function applySettings(s, specs) {
   _graph.curveX = CURVE_X[s.curveX] ? s.curveX : "env actions";
   _graph.order = Array.isArray(s.order) ? s.order : [];
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
+  _graph.lineStyles = (s.lineStyles && typeof s.lineStyles === "object") ? s.lineStyles : {};
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
   _graph.perRun = new Set(Array.isArray(s.perRun) ? s.perRun : []);
   _graph.muted = new Set(Array.isArray(s.muted) ? s.muted : []);
@@ -634,6 +637,8 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName, o
         s.append(clipped(svg("circle", { class: "curve-end run", cx: xOf(run.end), cy: yOf(curveAt(run, run.end)), r: 2.5, fill: color })));
       }
     const line = svg("path", { class: "curve-line", stroke: color, d: steps(at.map((xs) => (xs.length ? agg(xs) : null))) });
+    const dash = LINE_STYLES[_graph.lineStyles[exp]];
+    if (dash) line.setAttribute("stroke-dasharray", dash);
     line.append(svg("title", {}, txt(`${expLeaf(exp)} · ${task}\n${runs.length} run${runs.length > 1 ? "s" : ""}`)));
     s.append(clipped(line));
     s.append(clipped(svg("circle", { class: "curve-end", cx: xOf(lastEnd), cy: yOf(agg(runs.map((r) => curveAt(r, lastEnd)))), r: 4, fill: color })));   // where it stops
@@ -720,11 +725,12 @@ function legend(items) {   // items: [{label, color}] — the static status lege
 // The experiments of a chart, in bar order, beside it (scrolls when there are many). Clicking one
 // cycles it on every chart: drawn, not drawn, drawn with each of its runs (a tick per run on its
 // bars, a dashed line per run on the curves), then drawn again.
-function expLegend(experiments, expColor, redraw) {
+function expLegend(experiments, expColor, redraw, lines = false) {
   const l = h("div", "chartlegend");
   for (const exp of experiments) {
     const state = _graph.muted.has(exp) ? "off" : _graph.perRun.has(exp) ? "on" : "";
-    const row = h("div", "leg " + state, swatch(expColor(exp)), expLeaf(exp));
+    const mark = lines ? lineSample(expColor(exp), _graph.lineStyles[exp]) : swatch(expColor(exp));
+    const row = h("div", "leg " + state, mark, expLeaf(exp));
     row.title = exp + "\nclick: " + (state === "off" ? "show each run" : state === "on" ? "back to the aggregate" : "hide");
     row.onclick = () => {
       _graph.muted.delete(exp); _graph.perRun.delete(exp);
@@ -737,6 +743,13 @@ function expLegend(experiments, expColor, redraw) {
   return l;
 }
 function swatch(color) { const s = h("span", "sw"); s.style.background = color; return s; }
+function lineSample(color, style) {
+  const s = svg("svg", { class: "linesample", width: 22, height: 10, viewBox: "0 0 22 10" });
+  const line = svg("line", { x1: 1, y1: 5, x2: 21, y2: 5, stroke: color, "stroke-width": 2 });
+  if (LINE_STYLES[style]) line.setAttribute("stroke-dasharray", LINE_STYLES[style]);
+  s.append(line);
+  return s;
+}
 
 // The Experiments panel (sidebar, below Metrics). Each row: up/down to reorder (= reorder the bars
 // left-to-right), a swatch to recolor (persisted), and the name to show/hide. `experiments` is the
@@ -753,9 +766,18 @@ function expSection(experiments, expColor, redraw, allExps) {
     const pick = h("input"); pick.type = "color"; pick.className = "sw-pick";
     pick.value = expColor(exp); pick.title = "pick colour";
     pick.oninput = () => { _graph.colors[exp] = pick.value; redraw(); };
+    const styles = Object.keys(LINE_STYLES);
+    const current = styles.includes(_graph.lineStyles[exp]) ? _graph.lineStyles[exp] : "solid";
+    const look = h("button", "linebtn", lineSample(expColor(exp), current));
+    look.title = `line: ${current} (click for ${styles[(styles.indexOf(current) + 1) % styles.length]})`;
+    look.onclick = () => {
+      const next = styles[(styles.indexOf(current) + 1) % styles.length];
+      if (next === "solid") delete _graph.lineStyles[exp]; else _graph.lineStyles[exp] = next;
+      redraw();
+    };
     const label = h("span", "leg-label", expLeaf(exp)); label.title = "click to show / hide";
     label.onclick = () => { _graph.hidden.has(exp) ? _graph.hidden.delete(exp) : _graph.hidden.add(exp); redraw(); };
-    row.append(up, down, pick, label);
+    row.append(up, down, pick, look, label);
     panel.append(row);
   });
   return panel;
@@ -840,7 +862,7 @@ async function graphsView(games, onlyExp, scope) {
       const card = h("div", "chartcard", h("h3", null, spec.label));
       card.dataset.key = spec.key;
       const scroll = h("div", "chartscroll");
-      const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor, redraw));
+      const body = h("div", "chartbody", scroll, expLegend(activeExps, expColor, redraw, !!spec.curve));
       if (spec.curve) {
         const zoomed = _graph.zoom[_graph.curveX];
         const setZoom = (span) => { if (span) _graph.zoom[_graph.curveX] = span; else delete _graph.zoom[_graph.curveX]; redraw(); };

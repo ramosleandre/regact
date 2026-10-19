@@ -191,6 +191,13 @@ vm.runInContext(String.raw`
   const lines = ['curve-line', 'curve-run', 'curve-ref', 'curve-end'].flatMap((c) => zoomed.by(c));
   if (!lines.length || lines.some((k) => !String(k.attrs['clip-path']).startsWith('url(#'))) throw Error('unclipped line');
   _graph.zoom = {};
+
+  // An experiment's line style dashes its aggregate curve; the others stay solid.
+  _graph.lineStyles = {A: 'dotted'};
+  const styled = draw([game('A', a1), game('B', b1)], 'env actions');
+  const dashes = styled.by('curve-line').map((p) => p.attrs['stroke-dasharray'] || 'solid');
+  if (dashes.join() !== '2 3,solid') throw Error('line styles ' + dashes);
+  _graph.lineStyles = {};
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

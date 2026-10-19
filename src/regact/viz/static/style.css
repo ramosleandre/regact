@@ -228,3 +228,5 @@ main:has(.graphs) { max-width: none; }
 .totop:hover { color: var(--accent); }
 .panelnav .exportbtn { margin-left: auto; }
 .panelnav .snapnote { margin-left: auto; font-size: 12px; }
+.linebtn { padding: 0 2px; margin-right: 5px; height: 14px; line-height: 0; background: none; border: 1px solid var(--line); border-radius: 3px; cursor: pointer; vertical-align: middle; }
+.linesample { display: inline-block; vertical-align: middle; margin-right: 6px; }
