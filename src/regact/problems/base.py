@@ -71,6 +71,11 @@ class BaseProblem(ABC):
         """Optional per-step milestone detector for the wrapper."""
         return None
 
+    def counts_as_action(self, action: Any) -> bool:
+        """Whether a real step counts as an action in the problem's scores (the task's action
+        budget counts every step)."""
+        return True
+
     def milestone_kind(self, milestone: str) -> str:
         """Classify an event for CWM notices; unknown events are not assumed successes."""
         return "event"

@@ -302,8 +302,10 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 out[key] = r[key]
         if reason == "prediction_mismatch" and "real_actions" in r:
             n = r["real_actions"]
-            out["message"] = f"Reality contradicted a predicted observation after {n} action" + (
-                "s" * (n != 1)
+            out["message"] = (
+                f"Reality contradicted a predicted observation after {n} action"
+                + ("s" * (n != 1))
+                + " of this call"
             )
             if "differences" in r and "counterexample" in r:
                 out["message"] += ", " + mismatch_summary(r["counterexample"], r["differences"])

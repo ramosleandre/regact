@@ -53,12 +53,12 @@ The system prompt gives the workflow and actual file inventory. The generated ph
 | `world_model/model_render.py` | `render(state) -> dict` | Reconstruct the complete observation |
 | `world_model/model_transition.py` | `step(state, action) -> State` | Predict the State after one problem-format action, carrying hidden state too |
 
-An **episode** begins at an environment start or an explicit reset and runs until the next reset. `get_initial_state` builds the State from the episode's first observation (the game's start, or after a level reset the start of whichever level is current), and `step` carries it from there, through level completions too, including what the screen does not show. This lets a CWM model hidden state, such as a budget counter shown at lower resolution than it counts, which a function of the current observation alone cannot.
+An **episode** begins at an environment start or a framework reset command and runs until the next one. `get_initial_state` builds the State from the episode's first observation, and `step` carries it from there, through level completions and in-game resets (ARC's RESET action) too, including what the screen does not show. This lets a CWM model hidden state, such as a budget counter shown at lower resolution than it counts, which a function of the current observation alone cannot.
 
 The design assumes three things about the game:
 
 1. It is a **deterministic POMDP**: it may have hidden state, but transitions and observations involve no randomness.
-2. **The first observation of an episode determines the whole game state**, hidden part included. A level reset may keep a game variable from before the reset only if the reset screen shows it (sc25 does this on levels 4 and 5), so `get_initial_state` reads the screen and cannot assume one fixed start per level.
+2. **The first observation of an episode determines the whole game state**, hidden part included. In-game resets are ordinary actions for this reason: sc25 keeps the player's facing across a RESET without showing it, so only `step` can carry it.
 3. The start is fixed. `get_initial_state` takes the observation as input, so several distinct start observations are also supported.
 
 Under these, an episode's first observation and the actions taken since determine every later observation, which is what validation replays.

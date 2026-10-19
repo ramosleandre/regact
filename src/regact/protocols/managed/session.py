@@ -212,7 +212,9 @@ class ManagedCoordinator:
         return self.problem.main_scores(
             {
                 **(self.latest or {}).get("aggregate", {}),
-                **self.problem.derived_trace_metrics(self.task, info_trace(self.store.db)),
+                **self.problem.derived_trace_metrics(
+                    self.task, info_trace(self.store.db, self.problem.counts_as_action)
+                ),
             }
         )
 

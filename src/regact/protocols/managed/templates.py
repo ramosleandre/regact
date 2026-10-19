@@ -169,7 +169,7 @@ def load_transitions(ids: int | str | Iterable[int]) -> list[dict[str, Any]]:
 
 def list_episodes() -> list[dict[str, Any]]:
     """Every episode in start order. Keys: episode_id; started_by ("initial_collection",
-    "exploration", "reset_level", "reset_environment"); start_observation_id; n_steps; live
+    "exploration", "reset_environment"); start_observation_id; n_steps; live
     (True for the episode the environment is in now)."""
     return _query("episodes")
 

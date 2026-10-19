@@ -347,3 +347,23 @@ def test_max_levels_ends_the_real_game_as_a_win(cap: int) -> None:
         prev_obs=SimpleNamespace(info={"levels_completed": cap - 1}),
     )
     assert _milestone_detector(env) == [f"level completed ({cap}/{cap})", "game won"]
+
+
+def test_reset_is_a_game_action_and_a_lost_level_is_not_the_end() -> None:
+    problem = _problem()
+    assert problem.reset_commands() == {}
+    problem.validate_controller_action(0)  # RESET is allowed in controllers
+    assert not problem.counts_as_action(0) and problem.counts_as_action({"action": 6})
+    env = problem.make_env("sk48")
+    env.reset()
+    moves = 0
+    while True:
+        _, _, terminated, _, info = env.step(1 + moves % 2)
+        moves += 1
+        if info["state"] == "GAME_OVER":
+            break
+    assert not terminated  # the budget ran out: a lost level, which RESET continues
+    obs, _, terminated, _, info = env.step(3)
+    assert obs.frame == [] and not terminated
+    _, _, terminated, _, info = env.step(0)
+    assert info["state"] == "NOT_FINISHED" and not terminated

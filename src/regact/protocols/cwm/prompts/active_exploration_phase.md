@@ -21,7 +21,7 @@ Run `python framework/commands.py RunController` with no arguments. The command 
 
 The command follows the task lifecycle described in your instructions: it continues the live environment in single-instance mode and starts fresh in multi-instance mode. At each step:
 
-1. Give the current State to the controller and check whether it wants to stop. The first State is `get_initial_state(starting observation)` in multi-instance mode, or the State carried from earlier calls in single-instance mode (after a reset, `get_initial_state` of the reset observation).
+1. Give the current State to the controller and check whether it wants to stop. The first State is `get_initial_state(starting observation)` in multi-instance mode, or the State carried from earlier calls in single-instance mode (after a framework reset command, `get_initial_state` of the reset observation).
 2. Obtain an action from `act(state)` and compute the CWM's next State with `step` and its predicted observation with `render`.
 3. Execute the action in the real environment, record the transition and compare the actual observation with the prediction. If they match, the predicted State becomes the current State; compactness is checked on it.
 4. Stop at the first contradiction, controller completion, game end or limit.

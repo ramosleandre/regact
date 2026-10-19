@@ -7,6 +7,7 @@ import json
 import sqlite3
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,17 +26,25 @@ def _link(*parts: str) -> str:
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
-def info_trace(db: sqlite3.Connection) -> list[tuple[int, dict[str, Any]]]:
+def info_trace(
+    db: sqlite3.Connection, counts: Callable[[Any], bool] = lambda action: True
+) -> list[tuple[int, dict[str, Any]]]:
     """``(real actions so far, observation info)`` after every real step of the task, in order.
-    Explicit resets count as one action each, as in the task's action budget."""
+    Explicit resets count as one action each, as in the task's action budget; a step counts
+    when ``counts(action)`` (see ``BaseProblem.counts_as_action``)."""
     rows = db.execute(
-        """SELECT json_extract(o.payload,'$.info') info,
+        """SELECT json_extract(o.payload,'$.info') info, a.payload action,
             (SELECT COUNT(*) FROM episodes e WHERE e.id<=s.episode_id
                 AND e.purpose LIKE 'reset\\_%' ESCAPE '\\') resets
         FROM step_events s JOIN transitions t ON t.id=s.transition_id
+        JOIN actions a ON a.id=t.action_id
         JOIN observations o ON o.id=t.after_id ORDER BY s.id"""
     ).fetchall()
-    return [(index + 1 + row[1], json.loads(row[0] or "{}")) for index, row in enumerate(rows)]
+    out, actions = [], 0
+    for info, action, resets in rows:
+        actions += counts(json.loads(action))
+        out.append((actions + resets, json.loads(info or "{}")))
+    return out
 
 
 def regact_commit() -> str:

@@ -9,7 +9,7 @@ If framework tools are available directly, invoke them by name. Otherwise use th
 | File in `world_model/` | Required definition | Meaning |
 |---|---|---|
 | `model_state.py` | `State` | Your compact state representation, preferably a dataclass. |
-| `model_initial_state.py` | `get_initial_state(obs) -> State` | Build the State from the first observation of an episode: the game's start, or the start of any level after a reset. |
+| `model_initial_state.py` | `get_initial_state(obs) -> State` | Build the State from the first observation of an episode. |
 | `model_render.py` | `render(state) -> dict` | Reconstruct the complete observation dictionary. |
 | `model_transition.py` | `step(state, action) -> State` | Predict the State after one game-format action. It must carry everything later observations depend on, including what the screen does not show. |
 
@@ -19,7 +19,7 @@ The complete observation contains `frame`, `reward`, `is_done`, `available_actio
 
 ## How the State is carried
 
-An *episode* begins at an environment start or reset and runs until the next reset. `get_initial_state` builds the State from the episode's first observation; from there the State evolves through `step`, one recorded action at a time. A level reset restarts the current level, so that first observation can be the start of any level you have reached: `get_initial_state` must recognise which one and return its starting State. Completing a level is an ordinary action: `step` produces the next level's starting State. The first observation of an episode determines its State; the start of a level can look different from one reset to the next, so read it from the observation. Later observations can depend on things the screen does not show, and `step` carries them.
+An *episode* begins at an environment start, or at a framework reset command when the game has one, and runs until the next one. `get_initial_state` builds the State from the episode's first observation; from there the State evolves through `step`, one recorded action at a time. Completing a level, and a reset that is a game action, are ordinary actions: `step` predicts them, and the State carries through them. Later observations can depend on things the screen does not show, and `step` carries them.
 
 Example of hidden state: a budget bar with 64 cells for a budget of 75 clicks, where a click blocked by a wall still spends budget. One frame cannot tell how many clicks are left. Keep a `clicks` field in the State: `get_initial_state` sets it from the full bar, `step` adds 1 on every click (blocked ones included) and resets it when a level completes, and `render` draws the bar from it.
 
@@ -35,6 +35,8 @@ Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It re
 2. **Every recorded action:** `state = step(state, action)`, and `render(state)` must equal the next recorded observation. An episode stops at its first divergence: the State after it is unreliable.
 3. **Repeatability:** callbacks give the same results on repeated identical inputs (checked on a sample of calls).
 4. **Compactness:** `sum(serialized State bytes) / sum(serialized observation bytes)` must be strictly below **__SIZE_RATIO__**, and so must the ratio of the single largest State. States that grow along an episode (visited sets, action logs) fail.
+
+Submitting is the cheapest way to check your CWM against everything recorded: it costs one tool call and no game action, and a refusal costs nothing else. Prefer it to replaying recorded data with your own script.
 
 ## 3. Use the result
 
@@ -55,7 +57,7 @@ Counterexamples include evidence IDs and one of these failure types:
 
 `failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during exploration, described in "Reading a contradiction" in `docs/active_exploration_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
-Use `load_observations`, `load_transitions` or `load_diagnostic` from `data_api` with the returned IDs. To see what happened in order, use `data_api.list_episodes()` and `data_api.load_history(episode_id)`. To reproduce a counterexample locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then for each action `state = step(state, action)` and compare `render(state)` with the next observation.__DIAGNOSTIC_IMAGES__
+To understand a counterexample, start with its `details` call, `data_api.describe_diagnostic(diagnostic_id)`: the differences, your model's State before the step and the State it predicted, all bounded. `data_api.load_diagnostic(diagnostic_id)` returns the whole record and can be very large. Use `load_observations` or `load_transitions` from `data_api` with the returned IDs, and `data_api.list_episodes()` and `data_api.load_history(episode_id)` to see what happened in order. Only when a hidden field may have gone wrong before the failing step, replay the episode locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then `state = step(state, action)` for each action, checking the field you suspect.__DIAGNOSTIC_IMAGES__
 
 ## Code execution rules
 

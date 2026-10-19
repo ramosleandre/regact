@@ -87,8 +87,8 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
         if lifecycle is Lifecycle.MULTI_INSTANCE:
             assert "ResetLevel" not in prompt and "ResetEnvironment" not in prompt
         elif game == "arc":
-            assert "You can reset the current ARC level, preserving completed levels with the ResetLevel command." in prompt
-            assert "You can reset the whole environment from level 1 with the ResetEnvironment command." in prompt
+            assert "ResetLevel" not in prompt and "ResetEnvironment" not in prompt
+            assert "RESET (action 0) is always allowed" in prompt
         else:
             assert "ResetLevel" not in prompt
             assert "You can reset the whole environment from its initial state with the ResetEnvironment command." in prompt

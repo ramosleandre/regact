@@ -130,7 +130,7 @@ def build_app(experiment_dir: str) -> FastAPI:
                 task = reader.task_name(name, view.state)
                 with contextlib.suppress(Exception):  # a viewer renders without them
                     result["derived_metrics"] = problem.derived_trace_metrics(
-                        task, cwm_viewer.info_trace(root / name)
+                        task, cwm_viewer.info_trace(root / name, problem)
                     )
                 with contextlib.suppress(Exception):
                     result["progress"] = cwm_viewer.progress(

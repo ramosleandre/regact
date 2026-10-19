@@ -216,7 +216,7 @@ def test_messages_summarize_the_step_and_what_differs(make_rig):  # noqa: F811
     assert shown["message"].startswith(
         f"Reality contradicted a predicted observation after {result['real_actions']} action"
     )
-    assert ", at step " in shown["message"]
+    assert " of this call, at step " in shown["message"]
     assert "(action 1): frame predicted" in shown["message"]
     refused = present(
         "UpdateCodeWorldModel", c.tool("UpdateCodeWorldModel", {}), c.options, c.config.limits

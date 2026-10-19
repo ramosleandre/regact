@@ -7,8 +7,10 @@ the gym shim here maps them to native ``GameAction`` — so the agent never impo
 the game library. ``arc_agi``/``arcengine`` are imported lazily inside ``make_env``
 (and the shim), so this module imports cleanly without the ``arc`` extra.
 
-Lifecycle is enforced elsewhere: ARC runs ``single_instance`` (one make per game,
-RESET is a level reset), guarded by ``SingleInstancePolicy`` — not here.
+Lifecycle is enforced elsewhere: ARC runs ``single_instance`` (one make per game),
+guarded by ``SingleInstancePolicy`` - not here. RESET (action 0) is an ordinary action, as
+in the competition: the engine restarts the level, or the whole game when the level has no
+action yet.
 """
 
 from __future__ import annotations
@@ -179,9 +181,7 @@ class _ArcGymShim:
             return 0.0, False
         if obs.state == self._GameState.WIN or self._capped_win(obs):
             return 1.0, True
-        if obs.state == self._GameState.GAME_OVER:
-            return 0.0, True
-        return 0.0, False
+        return 0.0, False  # GAME_OVER is not the end: RESET continues the game
 
     def _capped_win(self, obs: Any) -> bool:
         return self._max_levels is not None and getattr(obs, "levels_completed", 0) >= self._max_levels
@@ -435,18 +435,11 @@ class ArcAgiProblem(BaseProblem):
         return list(self._tasks)
 
     def reset_commands(self) -> dict[str, str]:
-        return {
-            "ResetLevel": "Reset the current ARC level, preserving completed levels.",
-            "ResetEnvironment": "Reset the whole environment from level 1.",
-        }
+        return {}  # RESET is a game action
 
-    def validate_controller_action(self, action: Any) -> None:
-        action_id = action.get("action") if isinstance(action, dict) else action
-        if action_id == 0:
-            raise InvalidActionError(
-                "RESET is not a controller action; use the framework's reset commands, if listed, "
-                "between RunController calls."
-            )
+    def counts_as_action(self, action: Any) -> bool:
+        # The competition's scorecard counts actions 1-7, not RESET.
+        return (action.get("action") if isinstance(action, dict) else action) != 0
 
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
         if mode not in (ObsMode.RAW, ObsMode.RAW_LAST_FRAME_ONLY):

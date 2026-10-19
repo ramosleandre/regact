@@ -115,9 +115,9 @@ def database(task: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def info_trace(task: Path) -> list[tuple[int, dict[str, Any]]]:
+def info_trace(task: Path, problem: BaseProblem) -> list[tuple[int, dict[str, Any]]]:
     with database(task) as db:
-        return store_info_trace(db)
+        return store_info_trace(db, problem.counts_as_action)
 
 
 def progress(
@@ -155,7 +155,7 @@ def _timestamps(
 
 def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]]:
     with database(task) as db:
-        trace = store_info_trace(db)
+        trace = store_info_trace(db, problem.counts_as_action)
         reached: dict[int, float] = {}  # step -> when its milestone was recorded
         for at, step in db.execute(
             """SELECT timestamp, json_extract(payload,'$.milestone.event_id') FROM events

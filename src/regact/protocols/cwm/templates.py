@@ -37,7 +37,7 @@ class State:
         (
             "initial_state",
             "get_initial_state(obs)",
-            "Build the State from the first observation of an episode: the game's start, or the start of any level after a reset. Do not mutate obs.",
+            "Build the State from the first observation of an episode. Do not mutate obs.",
         ),
         (
             "render",

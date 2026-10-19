@@ -112,14 +112,13 @@ ARC's `info.state="GAME_OVER"` is game metadata. The generic framework uses `is_
 
 ## Explicit resets
 
-| Command | Offline ARC | MiniGrid |
+| Command | ARC | MiniGrid |
 |---|---|---|
-| `ResetLevel` | Restart the current level, preserving completed levels | Not available |
-| `ResetEnvironment` | Restart from level 1 | Restart the environment |
+| `ResetEnvironment` | Not available: RESET (action 0) is a game action | Restart the environment |
 
-They exist only in `single_instance`: in `multi_instance` every `RunController` starts from a fresh environment, so the commands are neither offered nor described. Invoke them with `python framework/commands.py ResetLevel` or `ResetEnvironment`, without arguments. Each successful explicit reset consumes **one task action**, starts a recorded episode, and renews the episode action allowance. It does not clear the dataset or replenish task budgets. Reset boundaries are not ordinary CWM transition examples.
+They exist only in `single_instance`: in `multi_instance` every `RunController` starts from a fresh environment, so the commands are neither offered nor described. Invoke them with `python framework/commands.py ResetEnvironment`, without arguments. Each successful explicit reset consumes **one task action**, starts a recorded episode, and renews the episode action allowance. It does not clear the dataset or replenish task budgets. Reset boundaries are not ordinary CWM transition examples.
 
-CWM permits resets in either phase. A new reset observation requires validation; an already validated one does not cause redundant validation. ARC `RESET` is rejected as a controller action: use the explicit commands. Separate ARC reset scopes currently depend on its offline/local engine.
+CWM permits resets in either phase. A new reset observation requires validation; an already validated one does not cause redundant validation. On ARC, a controller plays `RESET` like any other action: the engine restarts the level, or the whole game when the level has no action yet, and the step is recorded as an ordinary transition (counted as one action). A `GAME_OVER` is not terminal there.
 
 ## Dataset API
 

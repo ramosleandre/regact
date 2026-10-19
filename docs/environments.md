@@ -43,7 +43,7 @@ Both problem groups default to `multi_instance`. Support depends on the selected
 
 Every managed call creates a new controller object in either lifecycle. `single_instance` preserves the **environment**, not the Python controller's private memory. Set `problem.lifecycle=single_instance` explicitly to use it.
 
-In vanilla/CWM `single_instance`, `ResetEnvironment` restarts the whole environment. Offline ARC also supports `ResetLevel`, preserving completed levels. `multi_instance` has no reset commands, since every `RunController` starts fresh. An observation with `is_done=True` ends a controller call; full-game success ends the task, while an unsuccessful terminal episode permits inspection/reset. See [Managed execution](managed_protocols.md#explicit-resets) for action accounting and dataset boundaries.
+In vanilla/CWM `single_instance`, `ResetEnvironment` restarts the whole environment, except on ARC, where RESET (action 0) is an ordinary game action, as in the competition: it restarts the level, or the whole game when the level has no action yet. `multi_instance` has no reset commands, since every `RunController` starts fresh. An observation with `is_done=True` ends a controller call; full-game success ends the task, while an unsuccessful terminal episode permits inspection/reset. An ARC `GAME_OVER` is not terminal: RESET continues the game. See [Managed execution](managed_protocols.md#explicit-resets) for action accounting and dataset boundaries.
 
 For policy search, more episodes do not automatically mean more varied evaluation: MiniGrid uses an
 episode seed sequence, while deterministic ARC games ignore the seed. Submissions and

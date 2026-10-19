@@ -8,8 +8,10 @@ ARC-AGI-3 is an interactive game benchmark. Each game is a multi-level puzzle on
 
 - {frame_desc}
 - `obs.available_actions`: the integer action ids currently valid.
-- `obs.is_done` / `obs.reward`: episode end / reward (1.0 on WIN).
+- `obs.is_done` / `obs.reward`: True / 1.0 once the game is won.
 - `obs.info`: readable metadata: `obs.info["state"]` (`NOT_FINISHED`/`WIN`/`GAME_OVER`), `obs.info["levels_completed"]`, `obs.info["win_levels"]`.
+
+RESET (action 0) is always allowed, although `obs.available_actions` does not list it. It restarts the current level; when no action has been played in the current level yet (for example two RESETs in a row), it restarts the whole game from level 1. `GAME_OVER` means the level is lost: until a RESET, every other action returns an empty `obs.frame`.
 
 `framework/arc_agi_helper.py` provides this game's action-id constants and a click builder.
 
