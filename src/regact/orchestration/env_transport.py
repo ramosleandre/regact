@@ -15,6 +15,7 @@ tears the server down on exit.
 from __future__ import annotations
 
 import asyncio
+import socket
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -25,6 +26,15 @@ from regact.envclient.client import EnvClient
 
 # Placeholder baked into a scripted run's workdir; that backend never calls it.
 _IN_PROCESS_URL = "http://127.0.0.1:0"
+
+def _free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
 
 # How long to wait for the uvicorn thread to bind its port before giving up.
 _STARTUP_TIMEOUT_S = 30.0
@@ -40,7 +50,7 @@ class EnvConnection:
 
 @asynccontextmanager
 async def serve_env(
-    server: EnvServer, game_id: str, *, in_process: bool
+    server: EnvServer, game_id: str, *, in_process: bool, port: int | None = None
 ) -> AsyncIterator[EnvConnection]:
     """Front ``server`` for one game over the chosen transport; yield the connection."""
     if in_process:
@@ -53,7 +63,7 @@ async def serve_env(
             client.close()
         return
 
-    async with _running_uvicorn(server) as base_url:
+    async with _running_uvicorn(server, port) as base_url:
         client = EnvClient.connect(base_url, game_id)
         try:
             yield EnvConnection(base_url=base_url, client=client)
@@ -62,8 +72,9 @@ async def serve_env(
 
 
 @asynccontextmanager
-async def _running_uvicorn(server: EnvServer) -> AsyncIterator[str]:
-    """Run ``server.app`` on an ephemeral port, on its own thread.
+async def _running_uvicorn(server: EnvServer, port: int | None = None) -> AsyncIterator[str]:
+    """Run ``server.app`` on ``port`` if it is free (a resumed task keeps the address its agent
+    may have copied), else on an ephemeral port, on its own thread.
 
     A separate thread (with its own event loop) is required: the orchestrator
     drives the env through a *synchronous* ``EnvClient``, so a server sharing the
@@ -72,7 +83,11 @@ async def _running_uvicorn(server: EnvServer) -> AsyncIterator[str]:
     """
     import uvicorn
 
-    config = uvicorn.Config(server.app, host="127.0.0.1", port=0, log_level="warning", ws="none")
+    if port and not _free(port):
+        port = None
+    config = uvicorn.Config(
+        server.app, host="127.0.0.1", port=port or 0, log_level="warning", ws="none"
+    )
     uv_server = uvicorn.Server(config)
     thread = threading.Thread(target=uv_server.run, daemon=True)
     thread.start()

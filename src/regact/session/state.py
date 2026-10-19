@@ -32,6 +32,7 @@ class ExperimentState:
     exit_requested: bool = False
     agent_session_id: str | None = None  # locates the native transcript dir
     base_url: str | None = None  # the model endpoint this run used (None = the agent's default)
+    env_port: int | None = None  # the env server's port; a resume asks for the same one
     context_window: int | None = None  # the window this run used; null = unconfigured
     context_window_source: str | None = None  # "config" = passed; else alancode's, e.g. "fallback"
     last_submission_results: dict[str, Any] | None = None

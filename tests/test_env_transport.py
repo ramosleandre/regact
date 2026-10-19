@@ -43,3 +43,14 @@ async def test_real_uvicorn_transport_binds_and_drives() -> None:
             conn.client.step(1)
         assert conn.client.is_done is True
         assert conn.client.last_reward == 1.0
+
+
+async def test_a_resumed_server_keeps_its_port_when_free() -> None:
+    async with serve_env(_server(), "g", in_process=False) as first:
+        port = int(first.base_url.rsplit(":", 1)[1])
+        # Taken: the server falls back to another port instead of failing.
+        async with serve_env(_server(), "g", in_process=False, port=port) as busy:
+            assert busy.base_url != first.base_url
+    async with serve_env(_server(), "g", in_process=False, port=port) as again:
+        assert again.base_url == first.base_url
+        assert again.client.reset().available_actions == [0, 1]

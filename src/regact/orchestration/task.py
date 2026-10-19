@@ -352,7 +352,8 @@ async def run_task(
     )
     in_process = config.agent.name is AgentName.SCRIPTED
 
-    async with protocol, serve_env(server, task_name, in_process=in_process) as conn:
+    port = previous.env_port if previous is not None else None
+    async with protocol, serve_env(server, task_name, in_process=in_process, port=port) as conn:
         resuming = previous is not None
         with (
             TranscriptWriter(
@@ -380,6 +381,7 @@ async def run_task(
                     "config" if config.agent.args.get("context_window") is not None else None
                 ),
             )
+            experiment.env_port = None if in_process else _loopback_port(conn.base_url)
             if resuming:
                 experiment.exit_reason = experiment.exit_detail = None
                 experiment.last_error_category = None
