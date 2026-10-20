@@ -452,9 +452,10 @@ class ArcAgiProblem(BaseProblem):
         return int(info.get("levels_completed", 0) or 0)
 
     def progress_reference(self, task_name: str) -> list[tuple[float, float]]:
-        """The human baseline: its cumulative actions at each completed level."""
+        """The human baseline: its cumulative actions at each completed level, up to the win."""
         points, total = [], 0
-        for level, actions in enumerate(self._task(task_name).baseline_actions or (), start=1):
+        baselines = self._task(task_name).baseline_actions or ()
+        for level, actions in enumerate(baselines[: self._max_levels], start=1):
             total += actions
             points.append((float(total), float(level)))
         return points

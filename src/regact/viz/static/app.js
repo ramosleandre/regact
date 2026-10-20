@@ -250,7 +250,7 @@ function currentSettings() {
   return {
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
     order: _graph.order, colors: _graph.colors, curveX: _graph.curveX, lineStyles: _graph.lineStyles,
-    gamma: _graph.gamma,
+    gamma: _graph.gamma, comparable: _graph.comparable,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
     perRun: [..._graph.perRun], muted: [..._graph.muted],
   };
@@ -287,6 +287,7 @@ const _graph = {
   zoom: {},   // x measure -> [from, to] shown by the progress charts (not saved: drag to set)
   lineStyles: {},   // experiment -> a LINE_STYLES key for its progress curves (persisted)
   gamma: 1,   // discount of the progress-curve area (persisted)
+  comparable: false,   // efficiency scores cut where the shortest experiment ends (persisted)
 };
 const LINE_STYLES = { solid: "", dashed: "8 4", dotted: "2 3", "dash-dot": "8 3 2 3" };
 
@@ -303,6 +304,7 @@ function applySettings(s, specs) {
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
   _graph.lineStyles = (s.lineStyles && typeof s.lineStyles === "object") ? s.lineStyles : {};
   _graph.gamma = typeof s.gamma === "number" && s.gamma >= 0 && s.gamma <= 1 ? s.gamma : 1;
+  _graph.comparable = !!s.comparable;
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
   _graph.perRun = new Set(Array.isArray(s.perRun) ? s.perRun : []);
   _graph.muted = new Set(Array.isArray(s.muted) ? s.muted : []);
@@ -697,6 +699,50 @@ function areaSpec(spec, group, mask, xName, gamma) {
   }
   return { ...spec, get: (m) => byRun.get(m), refOf: (task) => refs.get(task), horizons };
 }
+// RHAE and LRHAE-Uncapped of a run as if it had stopped after `horizon` env actions, computed as
+// problems/arc_agi/scoring.py does: a level completed later counts as not completed. `reference` is
+// the human's cumulative actions at each level, so it also gives the levels to win.
+const _LEVEL_CAP = 1.15;
+function efficiencyScores(points, reference, horizon) {
+  const solved = [];   // env actions when each level was first completed
+  let best = 0;
+  for (const [x, v] of [...points].sort((p, q) => p[0] - q[0])) {
+    if (x > horizon) break;
+    while (best < v) { solved.push(x); best += 1; }
+  }
+  let total = 0, solvedWeight = 0, capped = 0, linear = 0;
+  reference.forEach(([x], i) => {
+    const weight = i + 1, baseline = x - (i ? reference[i - 1][0] : 0);
+    const actions = i < solved.length ? solved[i] - (i ? solved[i - 1] : 0) : 0;
+    total += weight;
+    if (actions > 0 && baseline > 0) {
+      const ratio = baseline / actions;
+      capped += Math.min(_LEVEL_CAP, ratio * ratio) * weight;
+      linear += ratio * weight;
+      solvedWeight += weight;
+    }
+  });
+  return total ? { rhae: Math.min(solvedWeight, capped) / total, lrhae_uncapped: linear / total } : null;
+}
+const _COMPARABLE = { "derived:rhae": "rhae", "derived:lrhae_uncapped": "lrhae_uncapped" };
+function comparableSpec(spec, group, mask) {
+  const X = CURVE_X["env actions"], byRun = new Map(), horizons = new Map();
+  for (const task of group.tasks) {
+    const horizon = areaHorizon(task, group, mask, X);
+    if (horizon == null) continue;
+    horizons.set(task, horizon);
+    for (const exp of group.experiments)
+      for (const m of (group.byExp.get(exp) && group.byExp.get(exp).get(task)) || []) {
+        const pts = ((m.progress || {}).points || []).map((q) => [q[X.point], q.value]);
+        const reference = (m.progress || {}).reference || [];
+        if (!pts.length || pts.some((q) => q[0] == null) || !reference.length) continue;
+        const scores = efficiencyScores(pts, reference, horizon);
+        if (scores) byRun.set(m, scores[_COMPARABLE[spec.key]]);
+      }
+  }
+  return { ...spec, get: (m) => byRun.get(m), horizons };
+}
+
 // gamma on a logit scale: log resolution near 1 and near 0, with the slider ends exactly 1 and 0.
 const _GAMMA_LOGIT = 6, _GAMMA_STEPS = 1000;
 const gammaOf = (p) => (p <= 0 ? 1 : p >= _GAMMA_STEPS ? 0 : 1 / (1 + Math.pow(10, (2 * p / _GAMMA_STEPS - 1) * _GAMMA_LOGIT)));
@@ -962,8 +1008,18 @@ async function graphsView(games, onlyExp, scope) {
         scroll.append(chart);
         card.append(body, legend(cats.map((c) => ({ label: c, color: statusColor(c) }))));
       } else {
-        scroll.append(groupedBarChart(spec, g2, expColor, _graph.agg, _graph.err, _graph.mask));
+        let shown = spec;
+        if (_COMPARABLE[spec.key]) {
+          card.append(h("div", "zoomrow", segBtns("levels:", ["all", "comparable"], _graph.comparable ? "comparable" : "all",
+            (n) => { _graph.comparable = n === "comparable"; redraw(); })));
+          if (_graph.comparable) shown = comparableSpec(spec, g2, _graph.mask);
+        }
+        scroll.append(groupedBarChart(shown, g2, expColor, _graph.agg, _graph.err, _graph.mask));
         card.append(body);
+        if (shown.horizons) {
+          const upTo = [...shown.horizons].map(([t, x]) => `${shortTask(t)} ${fmt(Math.round(x))}`).join(", ");
+          card.append(h("div", "muted curve-note", `levels completed within the env actions where the shortest experiment ends (${upTo})`));
+        }
       }
       charts.append(card);
       (scrolled.get(spec.key) || []).forEach(([top, left], i) => {

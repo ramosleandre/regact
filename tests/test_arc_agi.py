@@ -367,3 +367,9 @@ def test_reset_is_a_game_action_and_a_lost_level_is_not_the_end() -> None:
     assert obs.frame == [] and not terminated
     _, _, terminated, _, info = env.step(0)
     assert info["state"] == "NOT_FINISHED" and not terminated
+
+
+def test_the_human_reference_stops_at_the_level_cap() -> None:
+    full = _problem().progress_reference("ls20")
+    capped = ArcAgiProblem(environments_dir=_ENV_DIR, max_levels=2).progress_reference("ls20")
+    assert len(full) > 2 and capped == full[:2]

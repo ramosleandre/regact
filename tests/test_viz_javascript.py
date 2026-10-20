@@ -315,3 +315,57 @@ vm.runInContext(String.raw`
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
+
+
+def test_comparable_efficiency_scores_match_the_server_and_stop_at_the_horizon():
+    import json
+
+    from regact.problems.arc_agi.scoring import rhae_score
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = Path(__file__).parents[1] / "src/regact/viz/static/app.js"
+    baselines = [10, 20, 30]
+    reference = [[10, 1], [30, 2], [60, 3]]
+    points = [[8, 1], [30, 2], [70, 3]]  # levels completed after 8, 22 and 40 more actions
+
+    def server(per_level):
+        result = rhae_score(
+            baseline_actions=baselines,
+            actions_per_level=per_level,
+            levels_completed=len(per_level),
+            total_levels=3,
+        )
+        return {"rhae": result.rhae, "lrhae_uncapped": result.lrhae_uncapped}
+
+    expected = {"all": server([8, 22, 40]), "cut": server([8, 22])}
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sandbox = {document: {getElementById: () => ({})}, window: {addEventListener: () => {}},
+  AbortController, DOMException, Intl, URL, fetch: async () => ({ok: true, json: async () => ({})}),
+  INPUT: JSON.parse(process.argv[2])};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$/, ''), sandbox);
+vm.runInContext(String.raw`
+  const {reference, points, expected} = INPUT;
+  const near = (a, b) => Math.abs(a - b) < 1e-12;
+  const all = efficiencyScores(points, reference, Infinity), cut = efficiencyScores(points, reference, 69);
+  for (const k of ['rhae', 'lrhae_uncapped']) {
+    if (!near(all[k], expected.all[k])) throw Error('all levels ' + k + ' ' + all[k] + ' ' + expected.all[k]);
+    if (!near(cut[k], expected.cut[k])) throw Error('cut at 69 ' + k + ' ' + cut[k] + ' ' + expected.cut[k]);
+  }
+  const run = (pts, env_moves) => ({exit_reason: 'solved', env_moves, n_tool_calls: 9, duration_s: 9,
+    derived_metrics: {rhae: 1}, progress: {label: 'Levels completed', reference,
+      points: pts.map(([env_actions, value]) => ({value, env_actions, tool_calls: 1, seconds: 1}))}});
+  const games = [{experiment: 'fast', task: 't', metrics: run(points, 69)},
+                 {experiment: 'slow', task: 't', metrics: run([[50, 1]], 200)}];
+  const spec = metricSpecs(games).find((s) => s.key === 'derived:rhae');
+  const shown = comparableSpec(spec, groupByExpTask(games), false);
+  if (shown.horizons.get('t') !== 70) throw Error('horizon ' + shown.horizons.get('t'));
+  if (!near(shown.get(games[0].metrics), expected.all.rhae)) throw Error('fast run keeps its 3 levels');
+`, sandbox);
+"""
+    payload = json.dumps({"reference": reference, "points": points, "expected": expected})
+    subprocess.run([node, "-e", script, str(source), payload], check=True, timeout=10)

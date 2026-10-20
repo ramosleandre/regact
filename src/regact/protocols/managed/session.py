@@ -374,7 +374,7 @@ class ManagedCoordinator:
         self.progress.append(
             {
                 "value": value,
-                "env_actions": self.store.summary()["n_total_transitions"] + self.reset_actions,
+                "env_actions": info_trace(self.store.db, self.problem.counts_as_action)[-1][0],
                 "tool_calls": experiment.tool_calls_total if experiment is not None else 0,
                 "seconds": round(time.monotonic() - self.started, 1) if self.started else 0.0,
             }
