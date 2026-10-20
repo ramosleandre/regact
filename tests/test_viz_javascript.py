@@ -264,3 +264,54 @@ vm.runInContext(String.raw`
 setTimeout(() => { if (fetched) { console.error('fetched', fetched); process.exit(1); } }, 50);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)
+
+
+def test_progress_area_is_discounted_and_stops_where_an_experiment_ends():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = Path(__file__).parents[1] / "src/regact/viz/static/app.js"
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sandbox = {document: {getElementById: () => ({})}, window: {addEventListener: () => {}},
+  AbortController, DOMException, Intl, URL, fetch: async () => ({ok: true, json: async () => ({})})};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$/, ''), sandbox);
+vm.runInContext(String.raw`
+  const near = (a, b) => Math.abs(a - b) < 1e-9 * Math.max(1, Math.abs(b));
+  // 1 level from x=10, 2 from x=30: area up to 40 = 1*20 + 2*10.
+  const pts = [[10, 1], [30, 2]];
+  if (discountedArea(pts, 40, 1) !== 40) throw Error('plain area');
+  if (discountedArea(pts, 20, 1) !== 10) throw Error('cut at the horizon');
+  if (discountedArea(pts, 40, 0) !== 0) throw Error('gamma 0');
+  const g = 0.9, lg = Math.log(g);
+  const exact = (Math.pow(g, 30) - Math.pow(g, 10)) / lg + 2 * (Math.pow(g, 40) - Math.pow(g, 30)) / lg;
+  if (!near(discountedArea(pts, 40, g), exact)) throw Error('discounted area');
+  if (!(discountedArea(pts, 40, 1 - 1e-9) < 40 && discountedArea(pts, 40, 1 - 1e-9) > 39.99)) throw Error('gamma near 1');
+  for (const p of [0, 1, 250, 500, 999, 1000]) if (gammaSlider(gammaOf(p)) !== p) throw Error('slider round trip ' + p);
+  if (gammaOf(0) !== 1 || gammaOf(1000) !== 0 || gammaOf(500) !== 0.5) throw Error('slider ends');
+
+  const run = (points, env_moves) => ({exit_reason: 'solved', env_moves, n_tool_calls: 9, duration_s: 9,
+    progress: {label: 'Levels completed', reference: [[5, 1], [15, 2]], points}});
+  const pt = (value, env_actions) => ({value, env_actions, tool_calls: 1, seconds: 1});
+  const games = [
+    {experiment: 'short', task: 't', metrics: run([pt(1, 10)], 20)},
+    {experiment: 'short', task: 't', metrics: run([pt(1, 10), pt(2, 25)], 30)},
+    {experiment: 'long', task: 't', metrics: run([pt(1, 40)], 90)},
+  ];
+  const spec = metricSpecs(games).find((s) => s.key === 'progress_auc');
+  if (!spec || !spec.auc || !spec.main) throw Error('the area is offered with a reference player');
+  const group = groupByExpTask(games);
+  if (areaHorizon('t', group, false, CURVE_X['env actions']) !== 30) throw Error('the shortest experiment ends at 30');
+  const area = areaSpec(spec, group, false, 'env actions', 1);
+  const [a, b, c] = games.map((x) => area.get(x.metrics));
+  // The run that stopped at 20 keeps its level up to the horizon 30, as in the aggregate curve.
+  if (a !== 20 || b !== 25 || c !== 0) throw Error('per-run areas ' + [a, b, c]);
+  if (area.refOf('t') !== 1 * 10 + 2 * 15) throw Error('reference player area');
+  if (areaSpec(spec, group, false, 'tool calls', 1).refOf('t') != null) throw Error('reference in env actions only');
+  const noRef = games.map((x) => ({...x, metrics: {...x.metrics, progress: {...x.metrics.progress, reference: []}}}));
+  if (metricSpecs(noRef).some((s) => s.key === 'progress_auc')) throw Error('no area without a reference player');
+`, sandbox);
+"""
+    subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

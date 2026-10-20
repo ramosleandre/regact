@@ -250,6 +250,7 @@ function currentSettings() {
   return {
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
     order: _graph.order, colors: _graph.colors, curveX: _graph.curveX, lineStyles: _graph.lineStyles,
+    gamma: _graph.gamma,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
     perRun: [..._graph.perRun], muted: [..._graph.muted],
   };
@@ -285,6 +286,7 @@ const _graph = {
   muted: new Set(), perRun: new Set(),
   zoom: {},   // x measure -> [from, to] shown by the progress charts (not saved: drag to set)
   lineStyles: {},   // experiment -> a LINE_STYLES key for its progress curves (persisted)
+  gamma: 1,   // discount of the progress-curve area (persisted)
 };
 const LINE_STYLES = { solid: "", dashed: "8 4", dotted: "2 3", "dash-dot": "8 3 2 3" };
 
@@ -300,6 +302,7 @@ function applySettings(s, specs) {
   _graph.order = Array.isArray(s.order) ? s.order : [];
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
   _graph.lineStyles = (s.lineStyles && typeof s.lineStyles === "object") ? s.lineStyles : {};
+  _graph.gamma = typeof s.gamma === "number" && s.gamma >= 0 && s.gamma <= 1 ? s.gamma : 1;
   _graph.hidden = new Set(Array.isArray(s.hidden) ? s.hidden : []);
   _graph.perRun = new Set(Array.isArray(s.perRun) ? s.perRun : []);
   _graph.muted = new Set(Array.isArray(s.muted) ? s.muted : []);
@@ -379,6 +382,9 @@ function metricSpecs(games) {
   // The problem's progress (ARC: levels completed) as a curve over what each run spent.
   const prog = games.map((g) => g.metrics.progress).find((p) => p && p.label);
   if (prog) specs.push({ key: "progress", label: prog.label + " over the run", curve: true, def: true });
+  // Its discounted area, where a reference player gives a scale to compare with (ARC).
+  if (prog && games.some((g) => g.metrics.progress && (g.metrics.progress.reference || []).length))
+    specs.push({ key: "progress_auc", label: "Area under " + prog.label.toLowerCase(), auc: true, def: true });
   specs.push(STATUS_METRIC);
   const mains = new Set(games.flatMap((g) => g.metrics.main_metrics || []));
   for (const s of specs) s.main = !!(s.def || (s.score && mains.has(s.score)));
@@ -480,6 +486,7 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
     const eb = errOf(e, t); if (eb) max = Math.max(max, eb.hi);   // keep error bars in view
     if (_graph.perRun.has(e) && !spec.count) max = Math.max(max, ...seriesOf(e, t));   // and run ticks
   }
+  for (const t of tasks) if (spec.refOf && spec.refOf(t) != null) max = Math.max(max, spec.refOf(t));
   max = max || 1;
   const { padL, padB, padR, padT, H } = _chartPad(cols);
   const slot = Math.max(2, 20 * _graph.barScale);   // per-experiment bar width (bar-width slider)
@@ -528,6 +535,12 @@ function groupedBarChart(spec, group, expColor, aggName, errMethod, mask) {
         s.append(svg("line", { class: "errbar", x1: cx - cap, y1: yl, x2: cx + cap, y2: yl }));
       }
     });
+    const ref = col !== _AVG_COL && spec.refOf ? spec.refOf(col) : null;   // the reference player's value
+    if (ref != null) {
+      const line = svg("line", { class: "barref", x1: gx - 3, y1: yOf(ref), x2: gx + groupW - 13, y2: yOf(ref) });
+      line.append(svg("title", {}, txt(`reference player · ${colName}\n${spec.label}: ${spec.fmt ? spec.fmt(ref) : fmtMetric(ref)}`)));
+      s.append(line, svg("text", { class: "reflab", x: gx + groupW - 11, y: yOf(ref) + 3 }, txt("ref")));
+    }
     const lx = gx + (groupW - 16) / 2, ly = H - padB + 12;   // x label (task), rotated; bold for the mean
     s.append(svg("text", { class: "xlab" + (col === _AVG_COL ? " avglab" : ""), x: lx, y: ly, "text-anchor": "end", transform: `rotate(-35 ${lx} ${ly})` }, txt(shortTask(col))));
   });
@@ -645,6 +658,59 @@ function progressChart(task, group, expColor, aggName, errMethod, mask, xName, o
   }
   if (onZoom) zoomByDrag(s, W, padL, padR, padT, H - padB, (px) => x0 + (x1 - x0) * Math.max(0, Math.min(1, (px - padL) / (W - padL - padR))), onZoom);
   return { chart: s, hasRef: ref.length > 0 };
+}
+
+// The discounted area under a progress step curve: the integral of gamma^x * value over [0, horizon],
+// exact on each step (so it also holds for seconds). gamma = 1 is the plain area (levels x actions).
+function discountedArea(pts, horizon, gamma) {
+  const lg = Math.log(gamma);
+  const piece = (a, b) => (gamma === 1 ? b - a : gamma === 0 ? 0 : Math.pow(gamma, a) * Math.expm1((b - a) * lg) / lg);
+  let area = 0, value = 0, from = 0;
+  for (const [x, v] of [...pts].sort((p, q) => p[0] - q[0])) {
+    if (x >= horizon) break;
+    if (x > from) { area += value * piece(from, x); from = x; }
+    value = v;
+  }
+  return horizon > from ? area + value * piece(from, horizon) : area;
+}
+// Up to where every shown experiment still has a curve: the shortest of their aggregate lines.
+function areaHorizon(task, group, mask, X) {
+  const ends = group.experiments.map((exp) => curveRuns(exp, task, group, mask, X))
+    .filter((runs) => runs.length).map((runs) => Math.max(...runs.map((r) => r.end)));
+  return ends.length ? Math.min(...ends) : null;
+}
+// The bar-chart spec of the area: each run's area up to its game's horizon, a run that stopped
+// earlier keeping its last value (as in the aggregate curve), and the reference player's area.
+function areaSpec(spec, group, mask, xName, gamma) {
+  const X = CURVE_X[xName], byRun = new Map(), refs = new Map(), horizons = new Map();
+  for (const task of group.tasks) {
+    const horizon = areaHorizon(task, group, mask, X);
+    if (horizon == null) continue;
+    horizons.set(task, horizon);
+    for (const exp of group.experiments)
+      for (const m of (group.byExp.get(exp) && group.byExp.get(exp).get(task)) || []) {
+        const pts = ((m.progress || {}).points || []).map((q) => [q[X.point], q.value]);
+        if (pts.length && pts.every((q) => q[0] != null)) byRun.set(m, discountedArea(pts, horizon, gamma));
+        const reference = (m.progress || {}).reference || [];
+        if (xName === "env actions" && reference.length && !refs.has(task)) refs.set(task, discountedArea(reference, horizon, gamma));
+      }
+  }
+  return { ...spec, get: (m) => byRun.get(m), refOf: (task) => refs.get(task), horizons };
+}
+// gamma on a logit scale: log resolution near 1 and near 0, with the slider ends exactly 1 and 0.
+const _GAMMA_LOGIT = 6, _GAMMA_STEPS = 1000;
+const gammaOf = (p) => (p <= 0 ? 1 : p >= _GAMMA_STEPS ? 0 : 1 / (1 + Math.pow(10, (2 * p / _GAMMA_STEPS - 1) * _GAMMA_LOGIT)));
+const gammaSlider = (g) => (g >= 1 ? 0 : g <= 0 ? _GAMMA_STEPS : Math.round((1 - Math.log10(g / (1 - g)) / _GAMMA_LOGIT) * _GAMMA_STEPS / 2));
+const fmtGamma = (g) => (g === 1 || g === 0 ? String(g) : 1 - g < 0.01 ? `1 - ${(1 - g).toPrecision(2)}` : g < 0.01 ? g.toPrecision(2) : g.toFixed(3));
+function gammaControl(redraw) {
+  const label = h("span", "gammaval");
+  const show = (g) => { label.textContent = `gamma = ${fmtGamma(g)}` + (g < 1 && g > 0 ? ` (horizon ~ ${fmt(Math.round(1 / (1 - g)))})` : ""); };
+  const sl = h("input"); sl.type = "range"; sl.min = "0"; sl.max = String(_GAMMA_STEPS); sl.step = "1";
+  sl.value = String(gammaSlider(_graph.gamma)); sl.title = "discount per unit of x: 1 (left) to 0 (right)";
+  sl.oninput = () => show(gammaOf(Number(sl.value)));   // a redraw rebuilds the slider: only on release
+  sl.onchange = () => { _graph.gamma = gammaOf(Number(sl.value)); redraw(); };
+  show(_graph.gamma);
+  return h("label", "widthctl gammactl", sl, label);
 }
 
 // Drag across a chart to show only that x range; a double-click shows the whole run again.
@@ -881,6 +947,16 @@ async function graphsView(games, onlyExp, scope) {
         }
         card.append(body);
         if (hasRef) card.append(h("div", "muted curve-note", "dashed: reference player (ARC: the human baseline)"));
+      } else if (spec.auc) {
+        const area = areaSpec(spec, g2, _graph.mask, _graph.curveX, _graph.gamma);
+        card.append(h("div", "zoomrow",
+          segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }),
+          gammaControl(redraw)));
+        scroll.append(groupedBarChart(area, g2, expColor, _graph.agg, _graph.err, _graph.mask));
+        const upTo = [...area.horizons].map(([t, x]) => `${shortTask(t)} ${CURVE_X[_graph.curveX].fmt(Math.round(x))}`).join(", ");
+        card.append(body, h("div", "muted curve-note",
+          `sum of gamma^x * ${spec.label.replace(/^Area under /, "")} up to where the shortest curve ends (${upTo})` +
+          (_graph.curveX === "env actions" ? "; dashed: reference player" : "")));
       } else if (spec.categorical) {
         const { chart, cats } = statusChart(g2, expColor);
         scroll.append(chart);
