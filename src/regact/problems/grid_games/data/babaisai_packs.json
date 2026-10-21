@@ -1,7 +1,44 @@
 {
+ "version": "babaisai-bench-v1",
  "source": "https://github.com/nacloos/baba-is-ai (MIT), commit 40ae1b2",
  "built_by": "scripts/grid_games/build_babaisai_packs.py",
  "seed": 0,
+ "search_budget_s": 300.0,
+ "selection": {
+  "goto_win": {
+   "drawn": 13,
+   "kept": 8,
+   "too short": 5
+  },
+  "make_win": {
+   "drawn": 13,
+   "kept": 13
+  },
+  "two_room-goto_win": {
+   "drawn": 13,
+   "kept": 9,
+   "too short": 4
+  },
+  "two_room-break_stop-goto_win": {
+   "drawn": 13,
+   "kept": 13
+  },
+  "two_room-make_you": {
+   "drawn": 12,
+   "kept": 12
+  },
+  "two_room-make_win": {
+   "drawn": 12,
+   "unsolved in budget": 7,
+   "hidden object": 1,
+   "kept": 4
+  },
+  "two_room-break_stop-make_win": {
+   "drawn": 12,
+   "unsolved in budget": 7,
+   "kept": 5
+  }
+ },
  "codes": [
   {
    "type": 1,
@@ -156,27 +193,6 @@
    "name": "rule_property:you",
    "word": true,
    "colour": 13
-  },
-  {
-   "type": 20,
-   "value": 0,
-   "name": "rule_color:red",
-   "word": true,
-   "colour": 6
-  },
-  {
-   "type": 20,
-   "value": 1,
-   "name": "rule_color:green",
-   "word": true,
-   "colour": 12
-  },
-  {
-   "type": 20,
-   "value": 2,
-   "name": "rule_color:blue",
-   "word": true,
-   "colour": 10
   }
  ],
  "packs": [
@@ -184,189 +200,24 @@
    "key": "babaisai_p01",
    "levels": [
     {
-     "env_id": "env/two_room-goto_win-distr_win_rule",
-     "seed": 5866,
-     "optimal": 5,
-     "plan": [
-      2,
-      3,
-      3,
-      3,
-      3
-     ]
-    },
-    {
-     "env_id": "env/make_win",
-     "seed": 4969,
-     "optimal": 11,
-     "plan": [
-      3,
-      3,
-      3,
-      2,
-      3,
-      1,
-      2,
-      2,
-      2,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj_rule",
-     "seed": 2407,
-     "optimal": 12,
-     "plan": [
-      1,
-      3,
-      1,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_rule",
-     "seed": 8725,
-     "optimal": 14,
-     "plan": [
-      1,
-      1,
-      2,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_obj-irrelevant_rule",
-     "seed": 7961,
-     "optimal": 15,
-     "plan": [
-      1,
-      1,
-      1,
-      3,
-      1,
-      4,
-      4,
-      4,
-      3,
-      2,
-      2,
-      4,
-      1,
-      2,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-make_you-make_win",
-     "seed": 1553,
-     "optimal": 20,
-     "plan": [
-      1,
-      1,
-      3,
-      1,
-      3,
-      2,
-      2,
-      2,
-      1,
-      1,
-      1,
-      1,
-      3,
-      1,
-      4,
-      2,
-      2,
-      2,
-      2,
-      3
-     ]
-    },
-    {
-     "env_id": "env/make_win",
-     "seed": 6890,
-     "optimal": 23,
-     "plan": [
-      1,
-      1,
-      1,
-      1,
-      4,
-      4,
-      4,
-      2,
-      2,
-      2,
-      4,
-      4,
-      2,
-      3,
-      2,
-      3,
-      1,
-      1,
-      1,
-      1,
-      2,
-      4,
-      4
-     ]
-    }
-   ]
-  },
-  {
-   "key": "babaisai_p02",
-   "levels": [
-    {
-     "env_id": "env/two_room-goto_win-distr_rule",
-     "seed": 8541,
+     "env_id": "env/goto_win-distr_obj-irrelevant_rule",
+     "seed": 2289,
+     "family": "goto_win",
      "optimal": 3,
      "plan": [
-      3,
-      3,
-      3
+      1,
+      1,
+      1
      ]
     },
     {
-     "env_id": "env/goto_win-distr_rule",
-     "seed": 1618,
-     "optimal": 4,
+     "env_id": "env/two_room-break_stop-goto_win",
+     "seed": 9402,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 7,
      "plan": [
       1,
-      1,
-      3,
-      3
-     ]
-    },
-    {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj_rule",
-     "seed": 5796,
-     "optimal": 9,
-     "plan": [
-      1,
-      3,
-      3,
-      1,
+      2,
       2,
       4,
       4,
@@ -375,122 +226,14 @@
      ]
     },
     {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_rule",
-     "seed": 230,
-     "optimal": 12,
+     "env_id": "env/two_room-break_stop-goto_win-distr_rule",
+     "seed": 7815,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 8,
      "plan": [
       1,
       1,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      2,
-      4
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_obj",
-     "seed": 9171,
-     "optimal": 15,
-     "plan": [
-      4,
-      4,
-      4,
       1,
-      1,
-      4,
-      1,
-      3,
-      3,
-      3,
-      2,
-      3,
-      1,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-break_stop-make_win-distr_obj_rule",
-     "seed": 1020,
-     "optimal": 15,
-     "plan": [
-      1,
-      1,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      1,
-      1,
-      2,
-      2,
-      2
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_rule",
-     "seed": 5409,
-     "optimal": 16,
-     "plan": [
-      1,
-      1,
-      4,
-      1,
-      3,
-      3,
-      3,
-      2,
-      3,
-      1,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    }
-   ]
-  },
-  {
-   "key": "babaisai_p03",
-   "levels": [
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win",
-     "seed": 8896,
-     "optimal": 3,
-     "plan": [
-      2,
-      3,
-      3
-     ]
-    },
-    {
-     "env_id": "env/goto_win-distr_win_rule",
-     "seed": 3996,
-     "optimal": 4,
-     "plan": [
-      1,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/goto_win-distr_obj",
-     "seed": 6534,
-     "optimal": 5,
-     "plan": [
       4,
       4,
       4,
@@ -500,49 +243,38 @@
     },
     {
      "env_id": "env/two_room-make_you",
-     "seed": 5328,
-     "optimal": 10,
+     "seed": 1208,
+     "family": "two_room-make_you",
+     "optimal": 13,
      "plan": [
-      2,
-      2,
+      4,
+      4,
+      1,
+      3,
       3,
       3,
       1,
       3,
       2,
       2,
-      2,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win",
-     "seed": 2334,
-     "optimal": 10,
-     "plan": [
       1,
-      3,
-      3,
       1,
-      2,
-      4,
-      4,
-      4,
-      4,
       4
      ]
     },
     {
      "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 5243,
-     "optimal": 12,
+     "seed": 1031,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 13,
      "plan": [
       1,
-      1,
-      3,
-      3,
-      1,
       2,
+      2,
+      2,
+      2,
+      4,
+      4,
       2,
       4,
       4,
@@ -552,52 +284,105 @@
      ]
     },
     {
-     "env_id": "env/make_win-distr_obj_rule",
-     "seed": 8086,
-     "optimal": 16,
+     "env_id": "env/two_room-make_you-make_win",
+     "seed": 7382,
+     "family": "two_room-make_you",
+     "optimal": 15,
      "plan": [
-      1,
-      1,
-      4,
-      4,
-      2,
-      2,
-      4,
-      4,
-      4,
-      1,
-      3,
-      3,
       2,
       3,
       1,
-      2
+      3,
+      2,
+      3,
+      2,
+      2,
+      4,
+      1,
+      1,
+      1,
+      2,
+      2,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_win-distr_obj-irrelevant_rule",
+     "seed": 5855,
+     "family": "two_room-make_win",
+     "optimal": 15,
+     "plan": [
+      4,
+      4,
+      4,
+      1,
+      1,
+      1,
+      3,
+      1,
+      4,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you-make_win",
+     "seed": 2044,
+     "family": "two_room-make_you",
+     "optimal": 23,
+     "plan": [
+      4,
+      2,
+      3,
+      3,
+      1,
+      3,
+      2,
+      1,
+      4,
+      1,
+      1,
+      4,
+      1,
+      3,
+      2,
+      3,
+      1,
+      2,
+      2,
+      2,
+      2,
+      3,
+      3
      ]
     }
    ]
   },
   {
-   "key": "babaisai_p04",
+   "key": "babaisai_p02",
    "levels": [
     {
-     "env_id": "env/goto_win-distr_obj",
-     "seed": 4938,
+     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj-irrelevant_rule",
+     "seed": 8016,
+     "family": "two_room-goto_win",
      "optimal": 3,
      "plan": [
-      2,
-      2,
+      1,
+      3,
       3
      ]
     },
     {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 9769,
-     "optimal": 10,
+     "env_id": "env/two_room-break_stop-goto_win",
+     "seed": 2133,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 7,
      "plan": [
-      3,
       1,
-      2,
-      4,
       4,
       4,
       4,
@@ -607,9 +392,67 @@
      ]
     },
     {
+     "env_id": "env/make_win-distr_rule",
+     "seed": 4260,
+     "family": "make_win",
+     "optimal": 8,
+     "plan": [
+      3,
+      3,
+      2,
+      3,
+      1,
+      1,
+      2,
+      4
+     ]
+    },
+    {
      "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 2133,
-     "optimal": 11,
+     "seed": 1146,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 12,
+     "plan": [
+      1,
+      3,
+      3,
+      1,
+      2,
+      2,
+      2,
+      4,
+      4,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you",
+     "seed": 9298,
+     "family": "two_room-make_you",
+     "optimal": 13,
+     "plan": [
+      1,
+      4,
+      4,
+      1,
+      3,
+      3,
+      3,
+      1,
+      3,
+      2,
+      2,
+      2,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-make_win-distr_rule",
+     "seed": 6410,
+     "family": "two_room-break_stop-make_win",
+     "optimal": 15,
      "plan": [
       3,
       1,
@@ -617,6 +460,96 @@
       2,
       4,
       4,
+      4,
+      4,
+      4,
+      2,
+      4,
+      1,
+      1,
+      1,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_wall_win",
+     "seed": 3612,
+     "family": "two_room-make_win",
+     "optimal": 16,
+     "plan": [
+      1,
+      1,
+      3,
+      3,
+      1,
+      3,
+      1,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you-make_win",
+     "seed": 5866,
+     "family": "two_room-make_you",
+     "optimal": 23,
+     "plan": [
+      2,
+      4,
+      2,
+      3,
+      3,
+      3,
+      1,
+      3,
+      2,
+      1,
+      4,
+      4,
+      2,
+      3,
+      2,
+      3,
+      1,
+      1,
+      2,
+      2,
+      2,
+      3,
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "key": "babaisai_p03",
+   "levels": [
+    {
+     "env_id": "env/goto_win-distr_win_rule",
+     "seed": 8594,
+     "family": "goto_win",
+     "optimal": 3,
+     "plan": [
+      3,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj-irrelevant_rule",
+     "seed": 9861,
+     "family": "two_room-goto_win",
+     "optimal": 7,
+     "plan": [
+      1,
+      1,
       4,
       4,
       4,
@@ -626,15 +559,32 @@
     },
     {
      "env_id": "env/two_room-break_stop-goto_win-distr_obj",
-     "seed": 4260,
+     "seed": 3981,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 8,
+     "plan": [
+      1,
+      1,
+      1,
+      4,
+      4,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-maybe_break_stop-goto_win",
+     "seed": 1662,
+     "family": "two_room-goto_win",
      "optimal": 12,
      "plan": [
       1,
+      3,
+      3,
       1,
       2,
       2,
-      2,
-      4,
       4,
       4,
       4,
@@ -644,12 +594,222 @@
      ]
     },
     {
-     "env_id": "env/make_win-distr_obj-irrelevant_rule",
-     "seed": 8016,
+     "env_id": "env/two_room-break_stop-goto_win",
+     "seed": 4938,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 13,
+     "plan": [
+      1,
+      3,
+      1,
+      2,
+      2,
+      2,
+      2,
+      4,
+      2,
+      4,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you",
+     "seed": 633,
+     "family": "two_room-make_you",
+     "optimal": 15,
+     "plan": [
+      4,
+      2,
+      4,
+      2,
+      3,
+      3,
+      1,
+      3,
+      2,
+      2,
+      2,
+      2,
+      3,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-make_win-distr_rule",
+     "seed": 9436,
+     "family": "two_room-break_stop-make_win",
+     "optimal": 16,
+     "plan": [
+      1,
+      1,
+      3,
+      1,
+      2,
+      4,
+      4,
+      4,
+      4,
+      4,
+      2,
+      4,
+      1,
+      1,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win",
+     "seed": 4242,
+     "family": "make_win",
+     "optimal": 23,
+     "plan": [
+      2,
+      2,
+      3,
+      3,
+      2,
+      4,
+      4,
+      4,
+      2,
+      4,
+      1,
+      1,
+      1,
+      4,
+      1,
+      3,
+      3,
+      3,
+      3,
+      2,
+      3,
+      1,
+      4
+     ]
+    }
+   ]
+  },
+  {
+   "key": "babaisai_p04",
+   "levels": [
+    {
+     "env_id": "env/two_room-goto_win-distr_obj_rule",
+     "seed": 3525,
+     "family": "two_room-goto_win",
+     "optimal": 3,
+     "plan": [
+      2,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj_rule",
+     "seed": 3350,
+     "family": "two_room-goto_win",
+     "optimal": 6,
+     "plan": [
+      2,
+      2,
+      2,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-goto_win",
+     "seed": 6410,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 8,
+     "plan": [
+      1,
+      2,
+      2,
+      4,
+      4,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/make_win-distr_rule",
+     "seed": 7653,
+     "family": "make_win",
+     "optimal": 11,
+     "plan": [
+      1,
+      3,
+      3,
+      3,
+      3,
+      2,
+      3,
+      1,
+      1,
+      1,
+      2
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_win-distr_win_rule",
+     "seed": 1314,
+     "family": "two_room-make_win",
      "optimal": 13,
      "plan": [
       1,
       4,
+      4,
+      4,
+      1,
+      4,
+      2,
+      3,
+      2,
+      3,
+      3,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-make_win-distr_obj_rule",
+     "seed": 9171,
+     "family": "two_room-break_stop-make_win",
+     "optimal": 15,
+     "plan": [
+      1,
+      1,
+      3,
+      1,
+      2,
+      2,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      1,
+      1,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win",
+     "seed": 8086,
+     "family": "make_win",
+     "optimal": 17,
+     "plan": [
+      4,
+      4,
+      4,
       1,
       3,
       3,
@@ -659,38 +819,19 @@
       3,
       1,
       2,
+      4,
+      4,
+      4,
       4,
       4
      ]
     },
     {
-     "env_id": "env/two_room-maybe_break_stop-goto_win",
-     "seed": 6306,
-     "optimal": 13,
+     "env_id": "env/make_win",
+     "seed": 1648,
+     "family": "make_win",
+     "optimal": 21,
      "plan": [
-      1,
-      1,
-      3,
-      3,
-      1,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_obj-irrelevant_rule",
-     "seed": 4769,
-     "optimal": 27,
-     "plan": [
-      2,
-      2,
-      2,
       4,
       4,
       2,
@@ -710,9 +851,6 @@
       2,
       2,
       2,
-      4,
-      4,
-      4,
       4,
       4
      ]
@@ -723,8 +861,9 @@
    "key": "babaisai_p05",
    "levels": [
     {
-     "env_id": "env/goto_win-distr_rule",
-     "seed": 8549,
+     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_rule",
+     "seed": 5493,
+     "family": "two_room-goto_win",
      "optimal": 3,
      "plan": [
       3,
@@ -733,8 +872,160 @@
      ]
     },
     {
-     "env_id": "env/two_room-goto_win-distr_rule",
-     "seed": 8071,
+     "env_id": "env/two_room-goto_win-distr_obj-irrelevant_rule",
+     "seed": 3584,
+     "family": "two_room-goto_win",
+     "optimal": 5,
+     "plan": [
+      1,
+      1,
+      1,
+      1,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win-distr_obj-irrelevant_rule",
+     "seed": 8549,
+     "family": "make_win",
+     "optimal": 9,
+     "plan": [
+      4,
+      2,
+      3,
+      2,
+      3,
+      1,
+      1,
+      1,
+      2
+     ]
+    },
+    {
+     "env_id": "env/make_win",
+     "seed": 8916,
+     "family": "make_win",
+     "optimal": 11,
+     "plan": [
+      1,
+      1,
+      4,
+      4,
+      1,
+      3,
+      3,
+      2,
+      3,
+      1,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you",
+     "seed": 437,
+     "family": "two_room-make_you",
+     "optimal": 13,
+     "plan": [
+      4,
+      4,
+      4,
+      1,
+      3,
+      3,
+      3,
+      1,
+      3,
+      2,
+      2,
+      2,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win-distr_obj_rule",
+     "seed": 9618,
+     "family": "make_win",
+     "optimal": 14,
+     "plan": [
+      3,
+      1,
+      4,
+      4,
+      4,
+      3,
+      2,
+      2,
+      4,
+      1,
+      2,
+      2,
+      2,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-make_win-distr_obj",
+     "seed": 8896,
+     "family": "two_room-break_stop-make_win",
+     "optimal": 17,
+     "plan": [
+      1,
+      1,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      2,
+      3,
+      2,
+      3,
+      1,
+      1,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you-make_win",
+     "seed": 9431,
+     "family": "two_room-make_you",
+     "optimal": 21,
+     "plan": [
+      4,
+      1,
+      3,
+      1,
+      3,
+      2,
+      2,
+      2,
+      1,
+      1,
+      4,
+      2,
+      4,
+      1,
+      1,
+      2,
+      2,
+      2,
+      2,
+      2,
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "key": "babaisai_p06",
+   "levels": [
+    {
+     "env_id": "env/goto_win-distr_win_rule",
+     "seed": 1000,
+     "family": "goto_win",
      "optimal": 3,
      "plan": [
       1,
@@ -744,24 +1035,47 @@
     },
     {
      "env_id": "env/goto_win-distr_obj",
-     "seed": 8857,
-     "optimal": 4,
+     "seed": 540,
+     "family": "goto_win",
+     "optimal": 5,
      "plan": [
+      3,
+      3,
+      3,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-goto_win-distr_rule",
+     "seed": 354,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 9,
+     "plan": [
+      3,
+      3,
       1,
+      2,
+      4,
+      4,
       4,
       4,
       4
      ]
     },
     {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj",
-     "seed": 6871,
-     "optimal": 8,
+     "env_id": "env/two_room-break_stop-goto_win-distr_rule",
+     "seed": 6306,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 11,
      "plan": [
+      1,
       3,
       3,
       1,
       2,
+      2,
+      4,
       4,
       4,
       4,
@@ -769,144 +1083,78 @@
      ]
     },
     {
-     "env_id": "env/make_win-distr_rule",
-     "seed": 6410,
-     "optimal": 10,
-     "plan": [
-      1,
-      1,
-      1,
-      3,
-      2,
-      3,
-      1,
-      2,
-      2,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 5313,
+     "env_id": "env/two_room-make_wall_win",
+     "seed": 3088,
+     "family": "two_room-make_win",
      "optimal": 13,
      "plan": [
       3,
+      1,
       3,
       1,
-      2,
-      2,
-      2,
-      2,
       4,
       4,
       4,
       4,
       4,
-      4
+      4,
+      4,
+      3,
+      3
      ]
     },
     {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 3525,
+     "env_id": "env/two_room-break_stop-goto_win-distr_rule",
+     "seed": 6871,
+     "family": "two_room-break_stop-goto_win",
      "optimal": 14,
      "plan": [
-      1,
+      3,
       1,
       2,
       2,
       2,
       2,
       4,
-      4,
       2,
+      4,
       4,
       4,
       4,
       4,
       4
-     ]
-    }
-   ]
-  },
-  {
-   "key": "babaisai_p06",
-   "levels": [
-    {
-     "env_id": "env/two_room-goto_win",
-     "seed": 6981,
-     "optimal": 4,
-     "plan": [
-      2,
-      3,
-      3,
-      3
-     ]
-    },
-    {
-     "env_id": "env/two_room-goto_win-distr_obj",
-     "seed": 2793,
-     "optimal": 6,
-     "plan": [
-      1,
-      3,
-      2,
-      3,
-      3,
-      3
-     ]
-    },
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 3119,
-     "optimal": 8,
-     "plan": [
-      3,
-      3,
-      1,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_obj",
-     "seed": 9618,
-     "optimal": 9,
-     "plan": [
-      1,
-      3,
-      3,
-      3,
-      3,
-      2,
-      3,
-      1,
-      2
      ]
     },
     {
      "env_id": "env/two_room-make_you",
-     "seed": 4440,
-     "optimal": 10,
+     "seed": 3030,
+     "family": "two_room-make_you",
+     "optimal": 17,
      "plan": [
+      4,
+      4,
+      2,
+      4,
+      2,
+      3,
       3,
       3,
       1,
       3,
       2,
-      2,
-      2,
-      2,
-      2,
+      1,
+      1,
+      1,
+      1,
+      1,
       4
      ]
     },
     {
      "env_id": "env/make_win-distr_rule",
-     "seed": 5493,
-     "optimal": 19,
+     "seed": 4712,
+     "family": "make_win",
+     "optimal": 21,
      "plan": [
       1,
       3,
@@ -926,45 +1174,8 @@
       1,
       1,
       1,
-      3
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_obj_rule",
-     "seed": 1889,
-     "optimal": 32,
-     "plan": [
-      3,
-      3,
-      3,
-      3,
-      3,
-      2,
-      4,
-      4,
-      4,
-      2,
-      4,
-      1,
-      1,
-      1,
-      4,
-      1,
-      3,
-      3,
-      3,
-      3,
-      2,
-      3,
-      1,
       2,
       2,
-      2,
-      4,
-      4,
-      4,
-      2,
-      4,
       4
      ]
     }
@@ -974,124 +1185,9 @@
    "key": "babaisai_p07",
    "levels": [
     {
-     "env_id": "env/goto_win",
-     "seed": 2038,
-     "optimal": 3,
-     "plan": [
-      2,
-      2,
-      2
-     ]
-    },
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj",
-     "seed": 1901,
-     "optimal": 5,
-     "plan": [
-      2,
-      2,
-      3,
-      3,
-      3
-     ]
-    },
-    {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj",
-     "seed": 9920,
-     "optimal": 8,
-     "plan": [
-      1,
-      1,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_obj_rule",
-     "seed": 1212,
-     "optimal": 9,
-     "plan": [
-      1,
-      3,
-      3,
-      2,
-      3,
-      1,
-      2,
-      2,
-      2
-     ]
-    },
-    {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 6064,
-     "optimal": 10,
-     "plan": [
-      1,
-      1,
-      2,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj_rule",
-     "seed": 6409,
-     "optimal": 13,
-     "plan": [
-      1,
-      1,
-      1,
-      2,
-      2,
-      2,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4,
-      4
-     ]
-    },
-    {
-     "env_id": "env/make_win-distr_rule",
-     "seed": 8752,
-     "optimal": 14,
-     "plan": [
-      3,
-      1,
-      4,
-      4,
-      2,
-      4,
-      4,
-      2,
-      3,
-      2,
-      3,
-      1,
-      1,
-      2
-     ]
-    }
-   ]
-  },
-  {
-   "key": "babaisai_p08",
-   "levels": [
-    {
-     "env_id": "env/goto_win-distr_obj-irrelevant_rule",
-     "seed": 2029,
+     "env_id": "env/goto_win-distr_obj",
+     "seed": 1000,
+     "family": "goto_win",
      "optimal": 4,
      "plan": [
       1,
@@ -1101,43 +1197,28 @@
      ]
     },
     {
-     "env_id": "env/goto_win",
-     "seed": 3188,
-     "optimal": 6,
+     "env_id": "env/goto_win-distr_rule",
+     "seed": 8965,
+     "family": "goto_win",
+     "optimal": 5,
      "plan": [
       1,
       1,
-      1,
-      3,
-      3,
-      3
+      4,
+      4,
+      4
      ]
     },
     {
-     "env_id": "env/two_room-make_you",
-     "seed": 1000,
-     "optimal": 9,
-     "plan": [
-      2,
-      3,
-      1,
-      3,
-      2,
-      2,
-      2,
-      2,
-      3
-     ]
-    },
-    {
-     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_rule",
-     "seed": 373,
+     "env_id": "env/two_room-break_stop-goto_win-distr_obj_rule",
+     "seed": 4969,
+     "family": "two_room-break_stop-goto_win",
      "optimal": 10,
      "plan": [
       1,
       1,
-      3,
       1,
+      2,
       2,
       4,
       4,
@@ -1147,34 +1228,58 @@
      ]
     },
     {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 3618,
+     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj-irrelevant_rule",
+     "seed": 7961,
+     "family": "two_room-goto_win",
      "optimal": 11,
      "plan": [
       1,
-      3,
-      3,
-      1,
       4,
       4,
       4,
       4,
       4,
+      4,
+      4,
+      2,
       4,
       4
      ]
     },
     {
-     "env_id": "env/two_room-break_stop-goto_win-distr_obj-irrelevant_rule",
-     "seed": 4932,
+     "env_id": "env/make_win",
+     "seed": 6064,
+     "family": "make_win",
      "optimal": 13,
      "plan": [
       1,
       1,
+      4,
+      1,
+      3,
+      3,
+      2,
+      3,
+      1,
+      2,
+      2,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-maybe_break_stop-goto_win-distr_obj",
+     "seed": 1131,
+     "family": "two_room-goto_win",
+     "optimal": 14,
+     "plan": [
+      1,
+      1,
       2,
       2,
       2,
       2,
+      4,
       4,
       4,
       4,
@@ -1185,15 +1290,203 @@
      ]
     },
     {
-     "env_id": "env/make_win-distr_obj",
-     "seed": 3450,
-     "optimal": 22,
+     "env_id": "env/two_room-make_you-make_win",
+     "seed": 8541,
+     "family": "two_room-make_you",
+     "optimal": 18,
+     "plan": [
+      1,
+      4,
+      1,
+      3,
+      3,
+      3,
+      1,
+      3,
+      2,
+      2,
+      2,
+      4,
+      1,
+      1,
+      2,
+      2,
+      2,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win",
+     "seed": 5243,
+     "family": "make_win",
+     "optimal": 21,
+     "plan": [
+      2,
+      3,
+      2,
+      4,
+      4,
+      2,
+      4,
+      1,
+      1,
+      1,
+      4,
+      1,
+      3,
+      3,
+      3,
+      3,
+      2,
+      3,
+      1,
+      2,
+      4
+     ]
+    }
+   ]
+  },
+  {
+   "key": "babaisai_p08",
+   "levels": [
+    {
+     "env_id": "env/goto_win-distr_obj_rule",
+     "seed": 6890,
+     "family": "goto_win",
+     "optimal": 5,
+     "plan": [
+      1,
+      1,
+      1,
+      3,
+      3
+     ]
+    },
+    {
+     "env_id": "env/goto_win",
+     "seed": 6534,
+     "family": "goto_win",
+     "optimal": 5,
+     "plan": [
+      4,
+      4,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-goto_win-distr_obj",
+     "seed": 5081,
+     "family": "two_room-break_stop-goto_win",
+     "optimal": 10,
+     "plan": [
+      1,
+      1,
+      1,
+      2,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you",
+     "seed": 4440,
+     "family": "two_room-make_you",
+     "optimal": 10,
      "plan": [
       3,
+      3,
+      1,
+      3,
       2,
+      2,
+      2,
+      2,
+      2,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-make_you",
+     "seed": 1179,
+     "family": "two_room-make_you",
+     "optimal": 13,
+     "plan": [
+      4,
+      4,
+      1,
+      3,
+      3,
+      1,
+      3,
+      2,
+      2,
+      2,
+      1,
+      1,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win",
+     "seed": 4104,
+     "family": "make_win",
+     "optimal": 14,
+     "plan": [
+      1,
+      1,
+      3,
+      3,
+      3,
+      2,
+      3,
+      1,
+      1,
+      1,
       4,
       4,
       4,
+      4
+     ]
+    },
+    {
+     "env_id": "env/two_room-break_stop-make_win-distr_obj_rule",
+     "seed": 3450,
+     "family": "two_room-break_stop-make_win",
+     "optimal": 18,
+     "plan": [
+      1,
+      1,
+      1,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      2,
+      3,
+      2,
+      3,
+      1,
+      1,
+      3
+     ]
+    },
+    {
+     "env_id": "env/make_win-distr_obj_rule",
+     "seed": 5180,
+     "family": "make_win",
+     "optimal": 19,
+     "plan": [
+      2,
       2,
       4,
       1,
@@ -1209,8 +1502,9 @@
       3,
       1,
       2,
-      2,
-      2
+      4,
+      4,
+      4
      ]
     }
    ]

@@ -9,7 +9,7 @@ and score an episode. regact ships these (each new one has its own page under [`
 | `arc_agi` | the discovered ARC-AGI-3 games | `multi_instance` | `make install-arc` |
 | `minigrid` | MiniGrid gym environments | `multi_instance` | `make install-minigrid` |
 | `sokoban` | sokoban-bench-v1: 8 packs of 8 Boxoban levels (grid game, [page](envs/sokoban.md)) | `single_instance` | nothing |
-| `babaisai` | 8 packs of 7 BabaIsAI levels (grid game, [page](envs/babaisai.md)) | `single_instance` | `make install-babaisai` |
+| `babaisai` | babaisai-bench-v1: 8 packs of 8 BabaIsAI levels (grid game, [page](envs/babaisai.md)) | `single_instance` | `make install-babaisai` |
 | `puzzlescript` | PuzzleScript gallery games (grid game, [page](envs/puzzlescript.md)) | `single_instance` | Node, `make install-puzzlescript` |
 
 ## Use an environment

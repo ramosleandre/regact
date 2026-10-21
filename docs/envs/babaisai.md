@@ -17,24 +17,36 @@
 | Step limit | lifted | the engine's 100-step limit is set to 10^9, so a level ends only when it is won; the step count is never observable |
 | Hidden state | objects the player stands on | only the top object of each cell is shown; levels with an object hidden under another at reset are excluded, so whatever is hidden was seen before |
 | Reset | RESET (action 0) restarts the current level; it is not scored | as in ARC and the other grid games |
-| Reference | shortest solution per level | breadth-first search on the real engine (20 s budget per level; unsolved levels are skipped), every plan replayed through regact's environment before it is stored |
+| Reference | shortest solution per level | breadth-first search on the real engine (300 s per level; candidates not solved are cut), every plan replayed through regact's environment before it is stored |
 
 The engine's facing direction is not shown; it affects nothing in these levels.
 
 ## Tasks
 
-8 packs, `babaisai_p01` .. `babaisai_p08`, of 7 levels each: 3 single-room levels (8x8) and 4 two-room levels (13x9), drawn from the engine's 43 level generators (go to the win object, break a STOP rule, make a WIN rule, make another object YOU, with distractor objects and rules), ordered by shortest solution. Levels solved in fewer than 3 moves are excluded.
+The benchmark version is **babaisai-bench-v1** (`version` in `data/babaisai_packs.json`): 8 packs, `babaisai_p01` .. `babaisai_p08`, of 8 levels each. Candidates are drawn in turn from 7 skill families (the engine's 43 generators, grouped: go to the win object in one or two rooms, break a STOP rule first, make a WIN rule in one or two rooms, break STOP then make WIN, make another object YOU; the one-move `you_win` generators are left out). A candidate is cut when the search does not solve it within 300 s, when it is solved in fewer than 3 moves, or when an object starts hidden under another. The first 64 levels kept are sorted by shortest solution and dealt in snake order, so every pack has the same easy-to-hard spread (93-97 moves per pack); each pack is ordered by length. The packs are independent replicates of one game.
 
 | Pack | Shortest solution per level | Total |
 |---|---|---|
-| babaisai_p01 | 5 11 12 14 15 20 23 | 100 |
-| babaisai_p02 | 3 4 9 12 15 15 16 | 74 |
-| babaisai_p03 | 3 4 5 10 10 12 16 | 60 |
-| babaisai_p04 | 3 10 11 12 13 13 27 | 89 |
-| babaisai_p05 | 3 3 4 8 10 13 14 | 55 |
-| babaisai_p06 | 4 6 8 9 10 19 32 | 88 |
-| babaisai_p07 | 3 5 8 9 10 13 14 | 62 |
-| babaisai_p08 | 4 6 9 10 11 13 22 | 75 |
+| babaisai_p01 | 3 7 8 13 13 15 15 23 | 97 |
+| babaisai_p02 | 3 7 8 12 13 15 16 23 | 97 |
+| babaisai_p03 | 3 7 8 12 13 15 16 23 | 97 |
+| babaisai_p04 | 3 6 8 11 13 15 17 21 | 94 |
+| babaisai_p05 | 3 5 9 11 13 14 17 21 | 93 |
+| babaisai_p06 | 3 5 9 11 13 14 17 21 | 93 |
+| babaisai_p07 | 4 5 10 11 13 14 18 21 | 96 |
+| babaisai_p08 | 5 5 10 10 13 14 18 19 | 94 |
+
+What the selection cut, per family (from `selection` in the data file). Exact references are out of reach for most two-room "make WIN" levels, so those families are under-represented: this is the cost of requiring a proven-optimal reference.
+
+| Skill family | Drawn | Kept | Too short (< 3 moves) | Unsolved in 300 s | Object hidden at start |
+|---|---|---|---|---|---|
+| goto_win | 13 | 8 | 5 | 0 | 0 |
+| make_win | 13 | 13 | 0 | 0 | 0 |
+| two_room-goto_win | 13 | 9 | 4 | 0 | 0 |
+| two_room-break_stop-goto_win | 13 | 13 | 0 | 0 | 0 |
+| two_room-make_you | 12 | 12 | 0 | 0 | 0 |
+| two_room-make_win | 12 | 4 | 0 | 7 | 1 |
+| two_room-break_stop-make_win | 12 | 5 | 0 | 7 | 0 |
 
 `problem.kwargs.max_levels=N` keeps the first N levels of each pack (the shortest), and completing level N wins.
 
@@ -59,10 +71,10 @@ For a benchmark, copy a local launch script and change the problem block; `objec
 ## Rebuild the packs
 
 ```bash
-python scripts/grid_games/build_babaisai_packs.py --packs 8 --seed 0
+python scripts/grid_games/build_babaisai_packs.py --seed 0 --budget 300
 ```
 
-It takes about 10 minutes and rewrites `src/regact/problems/grid_games/data/babaisai_packs.json` (levels, plans and the code table).
+It takes about two hours the first time (each candidate cut at the budget costs 300 s); search results are cached in `~/.cache/regact/grid_game_solutions/`, so a rebuild only searches new candidates. It rewrites `src/regact/problems/grid_games/data/babaisai_packs.json` (levels, plans, the selection counts and the code table); change `VERSION` in the script when the levels change.
 
 ## Limitations
 
