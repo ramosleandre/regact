@@ -260,6 +260,7 @@ def test_validation_budget_scales_with_recorded_steps(hidden_rig, monkeypatch):
 def test_a_state_that_grows_along_an_episode_fails_compactness(hidden_rig):
     c = hidden_rig(lifecycle=Lifecycle.SINGLE_INSTANCE, target=6)
     c.options.threshold_max_state_obs_size_ratio = 100
+    c.options.max_state_bytes_always_allowed = None  # the toy States are small
     d = c.workdir / "world_model"
     hidden_model(c.workdir)
     (d / "model_state.py").write_text(

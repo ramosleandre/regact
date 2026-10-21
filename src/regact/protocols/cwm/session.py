@@ -158,9 +158,10 @@ class Coordinator(ManagedCoordinator):
         return state
 
     def _check_size(self, state: Any, obs: dict[str, Any], oid: int) -> None:
-        add_state_size(self.state_sizes, oid, state, obs)
+        allowance = self.options.max_state_bytes_always_allowed
+        add_state_size(self.state_sizes, oid, state, obs, allowance)
         failure = compactness_failure(
-            self.state_sizes, self.options.threshold_max_state_obs_size_ratio
+            self.state_sizes, self.options.threshold_max_state_obs_size_ratio, allowance
         )
         if failure is not None:
             self.running = None

@@ -83,6 +83,9 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         else "",
         "INITIAL_TARGET": options.n_unique_observations_in_initial_collection,
         "SIZE_RATIO": options.threshold_max_state_obs_size_ratio,
+        "STATE_ALLOWANCE": f" A State of at most {options.max_state_bytes_always_allowed} serialized bytes always passes."
+        if options.max_state_bytes_always_allowed is not None
+        else "",
         "EXPLORATION_ACTIONS": options.max_actions_per_RunController,
         "CALL_SECONDS": options.execution.max_seconds_per_call,
         "VALIDATION_SECONDS": options.execution.max_seconds_per_UpdateCodeWorldModel,

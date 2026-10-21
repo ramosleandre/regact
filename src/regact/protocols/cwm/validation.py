@@ -39,12 +39,16 @@ def diagnostic_pointer(diagnostic_id: int) -> dict[str, Any]:
     }
 
 
-def add_state_size(summary: dict[str, Any], oid: int, state: Any, obs: Any) -> None:
-    """Accumulate bytes and representative extremes without retaining extra states."""
+def add_state_size(
+    summary: dict[str, Any], oid: int, state: Any, obs: Any, allowance: int | None = None
+) -> None:
+    """Accumulate bytes and representative extremes without retaining extra states. A State of at
+    most ``allowance`` bytes never becomes the largest-ratio State: it always passes."""
     state_bytes = len(canonical(state).encode())
     observation_bytes = len(canonical(obs).encode())
     summary["state_bytes"] = summary.get("state_bytes", 0) + state_bytes
     summary["observation_bytes"] = summary.get("observation_bytes", 0) + observation_bytes
+    summary["n_states"] = summary.get("n_states", 0) + 1
     item = {
         "observation_id": oid,
         "state_bytes": state_bytes,
@@ -54,17 +58,26 @@ def add_state_size(summary: dict[str, Any], oid: int, state: Any, obs: Any) -> N
     for key, sign in (("smallest_state", 1), ("largest_state", -1)):
         if key not in summary or sign * state_bytes < sign * summary[key]["state_bytes"]:
             summary[key] = item
+    if allowance is not None and state_bytes <= allowance:
+        return
     largest = summary.get("largest_ratio_state")
     if largest is None or item["ratio"] > largest["ratio"]:
         summary["largest_ratio_state"] = item
 
 
-def compactness_failure(sizes: dict[str, Any], threshold: float) -> dict[str, Any] | None:
+def compactness_failure(
+    sizes: dict[str, Any], threshold: float, allowance: int | None = None
+) -> dict[str, Any] | None:
     """Both the aggregate ratio and the largest single state must stay under the threshold, so a
-    State that grows along an episode (visited sets, logs) fails even when the average is low."""
+    State that grows along an episode (visited sets, logs) fails even when the average is low.
+    States of at most ``allowance`` bytes pass whatever the ratio: on games with small
+    observations the ratio alone would refuse even a minimal State."""
     ratio = sizes.get("state_bytes", 0) / max(1, sizes.get("observation_bytes", 0))
     largest = sizes.get("largest_ratio_state")
-    if ratio >= threshold:
+    small = allowance is not None and sizes.get("state_bytes", 0) <= allowance * max(
+        1, sizes.get("n_states", 0)
+    )
+    if ratio >= threshold and not small:
         return {"ratio": ratio, "required_below": threshold}
     if largest is not None and largest["ratio"] >= threshold:
         return {"largest_state": largest, "required_below": threshold}
@@ -161,7 +174,9 @@ def validate(
         if canonical(rendered) != canonical(obs):
             failure(kind, where, rendered, obs, states={"state_before": before, "state": state})
             return False
-        add_state_size(sizes, where["observation_id"], state, obs)
+        add_state_size(
+            sizes, where["observation_id"], state, obs, config.max_state_bytes_always_allowed
+        )
         return True
 
     def reached(history: str, state: Any, ok: bool = True) -> bool:
@@ -234,7 +249,9 @@ def validate(
         summary["state_obs_size_ratio"] = sizes.get("state_bytes", 0) / max(
             1, sizes.get("observation_bytes", 0)
         )
-        if size_failure := compactness_failure(sizes, config.threshold_max_state_obs_size_ratio):
+        if size_failure := compactness_failure(
+            sizes, config.threshold_max_state_obs_size_ratio, config.max_state_bytes_always_allowed
+        ):
             failure("compression_ratio", size_failure)
     except WorkerError as exc:
         summary["error"] = budgets.truncate_error(str(exc), config.feedback.max_error_chars)

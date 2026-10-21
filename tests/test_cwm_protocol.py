@@ -357,6 +357,7 @@ def test_bad_reconstruction_and_compression_are_rejected(rig):
     assert result["counterexamples"][0]["details"].startswith("data_api.describe_diagnostic(")
     model(c.workdir)
     c.options.threshold_max_state_obs_size_ratio = 0.01
+    c.options.max_state_bytes_always_allowed = None  # the toy States are small enough to pass
     assert "compression_ratio" in c.tool("UpdateCodeWorldModel", {})["failures"]
 
 

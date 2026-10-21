@@ -92,3 +92,21 @@ def test_generated_data_api_hides_the_query_cap(rig, cap):
     assert [o["frame"][0] for o in observations] == [0, 1, 2, 3] and actions == [1, 1, 1]
     observations, actions = api.load_history(episode["episode_id"], step=1)
     assert len(observations) == 2 and actions == [1]
+
+
+def test_small_states_pass_the_size_check_whatever_the_ratio():
+    from regact.protocols.cwm.validation import add_state_size, compactness_failure
+
+    def check(states, allowance):
+        sizes = {}
+        for i, (state_bytes, obs_bytes) in enumerate(states):
+            add_state_size(sizes, i + 1, "s" * (state_bytes - 2), "o" * (obs_bytes - 2), allowance)
+        return compactness_failure(sizes, 0.5, allowance)
+
+    small = [(200, 400), (210, 400)]  # ratio above 0.5, but each State is small
+    assert check(small, None) is not None
+    assert check(small, 256) is None
+    growing = [(200, 400), (300, 400)]  # one State above the allowance with a ratio of 0.75
+    assert check(growing, 256)["largest_state"]["state_bytes"] == 300
+    big = [(300, 500), (300, 500)]  # above the allowance on average: the ratio applies
+    assert check(big, 256)["ratio"] == 0.6

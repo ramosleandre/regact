@@ -93,7 +93,7 @@ sum(serialized State bytes over the validated States)
 sum(serialized observation bytes they render)
 ```
 
-The default threshold is **0.5**, strictly. The ratio of the single largest State must also stay below it, so States that grow along an episode fail. On failure, feedback includes the smallest/largest state sizes and their observation IDs. Python source/constants are not counted in this ratio.
+The default threshold is **0.5**, strictly. The ratio of the single largest State must also stay below it, so States that grow along an episode fail. A State of at most `protocol.max_state_bytes_always_allowed` bytes (default 256) passes whatever the ratio: on games with small observations (a Sokoban level is about 400 bytes) the ratio alone would refuse even a minimal State. On failure, feedback includes the smallest/largest state sizes and their observation IDs. Python source/constants are not counted in this ratio.
 
 ### Interpret validation feedback
 
@@ -175,6 +175,7 @@ For shared collection, execution, data, feedback and task settings, see the [com
 | Full parameter | Default | Meaning |
 |---|---|---|
 | `protocol.threshold_max_state_obs_size_ratio` | `0.5` | Strict upper bound on aggregate serialized State/observation size ratio |
+| `protocol.max_state_bytes_always_allowed` | `256` | A State of at most this many serialized bytes passes whatever the ratio (games with small observations); `null` disables it |
 | `protocol.workspace_helpers_enabled` | `true` | Supply the local environment helper `framework/cwm_env.py` |
 | `protocol.execution.max_seconds_per_UpdateCodeWorldModel` | `90` | Time spent in submitted code during one validation: world-model callbacks plus their module imports. Store reads and comparisons are not charged |
 | `protocol.execution.max_seconds_per_UpdateCodeWorldModel_per_1000_steps` | `30` | The same budget per 1,000 recorded steps; a validation gets the larger of the two, so long runs are not refused for length |

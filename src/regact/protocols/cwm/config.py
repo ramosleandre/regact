@@ -52,6 +52,7 @@ class CwmConfig:
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
     threshold_max_state_obs_size_ratio: float = 0.5
+    max_state_bytes_always_allowed: int | None = 256  # a State this small passes whatever the ratio
     max_actions_per_RunController: int | None = 2500
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True

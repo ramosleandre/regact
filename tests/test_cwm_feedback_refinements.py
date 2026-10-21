@@ -70,6 +70,7 @@ def test_state_size_is_shown_only_when_size_caused_the_refusal(rig):
     ratio = result["state_obs_size_ratio"]
     # The threshold is strict: equality must also return useful size witnesses.
     c.options.threshold_max_state_obs_size_ratio = ratio
+    c.options.max_state_bytes_always_allowed = None  # the toy States are small
     rejected = c.tool("UpdateCodeWorldModel", {})
     public = present("UpdateCodeWorldModel", rejected, c.options, c.config.limits)
     assert public["status"] == "Refused" and public["failures"]["compression_ratio"]

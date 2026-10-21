@@ -34,7 +34,7 @@ Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It re
 1. **Episode start:** `state = get_initial_state(first observation)`, and `render(state)` must equal that observation.
 2. **Every recorded action:** `state = step(state, action)`, and `render(state)` must equal the next recorded observation. An episode stops at its first divergence: the State after it is unreliable.
 3. **Repeatability:** callbacks give the same results on repeated identical inputs (checked on a sample of calls).
-4. **Compactness:** `sum(serialized State bytes) / sum(serialized observation bytes)` must be strictly below **__SIZE_RATIO__**, and so must the ratio of the single largest State. States that grow along an episode (visited sets, action logs) fail.
+4. **Compactness:** `sum(serialized State bytes) / sum(serialized observation bytes)` must be strictly below **__SIZE_RATIO__**, and so must the ratio of the single largest State. States that grow along an episode (visited sets, action logs) fail.__STATE_ALLOWANCE__
 
 Submitting is the cheapest way to check your CWM against everything recorded: it costs one tool call and no game action, and a refusal costs nothing else. Prefer it to replaying recorded data with your own script.
 
