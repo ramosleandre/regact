@@ -129,6 +129,8 @@ def test_framework_calls_take_their_outcome_and_playback_from_store_events(tmp_p
             (201.0, "UpdateCodeWorldModel", {"accepted": False}),
             (201.5, "RunController", {"exploration_id": 8, "observation_sequence": [2]}),
             (300.5, "ResetLevel", {"stop_reason": "reset_level"}),
+            (400.5, "RunController", {"exploration_id": 9, "observation_sequence": [3, 4]}),
+            (401.1, "UpdateCodeWorldModel", {"accepted": True}),  # between two calls: nobody's
         ):
             db.execute(
                 "INSERT INTO events(timestamp, kind, phase, payload) VALUES(?,?,?,?)",
@@ -144,11 +146,13 @@ def test_framework_calls_take_their_outcome_and_playback_from_store_events(tmp_p
     chained = call("python framework/commands.py UpdateCodeWorldModel; python framework/commands.py RunController", 200, 202)
     reset = call("python framework/commands.py ResetLevel | grep current", 300, 301, '"current_observation_id": 4')
     untimed = ToolCallView("old", "Bash", {"command": "python framework/commands.py RunController"})
+    scripted = call("chmod +x run.sh; ./run.sh", 400, 401)  # the command runs inside run.sh
+    plain = call("ls", 401.2, 402)  # right after it, without a command: must claim nothing
     from types import SimpleNamespace
 
     from regact.viz.reader import _link_store_records
 
-    turns = [SimpleNamespace(tools=[piped, chained, reset, untimed])]
+    turns = [SimpleNamespace(tools=[piped, chained, reset, untimed, scripted, plain])]
     _tag_tool_calls(turns, [])
     _link_store_records(turns, store)
     assert (piped.succeeded, piped.controller_playback_ids) == (True, [7])
@@ -156,3 +160,10 @@ def test_framework_calls_take_their_outcome_and_playback_from_store_events(tmp_p
     assert (chained.succeeded, chained.controller_playback_ids) == (False, [8])
     assert reset.succeeded is True and reset.controller_playback_ids == []
     assert untimed.succeeded is None  # an old transcript without timestamps keeps the output parse
+    assert (scripted.framework_tool, scripted.tag, scripted.controller_playback_ids) == (
+        "RunController",
+        "cwm",
+        [9],
+    )
+    assert plain.framework_tool is None
+    assert chained.framework_tools == ["UpdateCodeWorldModel", "RunController"]

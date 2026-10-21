@@ -1435,7 +1435,7 @@ async function renderConversation(name) {
         const tag = it.tool.tag;
         if (it.tool.framework_tool) {
           block.id = "nav-cwm-" + nCwm++;
-          navItems.push({id: block.id, tag: _CWM_TOOL_STYLE[it.tool.framework_tool] || "cwm", label: it.tool.framework_tool, succeeded: it.tool.succeeded});
+          navItems.push({id: block.id, tag: _CWM_TOOL_STYLE[it.tool.framework_tool] || "cwm", label: commandLabel(it.tool), succeeded: it.tool.succeeded});
         } else if (tag === "submit" || tag === "submit_win") {
           block.id = "nav-submit-" + nSubmit;
           navItems.push({ id: block.id, tag, label: `submission ${nSubmit}${tag === "submit_win" ? " ✓ level" : ""}` });
@@ -1524,6 +1524,12 @@ function parseHeredocs(command) {
   return { text: out.join("\n"), files };
 }
 
+// Every framework command a call ran (a script can chain several), else the one its text names.
+function commandLabel(tool) {
+  const ran = tool.framework_tools || [];
+  return ran.length ? ran.join(" + ") : tool.framework_tool;
+}
+
 function toolBlock(tool, gameName) {
   // The reader tags calls authoritatively: blue submit, green submit-that-won a level, red cheat.
   const cls = { cheat: " cheat", submit: " submit", submit_win: " submit-win" }[tool.tag] || "";
@@ -1531,7 +1537,7 @@ function toolBlock(tool, gameName) {
   const box = h("div", "tool" + cls + (cwmStyle ? " " + cwmStyle : ""));
   const t = h("div", "t");
   if (tool.framework_tool) {
-    t.append(h("span", "tag tag-" + (cwmStyle || "cwm"), tool.framework_tool), " ");
+    t.append(h("span", "tag tag-" + (cwmStyle || "cwm"), commandLabel(tool)), " ");
     if (tool.succeeded) {
       const check = h("span", "tool-success", "✓");
       check.title = "Command completed successfully; this does not mean the full game is solved.";

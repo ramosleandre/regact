@@ -33,6 +33,7 @@ class ToolCallView:
     images: list[dict[str, str]] = field(default_factory=list)
     tag: str | None = None  # policy submissions, CWM commands, or flagged calls
     framework_tool: str | None = None
+    framework_tools: list[str] = field(default_factory=list)  # every command that ran, in order
     succeeded: bool | None = None
     controller_playback_ids: list[int] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)  # why a call was tagged "cheat" (the reasons)
@@ -472,14 +473,16 @@ def _link_store_records(turns: list[TurnView], store: Path) -> None:
 
     An event belongs to the first call whose [start, end] contains its time. A call can run
     several commands (a script chaining them): it succeeds when all of its own kind did, and gets
-    a playback for every controller run. Calls without timestamps (older transcripts) or without
-    events (the result came back before the command finished) keep what was parsed from output.
+    a playback for every controller run. A call whose text names no command (it ran a script that
+    does) takes the kind of the first event strictly inside it. Calls without timestamps (older
+    transcripts) or without events (the result came back before the command finished) keep what
+    was parsed from output.
     """
     calls = [
         call
         for turn in turns
         for call in turn.tools
-        if call.framework_tool and call.started is not None and call.ended is not None
+        if call.started is not None and call.ended is not None
     ]
     if not calls or not store.is_file():
         return
@@ -497,13 +500,18 @@ def _link_store_records(turns: list[TurnView], store: Path) -> None:
     events = [(eid, at, kind, json.loads(payload).get("result") or {}) for eid, at, kind, payload in rows]
     claimed: set[int] = set()
     for call in calls:
+        slack = _CLOCK_SLACK_SECONDS if call.framework_tool else 0.0
         mine = [
             (eid, kind, result)
             for eid, at, kind, result in events
-            if eid not in claimed
-            and call.started - _CLOCK_SLACK_SECONDS <= at <= call.ended + _CLOCK_SLACK_SECONDS
+            if eid not in claimed and call.started - slack <= at <= call.ended + slack
         ]
         claimed.update(eid for eid, _, _ in mine)
+        call.framework_tools = list(dict.fromkeys(kind for _, kind, _ in mine))
+        if mine and not call.framework_tool:
+            call.framework_tool = mine[0][1]
+            if call.tag not in ("submit", "submit_win"):
+                call.tag = "cwm"
         if own := [result for _, kind, result in mine if kind == call.framework_tool]:
             call.succeeded = all(_command_succeeded(call.framework_tool, r) for r in own)
         if runs := [
