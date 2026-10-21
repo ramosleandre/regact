@@ -217,7 +217,7 @@ def test_codex_parses_message_reasoning_command_and_completion() -> None:
         "exit_code": 0,
     }
     [res] = agent._parse_events({"type": "item.completed", "item": done})
-    assert isinstance(res, ToolResult) and res.id == "c1" and res.output == "x"
+    assert isinstance(res, ToolResult) and res.id == "p0:c1" and res.output == "x"
     assert not res.is_error
     # an intermediate update of the same item is dropped (no duplicate ToolCall)
     assert (
@@ -692,3 +692,18 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     env = codex._launch_env()
     assert "CODEX_THREAD_ID" not in env and "OPENAI_BASE_URL" not in env
     assert env["OPENAI_API_KEY"] == "key" and env["CODEX_HOME"] == codex._config_dir()
+
+
+def test_codex_tool_ids_stay_unique_across_processes() -> None:
+    """codex exec item ids restart in each process (a resume starts a new one)."""
+    agent = CodexAgent()
+    agent._cwd = "/tmp/wd"
+    item = {
+        "type": "item.started",
+        "item": {"type": "command_execution", "command": "ls", "id": "c1"},
+    }
+    agent._command("first")
+    first = agent._parse_events(item)[0]
+    agent._command("again")
+    second = agent._parse_events(item)[0]
+    assert first.id != second.id

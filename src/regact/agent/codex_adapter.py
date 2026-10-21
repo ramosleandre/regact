@@ -14,6 +14,7 @@ agents' internal work; this stream cannot provide a full model tool-request coun
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import shutil
@@ -53,6 +54,7 @@ class CodexAgent(_CliAgent):
         self._started_tools: set[str] = set()
         self._finished_tools: set[str] = set()
         self._plan_updates = 0
+        self._processes = 0  # codex exec processes run so far: item ids restart in each one
         subagents = self._args.get("subagents_enabled")
         if subagents is not None and not isinstance(subagents, bool):
             raise ValueError("agent.args.subagents_enabled must be true, false, or null")
@@ -157,9 +159,10 @@ class CodexAgent(_CliAgent):
         return "\n".join(lines) + "\n"
 
     async def close(self) -> None:
-        """Drop the per-task home on teardown (nothing reads codex's native session store post-run;
-        the normalized transcript is already in logs/), so seeded auth + session state do not
-        accumulate. First preserve any token refresh back to the isolated ROOT (never ~/.codex)."""
+        """Drop the per-task home on teardown, so seeded auth + session state do not accumulate.
+        First keep codex's own session logs (what the model saw, full patches and command outputs,
+        which its JSON events abbreviate) in logs/codex_rollouts/, and preserve any token refresh
+        back to the isolated ROOT (never ~/.codex)."""
         await super().close()
         if self._session_home is None:
             return
@@ -171,14 +174,28 @@ class CodexAgent(_CliAgent):
             except OSError:
                 pass  # best-effort; a lost refresh just re-seeds from ~/.codex next run
         self._usage = codex_usage(self._session_home)  # before the home and its logs are deleted
+        self._keep_rollouts()
         shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
+
+    def _keep_rollouts(self) -> None:
+        if self._session_home is None or not self._cwd:
+            return
+        kept = os.path.join(os.path.dirname(self._cwd), "logs", "codex_rollouts")
+        pattern = os.path.join(self._session_home, "sessions", "**", "rollout-*.jsonl")
+        for path in glob.glob(pattern, recursive=True):
+            try:
+                os.makedirs(kept, exist_ok=True)
+                shutil.copyfile(path, os.path.join(kept, os.path.basename(path)))
+            except OSError:
+                pass  # best-effort, like the token refresh above
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         # Exec item IDs restart for each process, including resumed turns.
         self._started_tools.clear()
         self._finished_tools.clear()
         self._plan_updates = 0
+        self._processes += 1
         # Hosted web search is independent of the outer sandbox network rules.
         # Apply this override to both initial and resumed conversations.
         argv = ["codex", "-c", 'web_search="disabled"']
@@ -252,7 +269,7 @@ class CodexAgent(_CliAgent):
             if kind not in ("item.started", "item.updated"):
                 return []
             self._plan_updates += 1
-            tool_id = f"{item.get('id', 'plan')}:update:{self._plan_updates}"
+            tool_id = f"p{self._processes}:{item.get('id', 'plan')}:update:{self._plan_updates}"
             return [
                 ToolCall(tool_id, "update_plan", {"items": item.get("items", [])}),
                 ToolResult(tool_id, "Plan updated"),
@@ -281,7 +298,7 @@ class CodexAgent(_CliAgent):
         """Pair each item once, including failed and completion-only operations."""
         if kind not in ("item.started", "item.completed"):
             return []  # output/progress updates are not new calls or completions
-        tool_id = str(item.get("id", ""))
+        tool_id = f"p{self._processes}:{item.get('id', '')}"
         if tool_id in self._finished_tools:
             return []
         events: list[AgentEvent] = []
