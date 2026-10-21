@@ -86,7 +86,7 @@ def test_minigrid_build_prompt_informative_describes_actions() -> None:
 
 def test_minigrid_build_prompt_minimal_hides_action_meaning() -> None:
     prompt = MiniGridProblem().build_prompt("MiniGrid-Empty-5x5-v0", info_mode=InfoMode.MINIMAL)
-    assert "Empty-5x5" not in prompt
+    assert "Empty-5x5" not in prompt and "minigrid" not in prompt.lower()
     assert "Discover the rules" in prompt
     assert "turn left" not in prompt  # minimal does not spell out the actions
 
