@@ -53,7 +53,12 @@ Install Node (tested with v22), then fetch the engine and the games:
 make install-puzzlescript
 ```
 
-The games are fetched, not redistributed: their authors' gists carry no licence. `data/puzzlescript_games.json` pins each source by URL and SHA-256, and the installer refuses a source that changed. They go to `REGACT_PUZZLESCRIPT_DIR` (default `~/.cache/regact/puzzlescript`), outside the agent's sandbox. On a cluster, install on a login node (it needs internet); the runs then need only Node.
+The games are fetched, not redistributed: their authors' gists carry no licence. `data/puzzlescript_games.json` pins each source by URL and SHA-256, and the installer refuses a source that changed. They go to `REGACT_PUZZLESCRIPT_DIR` (default `~/.cache/regact/puzzlescript`), outside the agent's sandbox. On a cluster, install on a login node (it needs internet); the runs then need only Node, on the `PATH` of the job (it runs in the trusted environment server, not in the agent's sandbox).
+
+Getting Node:
+- macOS: `brew install node`, or the installer from [nodejs.org](https://nodejs.org).
+- Linux without a package or module (as on Adastra): the official `linux-x64` tarball; only `bin/node` is needed, e.g. `tar -xJf node-v22.17.0-linux-x64.tar.xz --strip-components=2 node-v22.17.0-linux-x64/bin/node`, then put its directory on `PATH`. Check the tarball against the release's `SHASUMS256.txt`.
+- Set `REGACT_PUZZLESCRIPT_DIR` when the home directory is small (a cluster's work space is a better place).
 
 The config is [`conf/problem/puzzlescript.yaml`](../../src/regact/conf/problem/puzzlescript.yaml).
 
