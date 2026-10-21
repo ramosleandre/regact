@@ -1,8 +1,8 @@
 """The HTTP env server: the env behind localhost HTTP.
 
 Holds the game sessions and exposes them over HTTP; the agent never imports the
-game, it only sees these endpoints. The real ``game_id`` is used as-is (no
-aliasing). Inspired by arc-3-agents-baseline1 ``server.py``.
+game, it only sees these endpoints. Sessions are registered under the real task name; the
+agent's files address the server's single game as ``AGENT_GAME_ID``, so they never name the task. Inspired by arc-3-agents-baseline1 ``server.py``.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from regact.env.wrapped_env import WrappedEnv
 from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.tools.base import Tool, ToolContext
+
+AGENT_GAME_ID = "game"
 
 
 def _env_fault(op: str, exc: Exception) -> HTTPException:
@@ -91,6 +93,12 @@ class EnvServer:
         session = self._sessions.get(game_id)
         return session.total_action_count if session is not None else 0
 
+    def _key(self, game_id: str) -> str:
+        """The registered name ``game_id`` stands for: the only game when it is the alias."""
+        if game_id == AGENT_GAME_ID and len(self._sessions) == 1:
+            return next(iter(self._sessions))
+        return game_id
+
     def _session(self, game_id: str) -> EnvSession:
         try:
             return self._sessions[game_id]
@@ -110,6 +118,7 @@ class EnvServer:
 
         @app.post("/env/{game_id}/reset")
         def reset(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            game_id = self._key(game_id)
             if game_id in self._environment:
                 return self._environment[game_id]("reset", body)
             session = self._session(game_id)
@@ -122,6 +131,7 @@ class EnvServer:
 
         @app.post("/env/{game_id}/step")
         def step(game_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            game_id = self._key(game_id)
             if game_id in self._environment:
                 return self._environment[game_id]("step", body)
             env = self._require_live(game_id)
@@ -133,6 +143,7 @@ class EnvServer:
 
         @app.get("/env/{game_id}/current")
         def current(game_id: str) -> dict[str, Any]:
+            game_id = self._key(game_id)
             if game_id in self._environment:
                 return self._environment[game_id]("current", {})
             env = self._require_live(game_id)
@@ -142,12 +153,14 @@ class EnvServer:
 
         @app.get("/env/{game_id}/last-step")
         def last_step(game_id: str) -> dict[str, int]:
+            game_id = self._key(game_id)
             if game_id in self._environment:
                 return self._environment[game_id]("last-step", {})
             return {"action_count": self._require_live(game_id).action_count}
 
         @app.post("/env/{game_id}/stop")
         def stop(game_id: str) -> dict[str, bool]:
+            game_id = self._key(game_id)
             if game_id in self._environment:
                 return self._environment[game_id]("stop", {})
             self._session(game_id).close()
@@ -155,6 +168,7 @@ class EnvServer:
 
         @app.post("/data/{game_id}")
         def protocol_data(game_id: str, body: dict[str, Any]) -> Any:
+            game_id = self._key(game_id)
             handler = self._data.get(game_id)
             if handler is None:
                 raise HTTPException(404, detail="no data API for this protocol")
@@ -165,6 +179,7 @@ class EnvServer:
 
         @app.post("/control/{game_id}/tool")
         async def control_tool(game_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
+            game_id = self._key(game_id)
             binding = self._control.get(game_id)
             if binding is None:
                 raise HTTPException(status_code=503, detail="control channel not bound")

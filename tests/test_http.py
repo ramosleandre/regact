@@ -147,3 +147,12 @@ def test_env_fault_returns_422_not_a_terminal_500() -> None:
     )
     r2 = TestClient(s2.app).post("/env/g/reset", json={})
     assert r2.status_code == 422 and "reset failed" in r2.json()["detail"]
+
+
+def test_the_agent_addresses_its_only_game_without_its_name() -> None:
+    """Workspace files use AGENT_GAME_ID, so they never name the task; the server resolves it."""
+    from regact.env.server import AGENT_GAME_ID
+
+    server = _server(SingleInstancePolicy())
+    obs = _client(server, AGENT_GAME_ID).reset()
+    assert obs == _client(server, "g").current()

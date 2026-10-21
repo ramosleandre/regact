@@ -34,7 +34,7 @@ from regact.config.schema import (
     redacted_config_dict,
 )
 from regact.env.lifecycle import EnvLifecyclePolicy, MultiInstancePolicy, SingleInstancePolicy
-from regact.env.server import EnvServer
+from regact.env.server import AGENT_GAME_ID, EnvServer
 from regact.env.session import EnvSession
 from regact.features.base import FeatureContext
 from regact.obs.errors import LogComponent
@@ -287,7 +287,7 @@ def _bootstrap_workdir(
         problem_name=problem.name,
         task_name=task_name,
         env_base_url=conn.base_url,
-        game_id=task_name,
+        game_id=AGENT_GAME_ID,
         lifecycle=config.problem.lifecycle,
         helper_templates=problem.helper_templates(
             task_name,

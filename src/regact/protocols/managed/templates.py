@@ -1,5 +1,6 @@
 """Data API and command transport shared by externally managed protocols."""
 
+from regact.env.server import AGENT_GAME_ID
 from regact.workspace.templates import TemplateFile
 
 HELPER = '''"""Controllers built from actions; simulation and reality each use a fresh instance."""
@@ -279,7 +280,7 @@ def templates(ctx, options, commands, *, vision):
         yield TemplateFile(
             filename,
             body.replace("__BASE_URL__", repr(ctx.env_base_url))
-            .replace("__GAME_ID__", repr(ctx.task_name))
+            .replace("__GAME_ID__", repr(AGENT_GAME_ID))
             .replace(
                 "__COMMAND_HELP__", "\n".join(f"{name}: {text}" for name, text in commands.items())
             )
