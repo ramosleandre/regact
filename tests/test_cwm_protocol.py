@@ -411,6 +411,15 @@ def test_worker_cannot_read_database_or_network(rig):
     assert result["accepted"], result
 
 
+def test_code_errors_name_workspace_files_not_host_paths(rig):
+    c, _ = rig
+    collect(c)
+    model(c.workdir)
+    (c.workdir / "world_model/model_render.py").write_text("from world_model.model_state import Nope\n")
+    error = json.dumps(c.tool("UpdateCodeWorldModel", {}))
+    assert "world_model/model_state.py" in error and str(c.root) not in error
+
+
 def test_partial_plan_and_utility_not_goal(rig):
     c, _ = rig
     accept(c)

@@ -155,7 +155,6 @@ class AlanSubprocessAgent(CodeAgent):
         self._send_command(
             {
                 "cmd": "start",
-                "cwd": cwd,
                 "model": model,
                 "base_url": base_url,
                 "api_key": api_key,  # over stdin, so it never lands in the host process list

@@ -210,7 +210,7 @@ class MiniGridProblem(BaseProblem):
         # obs_mode is accepted for interface parity; MiniGrid renders one obs mode (RAW).
         if info_mode is InfoMode.MINIMAL:
             return observation_prompt(
-                f"# Game: MiniGrid ({task_name})\n\n"
+                "# Game: MiniGrid\n\n"
                 "Discover the rules by interaction. Inspect `obs.frame` and "
                 "`obs.available_actions` "
                 + (
@@ -228,7 +228,6 @@ class MiniGridProblem(BaseProblem):
         )
         prompt = (
             _PROMPT.read_text(encoding="utf-8")
-            .replace("{task}", task_name)
             .replace("{obs_section}", obs_fragment.strip())
             .replace(
                 "{interaction_note}",

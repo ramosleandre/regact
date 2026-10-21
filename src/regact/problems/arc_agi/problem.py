@@ -615,7 +615,7 @@ class ArcAgiProblem(BaseProblem):
         task = self._task(task_name)
         if info_mode is InfoMode.MINIMAL:
             return observation_prompt(
-                f"# Game: ARC-AGI-3 ({task.title})\n\n"
+                "# Game: ARC-AGI-3\n\n"
                 "Discover the rules by interaction. Inspect `obs.frame` and "
                 "`obs.available_actions` "
                 + (
@@ -627,11 +627,10 @@ class ArcAgiProblem(BaseProblem):
                 direct_interaction=direct_interaction,
             )
         last_frame_only = obs_mode is ObsMode.RAW_LAST_FRAME_ONLY
-        # Show the level target when known; internal game IDs and efficiency baselines stay hidden.
+        # Show the level target when known; game names, IDs and efficiency baselines stay hidden.
         levels_to_win = f"Levels to win: {task.win_levels}" if task.win_levels is not None else ""
         body = (
             _PROMPT.read_text(encoding="utf-8")
-            .replace("{task}", task.title)
             .replace("{levels_to_win}", levels_to_win)
             .replace(
                 "{interaction_note}",

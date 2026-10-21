@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 Argv = list[str]
 Wrapper = Callable[[Argv], Argv]
+# Where bwrap shows the agent its workdir: the host path names the experiment, the model and the
+# task, which the agent must not see.
+AGENT_WORKDIR = "/workspace"
 
 
 class SandboxRuntime(StrEnum):
@@ -100,6 +103,7 @@ def make_wrapper(
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
     allow_rw: Sequence[str] = (),
+    workdir_alias: str | None = None,
 ) -> Wrapper:
     """Return a pure ``argv -> argv`` wrapper that runs argv inside the sandbox.
 
@@ -110,6 +114,7 @@ def make_wrapper(
     subtrees (the game engine/data packages) back out of the allowed interpreter prefix.
     ``allow_rw`` grants full access to extra paths — including connecting to unix sockets
     there, which is how bridged host services stay reachable when egress is denied.
+    ``workdir_alias`` is the path at which bwrap mounts the workdir (other backends cannot move it).
     """
     resolved = resolve(runtime)
     _log_resolved(runtime, resolved)
@@ -124,6 +129,7 @@ def make_wrapper(
             deny_read=deny_read,
             allow_write_prefixes=allow_write_prefixes,
             allow_rw=allow_rw,
+            workdir_alias=workdir_alias,
         )
 
     return wrap
@@ -139,6 +145,7 @@ def wrap_argv(
     deny_read: Sequence[str] = (),
     allow_write_prefixes: Sequence[str] = (),
     allow_rw: Sequence[str] = (),
+    workdir_alias: str | None = None,
 ) -> Argv:
     """Prepend the per-platform launcher so ``argv`` runs inside the sandbox (deny-by-default)."""
     resolved = resolve(runtime)
@@ -149,7 +156,7 @@ def wrap_argv(
             argv, workdir, allow_read, deny_egress, deny_read, allow_write_prefixes, allow_rw
         )
     if resolved is SandboxRuntime.BWRAP:
-        return _bwrap(argv, workdir, allow_read, deny_egress, deny_read, allow_rw)
+        return _bwrap(argv, workdir, allow_read, deny_egress, deny_read, allow_rw, workdir_alias)
     return list(argv)
 
 
@@ -324,6 +331,7 @@ def _bwrap(
     deny_egress: bool,
     deny_read: Sequence[str] = (),
     allow_rw: Sequence[str] = (),
+    workdir_alias: str | None = None,
 ) -> Argv:
     """Linux: a mount namespace that contains ONLY the allowlist (deny-default).
 
@@ -356,7 +364,8 @@ def _bwrap(
     # namespace.  Make relative inputs absolute without resolving symlinks instead.
     for path in (os.path.abspath(os.path.expanduser(p)) for p in allow_read):
         cmd += ["--ro-bind-try", path, path]
-    cmd += ["--bind", wd, wd, "--chdir", wd]
+    inside = workdir_alias or wd
+    cmd += ["--bind", wd, inside, "--chdir", inside]
     for path in (os.path.realpath(p) for p in allow_rw):
         cmd += ["--bind", path, path]
     for path in (os.path.realpath(p) for p in deny_read):

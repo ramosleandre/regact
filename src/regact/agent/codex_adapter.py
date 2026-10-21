@@ -215,7 +215,7 @@ class CodexAgent(_CliAgent):
         argv += [
             "exec",
             "--cd",
-            os.path.abspath(self._cwd) if self._cwd else ".",
+            ".",  # the process starts in the workdir; under bwrap its host path is not visible
             "--json",
         ]
         if self._session_id is not None:

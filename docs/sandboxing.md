@@ -66,6 +66,8 @@ allowed venv (`deny_read`). Each agent backend declares its own host paths
 so the allowlist only ever contains the *loaded* agent's paths — never another backend's
 ambient data.
 
+Under bwrap the agent sees its workdir at `/workspace` (`AGENT_WORKDIR`), not at its host path, which names the experiment, the model and the task. Its `/tmp` is a private tmpfs. Seatbelt cannot move a path, so on macOS (and without a sandbox) the agent sees the host path.
+
 ### HPC interpreter resolution
 
 A relocated Python (HPC module trees) is a chain of symlinks pointing at libraries

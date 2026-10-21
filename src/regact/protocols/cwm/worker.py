@@ -48,6 +48,7 @@ class Worker:
     ) -> None:
         # The subprocess changes cwd to private scratch; bundle paths must survive that.
         bundle = bundle.resolve()
+        self.bundle_prefix = f"{bundle}{os.sep}"
         self.config = config
         self.budget_key = budget_key
         self.budget_seconds = budget_seconds
@@ -119,11 +120,16 @@ class Worker:
             spawned = time.monotonic()
             reply = self._receive(self._next_limit())
             if not reply.get("ready"):
-                raise WorkerError(str(reply.get("error", "worker initialization failed")))
+                raise WorkerError(self._public(reply.get("error", "worker initialization failed")))
             self._charge(reply, spawned)
         except BaseException:
             self.close()
             raise
+
+    def _public(self, error: Any) -> str:
+        """The error as the agent sees it: paths relative to its workspace, not the host's
+        bundle directory (whose path names the run, the task and the model)."""
+        return str(error).replace(self.bundle_prefix, "")
 
     def _charge(self, reply: dict[str, Any] | None, started: float) -> None:
         """Charge the clock the submitted-code seconds the worker reports. Submitted code shares
@@ -234,7 +240,7 @@ class Worker:
             if reply.get("id") != self.seq:
                 raise WorkerError("worker response ID mismatch")
             if "error" in reply:
-                raise WorkerError(str(reply["error"]))
+                raise WorkerError(self._public(reply["error"]))
             return reply["result"]
         except (BrokenPipeError, OSError, ValueError, KeyError) as exc:
             raise WorkerError(f"worker transport error: {exc}") from exc

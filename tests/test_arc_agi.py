@@ -157,6 +157,7 @@ def test_build_prompt_informative_vs_minimal() -> None:
 
     minimal = problem.build_prompt("ls20", info_mode=InfoMode.MINIMAL)
     assert "Discover the rules" in minimal
+    assert "ls20" not in info.lower() and "ls20" not in minimal.lower()  # names stay hidden
 
 
 def test_actions_for_ids_includes_only_available_actions() -> None:

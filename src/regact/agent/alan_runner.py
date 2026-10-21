@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import sys
 from typing import Any
 
@@ -60,7 +61,7 @@ def _build(frame: dict[str, Any]) -> Any:
     from regact.agent.alan_adapter import build_alan_agent
 
     return build_alan_agent(
-        cwd=str(frame.get("cwd") or "."),
+        cwd=os.getcwd(),  # the workdir as the sandbox shows it, never the host path
         model=frame.get("model"),
         base_url=frame.get("base_url"),
         api_key=frame.get("api_key"),

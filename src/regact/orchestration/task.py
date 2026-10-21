@@ -49,7 +49,13 @@ from regact.protocols.base import ExperimentProtocol, ProtocolContext
 from regact.protocols.registry import build_protocol
 from regact.security.egress_proxy import EgressProxy
 from regact.security.netbridge import LoopbackMirror
-from regact.security.runtime import SandboxRuntime, Wrapper, make_wrapper, resolve
+from regact.security.runtime import (
+    AGENT_WORKDIR,
+    SandboxRuntime,
+    Wrapper,
+    make_wrapper,
+    resolve,
+)
 from regact.session.state import ExperimentState
 from regact.tools.base import LoggingTool, Tool
 from regact.workspace.bootstrap import Workspace
@@ -505,12 +511,12 @@ async def run_task(
                 loop_tools = tools
 
             # Under bwrap, keep the agent's scratch in the private /tmp tmpfs (out of the workdir,
-            # so ``find .`` stays clean and the scratch dir name can't leak the host path); on other
-            # backends it stays in workdir/tmp.
+            # so ``find .`` stays clean and the scratch dir name can't leak the host path), and
+            # mount the workdir at a neutral path; on other backends both stay where they are.
             if resolve(requested_runtime) is SandboxRuntime.BWRAP:
-                agent_tmp = "/tmp"
+                agent_tmp, agent_workdir = "/tmp", AGENT_WORKDIR
             else:
-                agent_tmp = os.path.join(workdir, "tmp")
+                agent_tmp, agent_workdir = os.path.join(workdir, "tmp"), workdir
                 os.makedirs(agent_tmp, exist_ok=True)
             # 'python' on the agent's PATH is the interpreter that runs regact (has httpx +
             # regact); system python3 has neither, so the agent's 'python foo.py' used to die on
@@ -523,7 +529,7 @@ async def run_task(
             # the root-level framework/ package.
             agent_env = {
                 "PATH": os.pathsep.join([agent_bin, os.environ.get("PATH", "")]),
-                "PYTHONPATH": os.pathsep.join([workdir, src_dir]),
+                "PYTHONPATH": os.pathsep.join([agent_workdir, src_dir]),
                 "TMPDIR": agent_tmp,
             }
             egress: EgressProxy | None = None
@@ -558,6 +564,7 @@ async def run_task(
                     deny_read=deny_read,
                     allow_write_prefixes=agent.host_write_prefixes(),
                     allow_rw=[*_mirror_sockets(mirror, agent_ports), *agent.host_rw_paths()],
+                    workdir_alias=agent_workdir,
                 ),
                 mirror,
                 agent_ports,

@@ -1,10 +1,10 @@
-# Game: MiniGrid ({task})
+# Game: MiniGrid
 
 MiniGrid is a symbolic 2D grid world. Read the current objective from `obs.frame["mission"]`.
 
 {interaction_note}
 
-`obs.frame` is a dict with keys `image`, `direction`, and `mission`.
+`obs.frame` is a dict with keys `image`, `direction` and `mission`, plus `carrying` in the fully observable mode (see below).
 
 {obs_section}
 

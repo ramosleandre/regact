@@ -244,7 +244,8 @@ def test_codex_command_pipes_prompt_on_stdin() -> None:
     argv, stdin = agent._command("solve it")
     assert stdin == "solve it"  # codex reads the prompt from stdin
     assert "exec" in argv and "--json" in argv and "--cd" in argv
-    assert os.path.isabs(argv[argv.index("--cd") + 1])  # absolute, else codex re-nests it
+    # the process already starts in the workdir: "." neither re-nests nor names the host path
+    assert argv[argv.index("--cd") + 1] == "."
 
 
 def test_codex_resume_puts_exec_flags_before_the_subcommand() -> None:

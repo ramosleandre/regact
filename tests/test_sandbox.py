@@ -17,6 +17,7 @@ import pytest
 from regact.security.contract import CONTRACT, Invariant
 from regact.security.probe import run_probe
 from regact.security.runtime import (
+    AGENT_WORKDIR,
     SandboxRuntime,
     _parse_ldd_lib_paths,
     detect,
@@ -169,6 +170,22 @@ def test_deny_read_carves_game_packages_out_of_the_allowed_venv() -> None:
     # bwrap mounts an empty tmpfs over each existing deny path (/usr exists here).
     bw = wrap_argv(SandboxRuntime.BWRAP, ["x"], workdir="/tmp/wd", deny_read=["/usr"])
     assert "--tmpfs /usr" in " ".join(bw)
+
+
+@pytest.mark.skipif(detect() is not SandboxRuntime.BWRAP, reason="needs a real bwrap host")
+def test_the_agent_sees_its_workdir_under_a_neutral_path(tmp_path: Path) -> None:
+    """The host path names the experiment, the model and the task; the agent sees AGENT_WORKDIR."""
+    workdir = tmp_path / "exp-claude-cwm" / "ls20" / "workdir"
+    workdir.mkdir(parents=True)
+    (workdir / "notes.txt").write_text("hello")
+    argv = wrap_argv(
+        SandboxRuntime.BWRAP,
+        [sys.executable, "-c", "import os; print(os.getcwd(), open('notes.txt').read())"],
+        workdir=str(workdir),
+        workdir_alias=AGENT_WORKDIR,
+    )
+    out = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=True).stdout
+    assert out.split() == [AGENT_WORKDIR, "hello"]
 
 
 @pytest.mark.skipif(

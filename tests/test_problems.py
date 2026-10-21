@@ -79,14 +79,14 @@ def test_minigrid_catalogue_matches_gameagents_sizes() -> None:
 
 def test_minigrid_build_prompt_informative_describes_actions() -> None:
     prompt = MiniGridProblem().build_prompt("MiniGrid-Empty-5x5-v0", info_mode=InfoMode.INFORMATIVE)
-    assert "MiniGrid-Empty-5x5-v0" in prompt
+    assert "Empty-5x5" not in prompt  # task names stay hidden from the agent
     assert "available_actions" in prompt
     assert "turn left" in prompt  # informative describes what actions do
 
 
 def test_minigrid_build_prompt_minimal_hides_action_meaning() -> None:
     prompt = MiniGridProblem().build_prompt("MiniGrid-Empty-5x5-v0", info_mode=InfoMode.MINIMAL)
-    assert "MiniGrid-Empty-5x5-v0" in prompt
+    assert "Empty-5x5" not in prompt
     assert "Discover the rules" in prompt
     assert "turn left" not in prompt  # minimal does not spell out the actions
 
