@@ -1,8 +1,8 @@
 """Render a small PNG preview of a task's environment.
 
 Rendered from the env (not pulled from a run's artifacts): a MiniGrid task via its gym
-``rgb_array`` render, an ARC task via its first frame painted with the ARC-AGI-3 palette,
-downscaled to a thumbnail. Run OFFLINE by scripts/gen_task_previews.py to pre-populate
+``rgb_array`` render, an ARC task or a grid game via its first frame painted with the ARC-AGI-3
+palette, downscaled to a thumbnail. Run OFFLINE by scripts/gen_task_previews.py to pre-populate
 static/icons_tasks/; the viz loads those PNGs as static files and never builds an env at serve time.
 """
 
@@ -12,35 +12,41 @@ import io
 
 import numpy as np
 
-# The official ARC-AGI-3 16-colour palette (mirrors problems/arc_agi/problem.py _PALETTE).
-_ARC_PALETTE = np.array(
-    [
-        (255, 255, 255),
-        (204, 204, 204),
-        (153, 153, 153),
-        (102, 102, 102),
-        (51, 51, 51),
-        (0, 0, 0),
-        (229, 58, 163),
-        (255, 123, 204),
-        (249, 60, 49),
-        (30, 147, 255),
-        (136, 216, 241),
-        (255, 220, 0),
-        (255, 133, 27),
-        (146, 18, 49),
-        (79, 204, 48),
-        (163, 86, 214),
-    ],
-    dtype=np.uint8,
-)
+from regact.problems.palette import ARC_PALETTE
+
+_ARC_PALETTE = np.array(ARC_PALETTE, dtype=np.uint8)
 _THUMB_MAX = 96  # max side of the rendered thumbnail (px)
 
 
 def render_task_png(task_name: str) -> bytes:
     """A small PNG preview of ``task_name``'s starting state. Raises if the task can't render."""
-    rgb = _minigrid_rgb(task_name) if task_name.startswith("MiniGrid") else _arc_rgb(task_name)
+    if task_name.startswith("MiniGrid"):
+        rgb = _minigrid_rgb(task_name)
+    elif (game := _grid_game_of(task_name)) is not None:
+        rgb = _grid_game_rgb(game, task_name)
+    else:
+        rgb = _arc_rgb(task_name)
     return _encode(rgb)
+
+
+def _grid_game_of(task_name: str):
+    from regact.problems.base import build_problem
+    from regact.problems.grid_games import GRID_GAMES
+
+    for name in GRID_GAMES:
+        problem = build_problem(name, {})
+        if task_name in problem.get_task_names():
+            return problem
+    return None
+
+
+def _grid_game_rgb(problem, task_name: str) -> np.ndarray:
+    from regact.config.schema import ObsMode
+
+    native, info = problem.make_env(task_name).reset()
+    return problem.render_frame(
+        problem.obs_renderer(task_name, mode=ObsMode.RAW).render(native, info)
+    )
 
 
 def _minigrid_rgb(task_name: str) -> np.ndarray:

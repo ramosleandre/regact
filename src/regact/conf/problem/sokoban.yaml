@@ -1,0 +1,8 @@
+name: sokoban
+tasks: []               # empty = every pack (sokoban_p01..sokoban_p08)
+lifecycle: single_instance  # vanilla and CWM; policy_search needs multi_instance
+obs_mode: raw
+info_mode: informative
+seed: null              # ignored: the game is deterministic
+kwargs:
+  max_levels: null      # N = only the first N levels of each pack (the easiest)

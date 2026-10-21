@@ -30,6 +30,8 @@ dependencies = [
 # WFC procedural envs; the pattern PNGs they read are vendored under problems/minigrid/.
 minigrid = ["gymnasium>=0.29", "minigrid>=2.3", "networkx>=3.0"]
 arc = ["arc-agi>=0.9.9"]  # <0.9 (e.g. Adastra's 0.0.7) lacks arc_agi.OperationMode
+# BabaIsAI is not on PyPI: pinned to the commit the v8-envs integration was checked against.
+babaisai = ["baba @ git+https://github.com/nacloos/baba-is-ai@40ae1b2"]
 # alancode is installed editable from the sibling repo, e.g.
 #   pip install alancode (wait for it to be published on PyPI) or
 #   pip install -e ../alancode (for local development)
@@ -44,10 +46,13 @@ dev = [
     "pre-commit>=3.5",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true  # the babaisai extra is a pinned git commit
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/regact"]
 # Ship prompt/template markdown alongside the package (read at runtime).
-artifacts = ["**/*.md", "**/*.yaml", "**/*.png"]  # *.png = vendored WFC pattern images
+artifacts = ["**/*.md", "**/*.yaml", "**/*.png", "**/data/*"]  # *.png = vendored WFC pattern images; data/ = vendored game levels
 
 # Editable installs add src/ to sys.path (simple .pth), so adding/moving modules
 # never requires a reinstall.
@@ -89,6 +94,8 @@ module = [
     "arc_agi.*",
     "arcengine",
     "arcengine.*",
+    "baba",
+    "baba.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

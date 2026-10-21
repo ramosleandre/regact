@@ -992,7 +992,7 @@ async function graphsView(games, onlyExp, scope) {
           scroll.append(drawn.chart);
         }
         card.append(body);
-        if (hasRef) card.append(h("div", "muted curve-note", "dashed: reference player (ARC: the human baseline)"));
+        if (hasRef) card.append(h("div", "muted curve-note", "dashed: reference player (ARC: the human baseline; grid games: optimal solutions)"));
       } else if (spec.auc) {
         const area = areaSpec(spec, g2, _graph.mask, _graph.curveX, _graph.gamma);
         card.append(h("div", "zoomrow",

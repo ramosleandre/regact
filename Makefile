@@ -30,6 +30,10 @@ install-arc:  ## setup ── Add the ARC-AGI-3 game engine (the arc_agi problem
 install-minigrid:  ## setup ── Add the MiniGrid environments (the minigrid problem)
 	$(PYTHON) -m pip install -e ".[minigrid]" -c constraints.txt
 
+.PHONY: install-babaisai
+install-babaisai:  ## setup ── Add the BabaIsAI engine (the babaisai grid game)
+	$(PYTHON) -m pip install -e ".[babaisai]" -c constraints.txt
+
 .PHONY: install-agents
 install-agents:  ## setup ── Add the Alan code agent (agent=alan; claude/codex are separate CLIs)
 	$(PYTHON) -m pip install -e ".[agents]" -c constraints.txt

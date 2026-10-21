@@ -33,6 +33,7 @@ from regact.problems.arc_agi.tasks import (
     discover_tasks_from_arcade,
 )
 from regact.problems.base import BaseProblem, observation_prompt, register_problem
+from regact.problems.palette import ARC_PALETTE
 from regact.workspace.templates import TemplateFile
 
 logger = logging.getLogger(__name__)
@@ -40,26 +41,7 @@ logger = logging.getLogger(__name__)
 _PROMPT = Path(__file__).parents[1] / "prompts" / "arc_agi.md"
 _DEFAULT_DIR = os.environ.get("ARC_ENVIRONMENTS_DIR", "environnement")
 
-# Cell value (0-15) -> RGB for the video render — the official ARC-AGI-3 palette
-# (mirrors ``arc_agi.rendering.COLOR_MAP``).
-_PALETTE: tuple[tuple[int, int, int], ...] = (
-    (255, 255, 255),  # 0  white
-    (204, 204, 204),  # 1  off-white
-    (153, 153, 153),  # 2  neutral light
-    (102, 102, 102),  # 3  neutral
-    (51, 51, 51),  # 4  off black
-    (0, 0, 0),  # 5  black
-    (229, 58, 163),  # 6  magenta
-    (255, 123, 204),  # 7  magenta light
-    (249, 60, 49),  # 8  red
-    (30, 147, 255),  # 9  blue
-    (136, 216, 241),  # 10 blue light
-    (255, 220, 0),  # 11 yellow
-    (255, 133, 27),  # 12 orange
-    (146, 18, 49),  # 13 maroon
-    (79, 204, 48),  # 14 green
-    (163, 86, 214),  # 15 purple
-)
+_PALETTE = ARC_PALETTE
 _RENDER_SCALE = 8
 
 

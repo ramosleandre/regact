@@ -38,6 +38,15 @@ def _collect_tasks() -> list[str]:
         tasks.update(ALL_MINIGRID_TASKS)
     except Exception as exc:
         print(f"warn: minigrid catalogue unavailable: {exc}")
+    # every grid game's tasks
+    try:
+        from regact.problems.base import build_problem
+        from regact.problems.grid_games import GRID_GAMES
+
+        for name in GRID_GAMES:
+            tasks.update(build_problem(name, {}).get_task_names())
+    except Exception as exc:
+        print(f"warn: grid games unavailable: {exc}")
     # ARC games present locally (one dir per game id)
     envdir = _ROOT / "environnement"
     if envdir.is_dir():

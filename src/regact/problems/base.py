@@ -240,7 +240,7 @@ def build_problem(name: str, kwargs: dict[str, Any]) -> BaseProblem:
 
 def _load_builtins() -> None:
     """Import built-in problem modules so they self-register (no game lib needed to import)."""
-    from regact.problems import arc_agi, minigrid  # noqa: F401
+    from regact.problems import arc_agi, grid_games, minigrid  # noqa: F401
 
 
 def observation_prompt(text: str, *, direct_interaction: bool) -> str:

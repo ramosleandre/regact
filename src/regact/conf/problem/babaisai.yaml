@@ -1,0 +1,8 @@
+name: babaisai
+tasks: []               # empty = every pack (babaisai_p01..babaisai_p08)
+lifecycle: single_instance  # vanilla and CWM; policy_search needs multi_instance
+obs_mode: raw
+info_mode: informative
+seed: null              # ignored: each level pins its own engine seed
+kwargs:
+  max_levels: null      # N = only the first N levels of each pack (the easiest)
