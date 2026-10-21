@@ -19,7 +19,7 @@ from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import BaseProblem, observation_prompt, register_problem
-from regact.problems.minigrid.tasks import ALL_MINIGRID_TASKS
+from regact.problems.minigrid.tasks import ALL_MINIGRID_TASKS, BABYAI_TASKS
 from regact.workspace.templates import TemplateFile
 
 # MiniGrid's tile renderer draws on a pygame Surface, and ``import minigrid`` pulls pygame in.
@@ -86,14 +86,18 @@ class _ActionInfoShim:
 
     A plain delegating shim (not a ``gymnasium.Wrapper``) so gymnasium stays a
     lazy import: the server's ``WrappedEnv`` only needs reset/step/render/close.
+    With ``fully_obs`` the frame also holds the carried object, which the full grid
+    does not draw, so one observation shows the whole state. The reward is rounded to
+    6 decimals, so a world model's ``1 - 0.9 * k / M`` equals it exactly.
     """
 
-    def __init__(self, env: Any) -> None:
+    def __init__(self, env: Any, *, fully_obs: bool = False) -> None:
         self._env = env
+        self._fully_obs = fully_obs
 
     def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
         obs, info = self._env.reset(seed=seed)
-        return obs, self._augment(info)
+        return self._frame(obs), self._augment(info)
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
         if isinstance(action, bool) or not self._env.action_space.contains(action):
@@ -101,13 +105,19 @@ class _ActionInfoShim:
                 f"expected a MiniGrid action in 0..{self._env.action_space.n - 1}; got {action!r}"
             )
         obs, reward, terminated, truncated, info = self._env.step(action)
-        return obs, reward, terminated, truncated, self._augment(info)
+        return self._frame(obs), round(float(reward), 6), terminated, truncated, self._augment(info)
 
     def render(self) -> Any:
         return self._env.render()
 
     def close(self) -> None:
         self._env.close()
+
+    def _frame(self, obs: Any) -> Any:
+        if not self._fully_obs:
+            return obs
+        carrying = self._env.unwrapped.carrying
+        return {**obs, "carrying": None if carrying is None else list(carrying.encode())}
 
     def _augment(self, info: dict[str, Any] | None) -> dict[str, Any]:
         info = dict(info or {})
@@ -128,7 +138,7 @@ class MiniGridProblem(BaseProblem):
         import gymnasium
         import minigrid  # noqa: F401  (importing registers the MiniGrid env ids)
 
-        if task_name not in ALL_MINIGRID_TASKS:
+        if task_name not in ALL_MINIGRID_TASKS and task_name not in BABYAI_TASKS:
             raise ValueError(f"unknown MiniGrid task {task_name!r}")
         if "WFC" in task_name:
             _ensure_wfc_patterns()  # repoint the preset at our vendored pattern before make()
@@ -137,10 +147,10 @@ class MiniGridProblem(BaseProblem):
             from minigrid.wrappers import FullyObsWrapper
 
             env = FullyObsWrapper(env)
-        return _ActionInfoShim(env)
+        return _ActionInfoShim(env, fully_obs=self._fully_obs)
 
     def get_task_names(self) -> list[str]:
-        return list(ALL_MINIGRID_TASKS)
+        return [*ALL_MINIGRID_TASKS, *BABYAI_TASKS]
 
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
         if mode is not ObsMode.RAW:

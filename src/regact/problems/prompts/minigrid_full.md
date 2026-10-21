@@ -7,4 +7,4 @@ Each cell is `[object, color, state]`:
 - color:  `0 red, 1 green, 2 blue, 3 purple, 4 yellow, 5 grey`
 - state (doors only): `0 open, 1 closed, 2 locked`
 
-The agent's own cell has object id `10`; the STATE channel of that cell holds its facing direction, which is also `obs.frame["direction"]`: `0 right (+x), 1 down (+y), 2 left (-x), 3 up (-y)`. In this fully observable mode the whole map is visible and the carried object is not shown in the grid (track it yourself).
+The agent's own cell has object id `10`; the STATE channel of that cell holds its facing direction, which is also `obs.frame["direction"]`: `0 right (+x), 1 down (+y), 2 left (-x), 3 up (-y)`. In this fully observable mode the whole map is visible. The grid does not draw the carried object; `obs.frame["carrying"]` gives it as `[object, color, state]`, or `None` when the agent carries nothing.

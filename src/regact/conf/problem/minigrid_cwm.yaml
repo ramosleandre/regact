@@ -1,0 +1,21 @@
+# A MiniGrid + BabyAI task set for CWM experiments (v8-envs). Every task is deterministic within
+# an episode and fully visible in this mode (the carried object is in the frame); see
+# docs/envs/minigrid.md for how this was checked and why each task is in the set.
+name: minigrid
+tasks:
+  - MiniGrid-LavaCrossingS9N2-v0      # hazards: lava ends the episode
+  - MiniGrid-DoorKey-8x8-v0           # key, locked door, goal
+  - MiniGrid-RedBlueDoors-8x8-v0      # order rule: the wrong door first fails
+  - MiniGrid-UnlockPickup-v0          # unlock, drop the key, pick up the box
+  - MiniGrid-BlockedUnlockPickup-v0   # move a blocking ball first
+  - MiniGrid-KeyCorridorS4R3-v0       # search rooms for the key
+  - MiniGrid-MultiRoom-N6-v0          # long navigation through doors
+  - MiniGrid-LockedRoom-v0            # long language mission over six rooms
+  - BabyAI-PutNextLocal-v0            # language: put an object next to another
+  - BabyAI-OpenDoorsOrderN4-v0        # language: open doors in the stated order
+lifecycle: single_instance
+obs_mode: raw
+info_mode: informative
+seed: 0                 # every reset rebuilds the same layout, as an ARC level does
+kwargs:
+  fully_obs: true       # the full grid; the egocentric view hides cells a model cannot infer

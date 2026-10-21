@@ -2,12 +2,14 @@
 
 An **environment** (a "problem") is the game the agent plays. A problem exposes one or
 more **tasks** (games/levels) and knows how to build the env, render it, prompt about it,
-and score an episode. regact ships two:
+and score an episode. regact ships these (each new one has its own page under [`envs/`](envs/)):
 
 | `problem=` | Tasks | Default lifecycle | Needs |
 |---|---|---|---|
 | `arc_agi` | the discovered ARC-AGI-3 games | `multi_instance` | `make install-arc` |
 | `minigrid` | MiniGrid gym environments | `multi_instance` | `make install-minigrid` |
+| `sokoban` | 8 packs of 7 Boxoban levels (grid game, [page](envs/sokoban.md)) | `single_instance` | nothing |
+| `babaisai` | 8 packs of 7 BabaIsAI levels (grid game, [page](envs/babaisai.md)) | `single_instance` | `make install-babaisai` |
 
 ## Use an environment
 
@@ -31,10 +33,12 @@ The `ProblemConfig` fields are `name`, `tasks`, `lifecycle`, `obs_mode`, `info_m
 | `minigrid.yaml` | `[MiniGrid-Empty-5x5-v0]` | `fully_obs: true` |
 | `minigrid_lite.yaml` | the curated 20 | `fully_obs: true` |
 | `minigrid_full.yaml` | the full configured task list | `fully_obs: true` |
+| `minigrid_cwm.yaml` | 10 deterministic MiniGrid/BabyAI tasks for CWM ([page](envs/minigrid.md)) | `fully_obs: true` |
+| `sokoban.yaml`, `babaisai.yaml` | `[]` (every pack) | `max_levels` |
 
 ## Lifecycle and protocol
 
-Both problem groups default to `multi_instance`. Support depends on the selected [protocol](protocols.md):
+ARC and MiniGrid default to `multi_instance`; the grid games and `minigrid_cwm` to `single_instance`. Support depends on the selected [protocol](protocols.md):
 
 | Lifecycle | Vanilla / CWM | Policy search |
 |---|---|---|
@@ -54,7 +58,24 @@ held-out tests. Managed protocols have no independent final evaluation. A fixed 
 
 The normalized observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. `frame` contains the last frame rather than an animation history. In managed code these are dictionary fields. Milestones describe events from the preceding action, not cumulative progress.
 
-CWM validates the complete observation, not just its image. Its current assumption is that observation plus action determines the next observation. A fully visible grid does not necessarily satisfy that assumption: MiniGrid's hidden step counter affects terminal reward and truncation, even with `fully_obs=true`. CWM stops if identical complete observation/action inputs have conflicting recorded successors. Vanilla makes no such prediction requirement. See [CWM limitations](cwm.md#scientific-and-operational-limitations) before interpreting failures as modeling mistakes.
+CWM validates the complete observation, not just its image. Its current assumption is that observation plus action determines the next observation. A fully visible grid does not necessarily satisfy that assumption: MiniGrid's hidden step counter affects terminal reward and truncation, even with `fully_obs=true`. That counter is hidden state a world model can track; CWM stops only if the same episode history and action once led to a different observation (randomness, or state a reset does not restore). Vanilla makes no such prediction requirement. See [CWM limitations](cwm.md#scientific-and-operational-limitations) before interpreting failures as modeling mistakes.
+
+## Grid games
+
+`problems/grid_games/` holds level-based games played on a small grid. A game supplies only its engine (`GridGame`: load a level, apply an action, tell whether the level is solved, draw the grid) and its tasks (`GridTask`: an ordered pack of levels plus a reference action count per level). The shared `GridGameProblem` gives every grid game ARC's conventions:
+
+- `obs.frame` is a one-element list holding the current grid of integer cells;
+- action 0 (RESET) restarts the current level and is an ordinary game action;
+- completing the last level wins;
+- RHAE, LRHAE-Uncapped and the levels-over-actions curve compare actions per level with the reference (for Sokoban, the move-optimal solutions).
+
+The prompt (`problems/prompts/grid_game.md`) never names the game.
+
+**Sokoban** (`problem=sokoban`, [page](envs/sokoban.md)) plays packs of Boxoban levels with an in-house engine; the reference is each level's move-optimal solution.
+
+**BabaIsAI** (`problem=babaisai`, [page](envs/babaisai.md)) plays packs of BabaIsAI levels, where the rules are word blocks the player pushes; the reference is each level's shortest solution.
+
+`problem.kwargs.max_levels=N` keeps the first N levels of each pack.
 
 ## Add an environment
 
