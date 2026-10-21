@@ -34,6 +34,10 @@ install-minigrid:  ## setup ── Add the MiniGrid environments (the minigrid p
 install-babaisai:  ## setup ── Add the BabaIsAI engine (the babaisai grid game)
 	$(PYTHON) -m pip install -e ".[babaisai]" -c constraints.txt
 
+.PHONY: install-puzzlescript
+install-puzzlescript:  ## setup ── Fetch the PuzzleScript engine and games (needs Node; the puzzlescript grid game)
+	$(RUN) scripts/grid_games/install_puzzlescript.py
+
 .PHONY: install-agents
 install-agents:  ## setup ── Add the Alan code agent (agent=alan; claude/codex are separate CLIs)
 	$(PYTHON) -m pip install -e ".[agents]" -c constraints.txt

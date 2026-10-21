@@ -1,0 +1,8 @@
+name: puzzlescript
+tasks: []               # empty = every game (puzzlescript_01, ...); needs make install-puzzlescript
+lifecycle: single_instance  # vanilla and CWM; policy_search needs multi_instance
+obs_mode: raw
+info_mode: informative
+seed: null              # ignored: the games are deterministic
+kwargs:
+  max_levels: null      # N = only the first N levels of each game (in the designer's order)

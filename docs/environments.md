@@ -8,8 +8,9 @@ and score an episode. regact ships these (each new one has its own page under [`
 |---|---|---|---|
 | `arc_agi` | the discovered ARC-AGI-3 games | `multi_instance` | `make install-arc` |
 | `minigrid` | MiniGrid gym environments | `multi_instance` | `make install-minigrid` |
-| `sokoban` | 8 packs of 7 Boxoban levels (grid game, [page](envs/sokoban.md)) | `single_instance` | nothing |
+| `sokoban` | sokoban-bench-v1: 8 packs of 8 Boxoban levels (grid game, [page](envs/sokoban.md)) | `single_instance` | nothing |
 | `babaisai` | 8 packs of 7 BabaIsAI levels (grid game, [page](envs/babaisai.md)) | `single_instance` | `make install-babaisai` |
+| `puzzlescript` | PuzzleScript gallery games (grid game, [page](envs/puzzlescript.md)) | `single_instance` | Node, `make install-puzzlescript` |
 
 ## Use an environment
 
@@ -34,7 +35,7 @@ The `ProblemConfig` fields are `name`, `tasks`, `lifecycle`, `obs_mode`, `info_m
 | `minigrid_lite.yaml` | the curated 20 | `fully_obs: true` |
 | `minigrid_full.yaml` | the full configured task list | `fully_obs: true` |
 | `minigrid_cwm.yaml` | 10 deterministic MiniGrid/BabyAI tasks for CWM ([page](envs/minigrid.md)) | `fully_obs: true` |
-| `sokoban.yaml`, `babaisai.yaml` | `[]` (every pack) | `max_levels` |
+| `sokoban.yaml`, `babaisai.yaml`, `puzzlescript.yaml` | `[]` (every pack or game) | `max_levels` |
 
 ## Lifecycle and protocol
 
@@ -74,6 +75,8 @@ The prompt (`problems/prompts/grid_game.md`) never names the game.
 **Sokoban** (`problem=sokoban`, [page](envs/sokoban.md)) plays packs of Boxoban levels with an in-house engine; the reference is each level's move-optimal solution.
 
 **BabaIsAI** (`problem=babaisai`, [page](envs/babaisai.md)) plays packs of BabaIsAI levels, where the rules are word blocks the player pushes; the reference is each level's shortest solution.
+
+**PuzzleScript** (`problem=puzzlescript`, [page](envs/puzzlescript.md)) plays puzzlescript.net gallery games with the original engine under Node; every game has rules of its own, and the reference is each level's shortest solution. The games are fetched at install time, not redistributed.
 
 `problem.kwargs.max_levels=N` keeps the first N levels of each pack.
 

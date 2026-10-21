@@ -6,7 +6,7 @@ This is an interactive puzzle game played on a small grid. It has several levels
 
 {interaction_note}
 
-- `obs.frame`: a one-element list holding the current grid of integer cells, {frame_note}. Read it as `obs.frame[-1]`. The grid size can change between levels.
+- `obs.frame`: a one-element list holding the current grid (a list of rows); {frame_note}. Read it as `obs.frame[-1]`. The grid size can change between levels.
 - `obs.available_actions`: the integer action ids currently valid.
 - `obs.is_done` / `obs.reward`: True / 1.0 once the game is won.
 - `obs.info`: readable metadata: `obs.info["state"]` (`NOT_FINISHED`/`WIN`), `obs.info["levels_completed"]`, `obs.info["win_levels"]`.

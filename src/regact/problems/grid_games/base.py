@@ -5,7 +5,7 @@ ordered pack of levels plus a reference action count per level). This layer turn
 regact problem with the conventions of ARC-AGI-3, so prompts, metrics, the viewer and the
 protocols treat every grid game alike:
 
-- ``obs.frame`` is a one-element list holding the current grid of colour ids (0-15);
+- ``obs.frame`` is a one-element list holding the current grid (each game says what a cell is);
 - ``obs.info`` has ``state`` (``NOT_FINISHED`` / ``WIN``), ``levels_completed`` and
   ``win_levels``;
 - action 0 is RESET, an ordinary game action that restarts the current level (no framework
@@ -56,8 +56,11 @@ class GridGame(ABC):
         """Whether the current level is complete."""
 
     @abstractmethod
-    def grid(self) -> list[list[int]]:
-        """The current level as rows of colour ids (0-15)."""
+    def grid(self) -> list[list[Any]]:
+        """The current level as rows of cells."""
+
+    def close(self) -> None:  # noqa: B027 - most engines hold nothing to release
+        """Release the engine's resources, if it holds any."""
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,7 @@ class GridGameEnv:
         return self._game.grid()
 
     def close(self) -> None:
-        pass
+        self._game.close()
 
     def _info(self) -> dict[str, Any]:
         won = self._level >= self._n_levels
@@ -164,7 +167,7 @@ class GridGameProblem(BaseProblem):
     main_metrics = ("roae", "lroae", "relative_env_actions")
     progress_label = "Levels completed"
     actions: tuple[int, ...] = (1, 2, 3, 4)
-    frame_note = "one integer per colour (0-15)"  # what a cell's integer stands for, in the prompt
+    frame_note = "each cell is an integer, one per colour (0-15)"  # what a cell is, in the prompt
     # Describes the game's own actions in the prompt, without naming their effects.
     action_note = (
         "Actions 1-4 are directional (typically up, down, left, right); discover their "
@@ -201,10 +204,16 @@ class GridGameProblem(BaseProblem):
         task = self._task(task_name)
         return task.reference_actions[: self._n_levels(task)]
 
+    def task_actions(self, task_name: str) -> tuple[int, ...]:
+        """The game's own action ids for ``task_name`` (RESET excluded)."""
+        return self.actions
+
     def make_env(self, task_name: str) -> Any:
         task = self._task(task_name)
         return GridGameEnv(
-            self.make_game(task), n_levels=self._n_levels(task), actions=self.actions
+            self.make_game(task),
+            n_levels=self._n_levels(task),
+            actions=self.task_actions(task_name),
         )
 
     def get_task_names(self) -> list[str]:
@@ -248,7 +257,7 @@ class GridGameProblem(BaseProblem):
         info_mode: InfoMode = InfoMode.INFORMATIVE,
         direct_interaction: bool = True,
     ) -> list[TemplateFile]:
-        names = "\n".join(f"ACTION{a} = {a}" for a in self.actions)
+        names = "\n".join(f"ACTION{a} = {a}" for a in self.task_actions(task_name))
         content = (
             '"""Action ids of this game; valid ids are also in `obs.available_actions`."""\n\n'
             f"RESET = {RESET}  # restarts the current level\n{names}\n"

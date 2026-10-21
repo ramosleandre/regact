@@ -1,4 +1,4 @@
-"""Grid games (v8-envs): the shared level/RESET layer and Sokoban's packs."""
+"""Grid games: the shared level/RESET layer, Sokoban, BabaIsAI and PuzzleScript."""
 
 import json
 import random
@@ -113,7 +113,7 @@ def test_babaisai_hides_the_game_and_lifts_the_step_limit():
     problem = _babaisai()
     task = problem.get_task_names()[0]
     prompt = problem.build_prompt(task, info_mode=InfoMode.INFORMATIVE, direct_interaction=False)
-    assert "baba" not in prompt.lower() and "one integer per kind of object" in prompt
+    assert "baba" not in prompt.lower() and "one per kind of object" in prompt
     env = problem.make_env(task)
     env.reset()
     for i in range(150):  # past the engine's own 100-step limit: the level is still running
@@ -149,6 +149,60 @@ def test_babaisai_levels_are_fixed_by_their_seed_and_steps_draw_no_randomness():
             engine.step(babaisai.ENGINE_ACTION[rng.randrange(1, 5)])
 
 
+def _puzzlescript():
+    import shutil
+
+    from regact.problems.grid_games import puzzlescript
+
+    games = json.loads((_DATA / "puzzlescript_games.json").read_text())["games"]
+    if shutil.which("node") is None or not all(
+        puzzlescript.game_source(g["sha256"]).is_file() for g in games
+    ):
+        pytest.skip("needs Node and make install-puzzlescript")
+    return build_problem("puzzlescript", {}), games
+
+
+def test_puzzlescript_plans_solve_their_levels_in_the_optimal_moves():
+    problem, games = _puzzlescript()
+    for game in games[:3]:
+        plans = [level["plan"] for level in game["levels"]]
+        assert [len(p) for p in plans] == [level["optimal"] for level in game["levels"]]
+        _, steps = _play(problem, game["key"], [a for plan in plans for a in plan])
+        assert steps[-1][2] and steps[-1][4]["state"] == "WIN"
+        assert sum(done for _, _, done, *_ in steps) == 1
+
+
+def test_puzzlescript_sources_match_and_cells_list_object_ids():
+    import hashlib
+
+    from regact.problems.grid_games import puzzlescript
+
+    problem, games = _puzzlescript()
+    for game in games:
+        source = puzzlescript.game_source(game["sha256"]).read_bytes()
+        assert hashlib.sha256(source).hexdigest() == game["sha256"]
+    env = problem.make_env(games[0]["key"])
+    grid, info = env.reset()
+    assert all(isinstance(cell, list) and cell == sorted(cell) for row in grid for cell in row)
+    assert info["available_actions"] == [RESET, *games[0]["actions"]]
+    env.step(games[0]["levels"][0]["plan"][0])
+    assert env.step(RESET)[0] == grid  # RESET restores the level
+    env.close()
+
+
+def test_puzzlescript_play_is_deterministic_and_hides_the_game():
+    problem, games = _puzzlescript()
+    rng = random.Random(0)
+    for game in games:
+        actions = [rng.choice(game["actions"]) for _ in range(40)]
+        runs = [[obs for obs, *_ in _play(problem, game["key"], actions)[1]] for _ in range(2)]
+        assert runs[0] == runs[1], game["key"]
+    prompt = problem.build_prompt(
+        games[0]["key"], info_mode=InfoMode.INFORMATIVE, direct_interaction=False
+    )
+    assert games[0]["title"].lower() not in prompt.lower() and "puzzlescript" not in prompt.lower()
+
+
 def test_the_viewer_draws_game_art_while_the_agent_keeps_its_neutral_picture():
     problem = _babaisai()
     task = problem.get_task_names()[0]
@@ -161,3 +215,16 @@ def test_the_viewer_draws_game_art_while_the_agent_keeps_its_neutral_picture():
     native, info = sokoban.make_env("sokoban_p01").reset()
     obs = sokoban.obs_renderer("sokoban_p01", mode=ObsMode.RAW).render(native, info)
     assert (sokoban.render_frame_for_viewer(obs, "sokoban_p01") == sokoban.render_frame(obs)).all()
+
+
+def test_puzzlescript_viewer_draws_each_game_with_its_sprites():
+    problem, games = _puzzlescript()
+    task = games[0]["key"]
+    env = problem.make_env(task)
+    native, info = env.reset()
+    env.close()
+    obs = problem.obs_renderer(task, mode=ObsMode.RAW).render(native, info)
+    assert problem.render_frame_for_viewer(obs, task).shape[:2] == (
+        len(native) * 25,
+        len(native[0]) * 25,
+    )

@@ -90,7 +90,8 @@ def _load() -> tuple[dict[str, GridTask], dict[tuple[int, int], int], tuple[dict
 class BabaIsAIProblem(GridGameProblem):
     name = "babaisai"
     frame_note = (
-        "one integer per kind of object or block (the same kind always has the same integer)"
+        "each cell is an integer, one per kind of object or block (the same kind always has the "
+        "same integer)"
     )
 
     def tasks(self) -> dict[str, GridTask]:
@@ -126,7 +127,6 @@ class BabaIsAIProblem(GridGameProblem):
                 else:
                     tile[:] = ARC_PALETTE[kind["colour"]]
         return out
-
 
     def render_frame_for_viewer(self, obs: Obs, task_name: str) -> Any | None:
         """The engine's own tiles (word blocks carry their text): for people, not the agent."""

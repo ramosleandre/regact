@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -22,19 +23,28 @@ class SolutionCache:
         self._entries: dict[str, Any] = (
             json.loads(self._path.read_text()) if self._path.is_file() else {}
         )
+        self._lock = threading.Lock()
+
+    def cached(self, key: str, budget: float) -> dict[str, Any] | None:
+        """The stored result, unless it is unsolved with a smaller budget than ``budget``."""
+        entry = self._entries.get(key)
+        if entry is None or (
+            entry["plan"] is None and not entry["exhausted"] and entry["budget"] < budget
+        ):
+            return None
+        return entry
 
     def solve(
         self, key: str, budget: float, search: Callable[[], dict[str, Any]]
     ) -> dict[str, Any]:
         """``search()`` returns ``{"plan": list | None, "exhausted": bool}``."""
-        entry = self._entries.get(key)
-        if entry is None or (
-            entry["plan"] is None and not entry["exhausted"] and entry["budget"] < budget
-        ):
+        entry = self.cached(key, budget)
+        if entry is None:
             entry = {**search(), "budget": budget}
-            self._entries[key] = entry
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._entries))
+            with self._lock:  # builds may search from several threads
+                self._entries[key] = entry
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                self._path.write_text(json.dumps(self._entries))
         return entry
 
 
