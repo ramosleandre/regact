@@ -355,6 +355,7 @@ async def run_task(
         # config.json stays the record of what the task started with.
         with open(os.path.join(output_dir, "config.json"), encoding="utf-8") as handle:
             original = json.load(handle)
+
         def identity(cfg: dict[str, Any], key: str) -> Any:
             value = cfg.get(key)
             if key == "agent" and isinstance(value, dict):
@@ -485,7 +486,7 @@ async def run_task(
                 compute_episode_metrics=problem.compute_episode_metrics,
                 aggregate_episode_metrics=problem.aggregate_episode_metrics,
                 sandbox_wrap=eval_wrap,
-                render_frame=problem.render_frame,
+                render_frame=lambda obs: problem.render_frame_for_viewer(obs, task_name),
                 seed=config.problem.seed,
             )
             session = protocol.bind(context)

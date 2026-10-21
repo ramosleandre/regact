@@ -147,3 +147,17 @@ def test_babaisai_levels_are_fixed_by_their_seed_and_steps_draw_no_randomness():
         engine._np_random = _NoDraws()
         for _ in range(60):
             engine.step(babaisai.ENGINE_ACTION[rng.randrange(1, 5)])
+
+
+def test_the_viewer_draws_game_art_while_the_agent_keeps_its_neutral_picture():
+    problem = _babaisai()
+    task = problem.get_task_names()[0]
+    native, info = problem.make_env(task).reset()
+    obs = problem.obs_renderer(task, mode=ObsMode.RAW).render(native, info)
+    agent, viewer = problem.render_frame(obs), problem.render_frame_for_viewer(obs, task)
+    rows, cols = len(native), len(native[0])
+    assert agent.shape[:2] != viewer.shape[:2] and viewer.shape[:2] == (rows * 32, cols * 32)
+    sokoban = build_problem("sokoban", {})  # a game without its own art: the same picture
+    native, info = sokoban.make_env("sokoban_p01").reset()
+    obs = sokoban.obs_renderer("sokoban_p01", mode=ObsMode.RAW).render(native, info)
+    assert (sokoban.render_frame_for_viewer(obs, "sokoban_p01") == sokoban.render_frame(obs)).all()

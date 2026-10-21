@@ -44,9 +44,8 @@ def _grid_game_rgb(problem, task_name: str) -> np.ndarray:
     from regact.config.schema import ObsMode
 
     native, info = problem.make_env(task_name).reset()
-    return problem.render_frame(
-        problem.obs_renderer(task_name, mode=ObsMode.RAW).render(native, info)
-    )
+    obs = problem.obs_renderer(task_name, mode=ObsMode.RAW).render(native, info)
+    return problem.render_frame_for_viewer(obs, task_name)
 
 
 def _minigrid_rgb(task_name: str) -> np.ndarray:

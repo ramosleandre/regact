@@ -262,7 +262,8 @@ def build_app(experiment_dir: str) -> FastAPI:
             if not isinstance(obs, dict) or "frame" not in obs:
                 raise ValueError("this evidence has no observation image for that side")
             return Response(
-                cwm_viewer.png(cwm_viewer.problem_for(task), obs), media_type="image/png"
+                cwm_viewer.png(cwm_viewer.problem_for(task), obs, cwm_viewer.task_name_of(task)),
+                media_type="image/png",
             )
 
         return cwm_call(name, read)
@@ -298,7 +299,9 @@ def build_app(experiment_dir: str) -> FastAPI:
             frame = playback.frame(task, kind, identifier, index)
             if image:
                 return Response(
-                    cwm_viewer.png(cwm_viewer.problem_for(task), frame["obs"]),
+                    cwm_viewer.png(
+                        cwm_viewer.problem_for(task), frame["obs"], cwm_viewer.task_name_of(task)
+                    ),
                     media_type="image/png",
                     headers={"Cache-Control": "no-store"},
                 )

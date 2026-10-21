@@ -26,10 +26,15 @@ from regact.protocols.cwm.validation import check_observation
 from regact.protocols.cwm.worker import Worker
 
 
-def png(problem: BaseProblem, obs: dict[str, Any]) -> bytes:
+def png(problem: BaseProblem, obs: dict[str, Any], task_name: str | None = None) -> bytes:
+    """The observation as a PNG: the agent's picture, or with ``task_name`` the viewer's."""
     from PIL import Image
 
-    frame = problem.render_frame(Obs.from_json(obs))
+    frame = (
+        problem.render_frame(Obs.from_json(obs))
+        if task_name is None
+        else problem.render_frame_for_viewer(Obs.from_json(obs), task_name)
+    )
     if frame is None:
         raise ValueError("this problem has no image renderer")
     image = frame if isinstance(frame, Image.Image) else Image.fromarray(frame)
@@ -475,6 +480,11 @@ class Playback:
 def problem_for(task: Path) -> BaseProblem:
     config = json.loads((task / "config.json").read_text())["problem"]
     return build_problem(config["name"], config.get("kwargs", {}))
+
+
+def task_name_of(task: Path) -> str:
+    state = json.loads((task / "logs" / "experiment_state.json").read_text())
+    return str(state["task_name"])
 
 
 def source(task: Path, bundle: str, filename: str = "") -> dict[str, Any]:

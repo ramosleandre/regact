@@ -18,6 +18,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from regact.envclient.obs import Obs
 from regact.problems.base import register_problem
 from regact.problems.grid_games.base import GridGame, GridGameProblem, GridTask
 
@@ -125,6 +126,49 @@ class BabaIsAIProblem(GridGameProblem):
                 else:
                     tile[:] = ARC_PALETTE[kind["colour"]]
         return out
+
+
+    def render_frame_for_viewer(self, obs: Obs, task_name: str) -> Any | None:
+        """The engine's own tiles (word blocks carry their text): for people, not the agent."""
+        import numpy as np
+
+        from regact.problems.grid_games.base import _current_grid
+
+        grid = _current_grid(obs.frame)
+        if grid is None:
+            return None
+        tiles = [[_tile(code) for code in row] for row in grid]
+        rows = [np.concatenate(row, axis=1) for row in tiles]
+        return np.concatenate(rows, axis=0).astype(np.uint8)
+
+
+@cache
+def _tile(code: int) -> Any:
+    """The engine's 32-pixel picture of a code's kind (``empty`` is a blank tile)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from baba import world_object as w
+        from baba.grid import BabaIsYouGrid
+
+    kinds = _load()[2]
+    kind = kinds[code] if 0 <= code < len(kinds) else {"name": "empty:red"}
+    type_name, value = kind["name"].split(":")
+    obj: Any
+    if type_name == "empty":
+        obj = None
+    elif type_name == "wall":
+        obj = w.Wall(value)
+    elif type_name == "rule_object":
+        obj = w.RuleObject(value)
+    elif type_name == "rule_is":
+        obj = w.RuleIs()
+    elif type_name == "rule_property":
+        obj = w.RuleProperty(value)
+    elif type_name == "rule_color":
+        obj = w.RuleColor(value)
+    else:
+        obj = w.make_obj(type_name, value)
+    return BabaIsYouGrid.render_tile(obj, tile_size=32)
 
 
 register_problem("babaisai", lambda kwargs: BabaIsAIProblem(**kwargs))

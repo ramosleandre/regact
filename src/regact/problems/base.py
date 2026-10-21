@@ -121,12 +121,17 @@ class BaseProblem(ABC):
         return None
 
     def render_frame(self, obs: Obs) -> Any | None:
-        """Colorize one observation into an RGB frame for video, or ``None``.
+        """Colorize one observation into an RGB frame, or ``None``.
 
-        Used only when the ControllerExecutor records a submitted controller's episodes
-        (never for the agent's own exploration scripts). Default: no video.
+        This is the agent's picture: the managed protocols save it into the workspace and serve it
+        through the data API, so it must show nothing the observation does not. Default: none.
         """
         return None
+
+    def render_frame_for_viewer(self, obs: Obs, task_name: str) -> Any | None:
+        """The picture for people only (the viewer, videos, task icons), never shown to the agent,
+        so it may use the game's own art. Default: the agent's picture."""
+        return self.render_frame(obs)
 
     def render_obs_text(self, obs: Obs) -> str | None:
         """A compact, human-readable text rendering of one observation, or ``None``.
