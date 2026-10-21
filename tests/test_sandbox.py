@@ -20,6 +20,7 @@ from regact.security.runtime import (
     AGENT_WORKDIR,
     SandboxRuntime,
     _parse_ldd_lib_paths,
+    cpu_cap_prefix,
     detect,
     interpreter_chain_prefixes,
     make_wrapper,
@@ -170,6 +171,18 @@ def test_deny_read_carves_game_packages_out_of_the_allowed_venv() -> None:
     # bwrap mounts an empty tmpfs over each existing deny path (/usr exists here).
     bw = wrap_argv(SandboxRuntime.BWRAP, ["x"], workdir="/tmp/wd", deny_read=["/usr"])
     assert "--tmpfs /usr" in " ".join(bw)
+
+
+@pytest.mark.skipif(not hasattr(os, "sched_getaffinity"), reason="Linux CPU affinity")
+def test_the_cpu_cap_pins_the_agent_to_at_most_max_cpus_cores() -> None:
+    n = len(os.sched_getaffinity(0))
+    assert cpu_cap_prefix(None, "run") == [] and cpu_cap_prefix(n, "run") == []
+    if n < 2 or not shutil.which("taskset"):
+        pytest.skip("needs 2+ cores and taskset")
+    prefix = cpu_cap_prefix(n - 1, "run")
+    assert len(prefix[2].split(",")) == n - 1 and prefix != cpu_cap_prefix(n - 1, "other run")
+    nproc = subprocess.run([*prefix, "nproc"], capture_output=True, text=True, check=True)
+    assert int(nproc.stdout) == n - 1
 
 
 @pytest.mark.skipif(detect() is not SandboxRuntime.BWRAP, reason="needs a real bwrap host")

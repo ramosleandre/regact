@@ -66,6 +66,8 @@ allowed venv (`deny_read`). Each agent backend declares its own host paths
 so the allowlist only ever contains the *loaded* agent's paths — never another backend's
 ambient data.
 
+On Linux the agent's whole process tree runs on at most `sandbox_opts.max_cpus` cores (default 16; `null` = no cap), through CPU affinity (`taskset`). The cap is taken within the cores the process may already use, so under Slurm it never exceeds the job's allocation. It keeps a run's compute comparable between the laptop and a cluster node: one agent once ran about 40 parallel searches on 28 cores.
+
 Under bwrap the agent sees its workdir at `/workspace` (`AGENT_WORKDIR`), not at its host path, which names the experiment, the model and the task. Its `/tmp` is a private tmpfs. Seatbelt cannot move a path, so on macOS (and without a sandbox) the agent sees the host path.
 
 ### HPC interpreter resolution

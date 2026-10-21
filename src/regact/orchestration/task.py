@@ -53,12 +53,15 @@ from regact.security.runtime import (
     AGENT_WORKDIR,
     SandboxRuntime,
     Wrapper,
+    cpu_cap_prefix,
     make_wrapper,
     resolve,
 )
 from regact.session.state import ExperimentState
 from regact.tools.base import LoggingTool, Tool
 from regact.workspace.bootstrap import Workspace
+
+_DEFAULT_MAX_CPUS = 16  # high: only a runaway parallel search reaches it
 
 
 def _warmup_problem(problem: BaseProblem) -> None:
@@ -130,6 +133,13 @@ def _mirror_sockets(mirror: LoopbackMirror | None, ports: Sequence[int]) -> list
     if mirror is None:
         return []
     return [mirror.socket_path(port) for port in ports]
+
+
+def _cpu_capped(wrapper: Wrapper, config: RunConfig, key: str) -> Wrapper:
+    """Compose ``wrapper`` with ``sandbox_opts.max_cpus`` (default 16; null = no cap): the agent's
+    whole process tree runs on at most that many cores, whatever the host has."""
+    prefix = cpu_cap_prefix(config.sandbox_opts.get("max_cpus", _DEFAULT_MAX_CPUS), key)
+    return (lambda argv: [*prefix, *wrapper(argv)]) if prefix else wrapper
 
 
 def _bridged(wrapper: Wrapper, mirror: LoopbackMirror | None, ports: Sequence[int]) -> Wrapper:
@@ -569,6 +579,7 @@ async def run_task(
                 mirror,
                 agent_ports,
             )
+            runtime_wrap = _cpu_capped(runtime_wrap, config, output_dir)
 
             builder = PromptBuilder()
             system_prompt = protocol.build_system_prompt(

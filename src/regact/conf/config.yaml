@@ -42,6 +42,8 @@ sandbox: true           # true = confine the agent (backend auto-detected: bwrap
                         # seatbelt on macOS) + block egress except its LLM hosts; the run FAILS
                         # rather than proceed unconfined. false = off.
                         # Force a backend with +sandbox_opts.backend=<seatbelt|bwrap>.
+                        # The agent runs on at most +sandbox_opts.max_cpus cores (default 16, Linux;
+                        # null = no cap), so a parallel search cannot take the whole host.
 output_root: experiments
 experiment_name: dev
 

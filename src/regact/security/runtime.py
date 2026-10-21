@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zlib
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 
@@ -158,6 +159,22 @@ def wrap_argv(
     if resolved is SandboxRuntime.BWRAP:
         return _bwrap(argv, workdir, allow_read, deny_egress, deny_read, allow_rw, workdir_alias)
     return list(argv)
+
+
+def cpu_cap_prefix(max_cpus: int | None, key: str) -> Argv:
+    """An argv prefix pinning a process tree to at most ``max_cpus`` of the cores this process may
+    use (a Slurm allocation included), or ``[]`` when no cap applies or ``taskset`` is missing.
+
+    ``key`` picks where the window of cores starts, so concurrent runs spread over the machine.
+    """
+    if max_cpus is None or not hasattr(os, "sched_getaffinity") or not shutil.which("taskset"):
+        return []
+    cores = sorted(os.sched_getaffinity(0))
+    if int(max_cpus) >= len(cores):
+        return []
+    start = zlib.crc32(key.encode()) % len(cores)
+    chosen = sorted(cores[(start + i) % len(cores)] for i in range(int(max_cpus)))
+    return ["taskset", "-c", ",".join(map(str, chosen))]
 
 
 def symlink_chain_dirs(path: str) -> list[str]:
