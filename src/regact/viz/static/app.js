@@ -359,7 +359,7 @@ function metricSpecs(games) {
     for (const [k, v] of Object.entries(g.metrics.final_aggregate || {}))
       if (typeof v === "number" && !_AGG_SKIP.has(k) && !seen.has(k)) {
         seen.add(k);
-        specs.push({ key: "agg:" + k, label: k, score: k, get: (m) => m.final_aggregate && m.final_aggregate[k] });
+        specs.push({ key: "agg:" + k, label: k.replace(/_/g, " "), score: k, get: (m) => m.final_aggregate && m.final_aggregate[k] });
       }
   // Per-feature submission metrics (e.g. cwm.n_conflicting_transitions), same dynamic treatment as
   // the game aggregate: each numeric key becomes a graphable metric, no per-feature viz code.
@@ -930,7 +930,7 @@ function metricControls(specs, redraw) {
     const id = "m-" + spec.key;
     const cb = h("input"); cb.type = "checkbox"; cb.id = id; cb.checked = _graph.active.has(spec.key);
     cb.onchange = () => { cb.checked ? _graph.active.add(spec.key) : _graph.active.delete(spec.key); redraw(); };
-    const row = h("label", "ctl"); row.htmlFor = id; row.append(cb, " " + spec.label);
+    const row = h("label", "ctl"); row.htmlFor = id; row.append(cb, h("span", "ctltext", spec.label));
     panel.append(row);
   }
   return panel;

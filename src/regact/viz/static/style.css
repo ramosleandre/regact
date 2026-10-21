@@ -146,6 +146,7 @@ h2.expsection { margin-top: 22px; font-size: 15px; }
   padding: 10px; }
 .controls .h { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .ctl { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 13px; cursor: pointer; }
+.ctl .ctltext { min-width: 0; overflow-wrap: anywhere; }  /* long metric names wrap */
 .chartcard { border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
   padding: 10px 12px; margin: 12px 0; }
 .chartcard h3 { margin: 0 0 6px; font-size: 14px; }
