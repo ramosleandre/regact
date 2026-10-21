@@ -329,7 +329,9 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         if r.get("objective_reached") is not None:
             out["goal_achieved"] = r["objective_reached"]
         if "metrics" in r:
-            out["metrics"] = r["metrics"]
+            # A controller error scores the call as zero, but the game kept its progress: tell the
+            # agent where the game is, not the score.
+            out["metrics"] = r.get("observed_metrics_before_error", r["metrics"])
         if r.get("history_complete") is False:
             out["history_complete"] = False
             out["real_actions_recorded"] = out.pop("real_actions", 0)

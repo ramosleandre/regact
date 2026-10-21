@@ -17,6 +17,7 @@ from regact.config.schema import (
 from regact.env.renderer import RawRenderer
 from regact.orchestration.task import _build_server
 from regact.problems.base import BaseProblem, register_problem
+from regact.protocols.cwm.feedback import present
 from regact.protocols.cwm.store import ExperienceStore
 from regact.protocols.cwm.viewer import Playback
 from regact.protocols.registry import build_protocol
@@ -295,6 +296,18 @@ def test_invalid_controller_action_gets_worst_metrics(rig):
     assert result["metrics"]["success"] is False
     assert result["error_type"] == "InvalidActionError"
     assert c.phase == "Active Exploration"
+
+
+def test_a_controller_error_shows_the_agent_the_game_progress_not_the_zero_score(rig, monkeypatch):
+    c, _ = rig
+    accept(c)
+    zero = {"success": False, "steps": 0, "zero_credit": True}
+    monkeypatch.setattr(c.problem, "failure_metrics", lambda *, steps: zero)
+    exploration(c, (1, 99, 1))
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] == "controller_error" and result["metrics"] == zero
+    public = present("RunController", result, c.options, c.config.limits)
+    assert "zero_credit" not in public["metrics"] and public["metrics"]["steps"] == 1
 
 
 def test_controller_cannot_monkeypatch_model(rig):
