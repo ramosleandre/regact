@@ -65,13 +65,16 @@ def _uninformative_rate(path: Path) -> float | None:
     which the empty test alone scores as healthy: a GLM run issuing ``ls -la`` a hundred times
     for a byte-identical listing reads as 8% blind and 72% uninformative. Deliberately
     parser-free - deciding from command text whether a call did anything defeats multi-line
-    shell, and cost two people a night of contradictory numbers.
+    shell, and cost two people a night of contradictory numbers. Codex's file edits
+    (``apply_patch``) are logged with their paths only, never their content, so two different
+    edits of one file look identical: only the empty half applies to them.
     """
     if not path.exists():
         return None
     seen: set[tuple[str, str]] = set()
     calls = uninformative = 0
     pending: str | None = None
+    edit = False
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             record = json.loads(line)
@@ -80,13 +83,14 @@ def _uninformative_rate(path: Path) -> float | None:
         kind = record.get("type")
         if kind == "ToolCall":
             pending = json.dumps(record.get("input") or {}, sort_keys=True)
+            edit = record.get("name") == "apply_patch"
         elif kind == "ToolResult" and pending is not None:
             output = record.get("output") or record.get("content") or ""
             if isinstance(output, (dict, list)):
                 output = json.dumps(output, sort_keys=True)
             output = str(output).strip()
             calls += 1
-            if output in ("(no output)", "") or (pending, output) in seen:
+            if output in ("(no output)", "") or (not edit and (pending, output) in seen):
                 uninformative += 1
             seen.add((pending, output))
             pending = None

@@ -388,6 +388,14 @@ def test_uninformative_rate_counts_empty_and_repeated_results(tmp_path: Path) ->
     assert bench_aggregate._uninformative_rate(tmp_path / "nope.jsonl") is None
 
 
+def test_codex_edits_are_not_repeats_because_their_content_is_not_logged(tmp_path: Path) -> None:
+    t = tmp_path / "transcript.jsonl"
+    edit = {"type": "ToolCall", "name": "apply_patch", "input": {"changes": [{"path": "c.py"}]}}
+    done = {"type": "ToolResult", "output": '{"changes": [{"path": "c.py"}], "status": "completed"}'}
+    t.write_text("\n".join(json.dumps(e) for e in [edit, done] * 3) + "\n")
+    assert bench_aggregate._uninformative_rate(t) == 0.0
+
+
 def test_reasoning_only_rate_counts_the_shape_not_the_fence(tmp_path: Path) -> None:
     """alancode's bash-fence stop fires inside a thinking model's reasoning channel, and
     llama.cpp strips the stop - so the fence is never in the transcript to search for. What
