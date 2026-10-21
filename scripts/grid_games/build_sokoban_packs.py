@@ -3,10 +3,11 @@
 Usage:
     python scripts/grid_games/build_sokoban_packs.py <boxoban-levels dir> [--packs 8] [--seed 0]
 
-Each pack holds levels of increasing difficulty: 2 from ``unfiltered``, 3 from ``medium``,
-2 from ``hard``, ordered by optimal length. Every level is solved move-optimally (A* with an
-admissible box-to-goal matching heuristic) and its plan is replayed through regact's engine
-before it is kept; unsolved levels within the time limit are skipped.
+A pool of ``POOL`` levels (from ``unfiltered``, ``medium`` and ``hard``) is drawn, each solved
+move-optimally (A* with an admissible box-to-goal matching heuristic) and replayed through
+regact's engine; levels not solved within the time limit are left out. The pool is then dealt into
+packs of ``PACK_SIZE``: sorted by optimal length and dealt round-robin, so every pack has the same
+easy-to-hard spread, each pack ordered by length. Search results are cached across builds.
 Boxoban levels: https://github.com/google-deepmind/boxoban-levels (Apache-2.0).
 """
 
@@ -23,11 +24,15 @@ from collections import deque
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from _common import SolutionCache, deal
+
 from regact.problems.grid_games.base import GridGameEnv
 from regact.problems.grid_games.sokoban import MOVES, SokobanGame, parse_level
 
 OUT = Path(__file__).resolve().parents[2] / "src/regact/problems/grid_games/data/sokoban_packs.json"
-MIX = (("unfiltered", 2), ("medium", 3), ("hard", 2))
+VERSION = "sokoban-bench-v1"
+POOL = (("unfiltered", 24), ("medium", 24), ("hard", 16))
+PACK_SIZE = 8
 TIME_LIMIT = 20.0
 
 
@@ -137,51 +142,55 @@ def solves(rows: tuple[str, ...], plan: list[int]) -> bool:
 def main() -> None:
     args = argparse.ArgumentParser()
     args.add_argument("boxoban")
-    args.add_argument("--packs", type=int, default=8)
     args.add_argument("--seed", type=int, default=0)
     opts = args.parse_args()
-    root, rng = Path(opts.boxoban), random.Random(opts.seed)
+    root, rng, cache = Path(opts.boxoban), random.Random(opts.seed), SolutionCache("sokoban")
     files = {
         name: sorted(p for p in (root / name).rglob("*.txt") if "test" not in p.parts)
-        for name, _ in MIX
+        for name, _ in POOL
     }
     used: set[tuple[str, ...]] = set()
-    packs = []
-    for p in range(opts.packs):
-        levels = []
-        for name, count in MIX:
-            found = 0
-            while found < count:
-                path = rng.choice(files[name])
-                index = rng.randrange(len(read_levels(path)))
-                rows = read_levels(path)[index]
-                if rows in used:
-                    continue
-                plan = solve(rows, TIME_LIMIT)
-                if plan is None or not solves(rows, plan):
-                    continue
-                used.add(rows)
-                found += 1
-                source = f"{path.relative_to(root)}#{index}"
-                levels.append(
-                    {"rows": list(rows), "optimal": len(plan), "plan": plan, "source": source}
-                )
-                print(f"pack {p + 1}: {source} optimal {len(plan)}", flush=True)
-        levels.sort(key=lambda level: level["optimal"])
-        packs.append({"key": f"sokoban_p{p + 1:02d}", "levels": levels})
+    pool, unsolved = [], 0
+    for name, count in POOL:
+        found = 0
+        while found < count:
+            path = rng.choice(files[name])
+            index = rng.randrange(len(read_levels(path)))
+            rows = read_levels(path)[index]
+            if rows in used:
+                continue
+            used.add(rows)
+            plan = cache.solve(
+                "\n".join(rows),
+                TIME_LIMIT,
+                lambda rows=rows: {"plan": solve(rows, TIME_LIMIT), "exhausted": False},
+            )["plan"]
+            if plan is None or not solves(rows, plan):
+                unsolved += 1
+                continue
+            found += 1
+            source = f"{path.relative_to(root)}#{index}"
+            pool.append({"rows": list(rows), "optimal": len(plan), "plan": plan, "source": source})
+            print(f"{source} optimal {len(plan)}", flush=True)
+    packs = [
+        {"key": f"sokoban_p{i + 1:02d}", "levels": levels}
+        for i, levels in enumerate(deal(pool, len(pool) // PACK_SIZE))
+    ]
     OUT.write_text(
         json.dumps(
             {
+                "version": VERSION,
                 "source": "https://github.com/google-deepmind/boxoban-levels (Apache-2.0)",
                 "built_by": "scripts/grid_games/build_sokoban_packs.py",
                 "seed": opts.seed,
+                "unsolved_draws_left_out": unsolved,
                 "packs": packs,
             },
             indent=1,
         )
         + "\n"
     )
-    print(f"wrote {OUT}")
+    print(f"wrote {OUT} ({VERSION}: {len(packs)} packs of {PACK_SIZE}, {unsolved} unsolved draws)")
 
 
 if __name__ == "__main__":

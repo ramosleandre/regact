@@ -21,18 +21,18 @@ Box-pushing puzzles: the player walks on a grid, pushes boxes (never pulls them)
 
 ## Tasks
 
-8 packs, `sokoban_p01` .. `sokoban_p08`, of 7 levels each (10x10 grids, 4 boxes). Each pack mixes 2 `unfiltered`, 3 `medium` and 2 `hard` Boxoban levels, ordered by optimal length:
+The benchmark version is **sokoban-bench-v1** (recorded as `version` in `data/sokoban_packs.json`): 8 packs, `sokoban_p01` .. `sokoban_p08`, of 8 Boxoban levels each (10x10 grids, 4 boxes). A pool of 64 levels (24 `unfiltered`, 24 `medium`, 16 `hard`, drawn once with seed 0) is sorted by optimal length and dealt in snake order, so every pack has the same easy-to-hard spread; each pack is ordered by length. The packs are independent replicates of one game: their levels share the rules and nothing else.
 
 | Pack | Optimal moves per level | Total |
 |---|---|---|
-| sokoban_p01 | 31 31 38 42 47 54 56 | 299 |
-| sokoban_p02 | 25 30 39 58 64 83 95 | 394 |
-| sokoban_p03 | 15 32 50 52 54 54 56 | 313 |
-| sokoban_p04 | 26 36 41 49 49 55 60 | 316 |
-| sokoban_p05 | 24 24 31 53 60 63 75 | 330 |
-| sokoban_p06 | 24 40 47 50 51 66 75 | 353 |
-| sokoban_p07 | 25 33 34 45 57 59 61 | 314 |
-| sokoban_p08 | 30 33 35 36 36 37 46 | 253 |
+| sokoban_p01 | 15 33 33 42 43 51 51 77 | 345 |
+| sokoban_p02 | 18 32 34 41 45 51 51 75 | 347 |
+| sokoban_p03 | 19 32 34 41 45 50 52 75 | 348 |
+| sokoban_p04 | 21 31 34 41 46 50 53 68 | 344 |
+| sokoban_p05 | 23 31 35 40 46 49 54 66 | 344 |
+| sokoban_p06 | 24 30 36 38 46 49 59 63 | 345 |
+| sokoban_p07 | 25 28 36 37 47 49 59 61 | 342 |
+| sokoban_p08 | 25 28 36 37 47 49 60 60 | 342 |
 
 `problem.kwargs.max_levels=N` keeps the first N levels of each pack (the shortest), and completing level N wins.
 
@@ -71,10 +71,10 @@ For a benchmark, copy a local launch script (`scripts/local/bench_regact_*_arc_*
 
 ```bash
 git clone --depth 1 https://github.com/google-deepmind/boxoban-levels /tmp/boxoban
-python scripts/grid_games/build_sokoban_packs.py /tmp/boxoban --packs 8 --seed 0
+python scripts/grid_games/build_sokoban_packs.py /tmp/boxoban --seed 0
 ```
 
-The build is deterministic for a given seed and takes a few minutes; it rewrites `src/regact/problems/grid_games/data/sokoban_packs.json`.
+The build is deterministic for a given seed and takes a few minutes; search results are cached in `~/.cache/regact/grid_game_solutions/`, so a rebuild only searches new levels. It rewrites `src/regact/problems/grid_games/data/sokoban_packs.json`; change `VERSION` in the script when the levels change.
 
 ## Limitations
 
