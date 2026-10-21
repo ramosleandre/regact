@@ -11,11 +11,8 @@ from regact.envclient.errors import InvalidActionError
 from regact.problems.base import build_problem
 from regact.problems.grid_games.base import RESET
 
-_PACKS = json.loads(
-    (
-        Path(__file__).parents[1] / "src/regact/problems/grid_games/data/sokoban_packs.json"
-    ).read_text()
-)["packs"]
+_DATA = Path(__file__).parents[1] / "src/regact/problems/grid_games/data"
+_PACKS = json.loads((_DATA / "sokoban_packs.json").read_text())["packs"]
 
 
 def _play(problem, task, actions):
@@ -71,7 +68,7 @@ def test_optimal_play_scores_rhae_one_and_the_reference_is_cumulative():
             actions += 1
             trace.append((actions, {"levels_completed": level if i == n - 1 else level - 1}))
     scores = problem.derived_trace_metrics("sokoban_p01", trace)
-    assert scores["roae"] == 1.0 and scores["lroae"] == 1.0 and scores["relative_env_actions"] == 1.0
+    assert scores["roae"] == scores["lroae"] == scores["relative_env_actions"] == 1.0
     assert problem.progress_reference("sokoban_p01") == [
         (float(sum(optimal[:k])), float(k)) for k in range(1, 4)
     ]
@@ -80,14 +77,17 @@ def test_optimal_play_scores_rhae_one_and_the_reference_is_cumulative():
 
 def test_the_prompt_and_helper_never_name_the_game():
     problem = build_problem("sokoban", {})
-    prompt = problem.build_prompt("sokoban_p01", info_mode=InfoMode.INFORMATIVE, direct_interaction=False)
+    prompt = problem.build_prompt(
+        "sokoban_p01", info_mode=InfoMode.INFORMATIVE, direct_interaction=False
+    )
     helper = problem.helper_templates("sokoban_p01")[0].content
     for text in (prompt, helper):
         assert not any(
             word in text.lower() for word in ("sokoban", "box", "push", "crate", "goal tile")
         )
     assert "Levels to win: 7" in prompt and 'obs["frame"]' in prompt
-    obs = problem.obs_renderer("sokoban_p01", mode=ObsMode.RAW).render(*problem.make_env("sokoban_p01").reset())
+    native, info = problem.make_env("sokoban_p01").reset()
+    obs = problem.obs_renderer("sokoban_p01", mode=ObsMode.RAW).render(native, info)
     assert len(obs.frame) == 1 and problem.render_frame(obs).shape == (240, 240, 3)
 
 
@@ -98,15 +98,13 @@ def _babaisai():
 
 def test_babaisai_plans_solve_their_levels_in_the_optimal_moves():
     problem = _babaisai()
-    data = json.loads(
-        (Path(__file__).parents[1] / "src/regact/problems/grid_games/data/babaisai_packs.json").read_text()
-    )
+    data = json.loads((_DATA / "babaisai_packs.json").read_text())
     for pack in data["packs"][:2]:
         plans = [level["plan"] for level in pack["levels"]]
         assert [len(p) for p in plans] == [level["optimal"] for level in pack["levels"]]
         _, steps = _play(problem, pack["key"], [a for plan in plans for a in plan])
         assert steps[-1][2] and steps[-1][4]["state"] == "WIN"
-        assert all(99 not in row for frame, *_ in steps for row in frame)  # every cell kind is coded
+        assert all(99 not in row for frame, *_ in steps for row in frame)  # every kind is coded
 
 
 def test_babaisai_hides_the_game_and_lifts_the_step_limit():
@@ -121,7 +119,6 @@ def test_babaisai_hides_the_game_and_lifts_the_step_limit():
     obs = problem.obs_renderer(task, mode=ObsMode.RAW).render(*env.reset())
     frame = problem.render_frame(obs)
     assert frame.shape[2] == 3 and problem.secret_modules() == ("baba",)
-
 
 
 class _NoDraws:

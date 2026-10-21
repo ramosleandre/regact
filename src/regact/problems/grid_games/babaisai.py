@@ -44,7 +44,9 @@ def encoded_rows(env: Any) -> list[list[tuple[int, int]]]:
     """The (type, colour-or-word) pair of each cell's top object, row by row."""
     cells = env.grid.encode()  # indexed [x][y][channel]
     width, height = cells.shape[0], cells.shape[1]
-    return [[(int(cells[x][y][0]), int(cells[x][y][1])) for x in range(width)] for y in range(height)]
+    return [
+        [(int(cells[x][y][0]), int(cells[x][y][1])) for x in range(width)] for y in range(height)
+    ]
 
 
 class BabaGame(GridGame):
@@ -64,7 +66,8 @@ class BabaGame(GridGame):
         return self._won
 
     def grid(self) -> list[list[int]]:
-        return [[self._codes.get(cell, _UNKNOWN_CODE) for cell in row] for row in encoded_rows(self._env)]
+        rows = encoded_rows(self._env)
+        return [[self._codes.get(cell, _UNKNOWN_CODE) for cell in row] for row in rows]
 
 
 @cache

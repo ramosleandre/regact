@@ -30,12 +30,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from regact.problems.grid_games import babaisai  # noqa: E402
 from regact.problems.grid_games.base import GridGameEnv  # noqa: E402
 
-OUT = Path(__file__).resolve().parents[2] / "src/regact/problems/grid_games/data/babaisai_packs.json"
+OUT = Path(babaisai.__file__).parent / "data" / "babaisai_packs.json"
 MIX = (("single", 3), ("two_room", 4))
 MAX_SECONDS = 20.0
 MIN_OPTIMAL = 3
 # Engine colour names -> ARC palette ids, for the video.
-OBJECT_COLOUR = {"red": 8, "green": 14, "blue": 9, "purple": 15, "yellow": 11, "grey": 3, "white": 1}
+OBJECT_COLOUR = {
+    "red": 8,
+    "green": 14,
+    "blue": 9,
+    "purple": 15,
+    "yellow": 11,
+    "grey": 3,
+    "white": 1,
+}
 WORD_COLOURS = (6, 12, 10, 7, 13, 2, 11, 14, 9, 8, 15, 3)
 
 
@@ -47,7 +55,7 @@ def stacks(env) -> tuple:
 def solve(env_id: str, seed: int, seen_pairs: set) -> list[int] | None:
     """A shortest plan in our action ids, or None; adds every top-of-cell pair seen."""
     start = babaisai.make_engine(env_id, seed)
-    start._np_random = None  # gym 0.25's generator does not deepcopy under numpy 2; unused after reset
+    start._np_random = None  # gym 0.25's generator: no deepcopy under numpy 2; unused after reset
     queue, seen, t0 = deque([(start, [])]), {stacks(start)}, time.time()
     while queue:
         env, plan = queue.popleft()
@@ -56,11 +64,11 @@ def solve(env_id: str, seed: int, seen_pairs: set) -> list[int] | None:
             nxt = copy.deepcopy(env)
             _, reward, done, _ = nxt.step(engine_action)
             if done and reward > 0:
-                return plan + [action]
+                return [*plan, action]
             key = stacks(nxt)
             if key not in seen:
                 seen.add(key)
-                queue.append((nxt, plan + [action]))
+                queue.append((nxt, [*plan, action]))
         if time.time() - t0 > MAX_SECONDS:
             return None
     return None
@@ -91,7 +99,8 @@ def kind(pair: tuple[int, int]) -> dict:
         colour = 4
     else:
         colour = OBJECT_COLOUR.get(value_name, 13)
-    return {"type": pair[0], "value": pair[1], "name": f"{type_name}:{value_name}", "word": word, "colour": colour}
+    name = f"{type_name}:{value_name}"
+    return {"type": pair[0], "value": pair[1], "name": name, "word": word, "colour": colour}
 
 
 def main() -> None:
