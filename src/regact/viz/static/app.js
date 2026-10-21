@@ -724,7 +724,9 @@ function efficiencyScores(points, reference, horizon) {
   });
   return total ? { rhae: Math.min(solvedWeight, capped) / total, lrhae_uncapped: linear / total } : null;
 }
-const _COMPARABLE = { "derived:rhae": "rhae", "derived:lrhae_uncapped": "lrhae_uncapped" };
+// ROAE/LROAE are the same scores against an optimal player (grid games).
+const _COMPARABLE = { "derived:rhae": "rhae", "derived:lrhae_uncapped": "lrhae_uncapped",
+                      "derived:roae": "rhae", "derived:lroae": "lrhae_uncapped" };
 function comparableSpec(spec, group, mask) {
   const X = CURVE_X["env actions"], byRun = new Map(), horizons = new Map();
   for (const task of group.tasks) {

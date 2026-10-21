@@ -1,6 +1,6 @@
 # BabaIsAI (`problem=babaisai`)
 
-[BabaIsAI](https://github.com/nacloos/baba-is-ai) (MIT, [paper](https://arxiv.org/abs/2407.13729)) is a small grid remake of *Baba Is You*: the rules of a level are sentences of word blocks on the board (`BABA IS YOU`, `DOOR IS WIN`, `WALL IS STOP`), and the player changes the rules by pushing the words. A level is won by moving the object that is YOU onto an object that is WIN. It is a [grid game](../environments.md#grid-games): ARC's conventions, RESET as action 0, and RHAE against a reference player.
+[BabaIsAI](https://github.com/nacloos/baba-is-ai) (MIT, [paper](https://arxiv.org/abs/2407.13729)) is a small grid remake of *Baba Is You*: the rules of a level are sentences of word blocks on the board (`BABA IS YOU`, `DOOR IS WIN`, `WALL IS STOP`), and the player changes the rules by pushing the words. A level is won by moving the object that is YOU onto an object that is WIN. It is a [grid game](../environments.md#grid-games): ARC's conventions, RESET as action 0, and ROAE against an optimal player.
 
 ## Why it is in the benchmark
 

@@ -1,12 +1,12 @@
 # Sokoban (`problem=sokoban`)
 
-Box-pushing puzzles: the player walks on a grid, pushes boxes (never pulls them) and completes a level once every box is on a goal. regact plays packs of [Boxoban](https://github.com/google-deepmind/boxoban-levels) levels (DeepMind, Apache-2.0, licence in `problems/grid_games/data/BOXOBAN_LICENSE`) with a small in-house engine. It is a [grid game](../environments.md#grid-games): ARC's conventions, a colour grid, RESET as action 0, and RHAE against a reference player.
+Box-pushing puzzles: the player walks on a grid, pushes boxes (never pulls them) and completes a level once every box is on a goal. regact plays packs of [Boxoban](https://github.com/google-deepmind/boxoban-levels) levels (DeepMind, Apache-2.0, licence in `problems/grid_games/data/BOXOBAN_LICENSE`) with a small in-house engine. It is a [grid game](../environments.md#grid-games): ARC's conventions, a colour grid, RESET as action 0, and ROAE against an optimal player.
 
 ## Why it is in the benchmark
 
 - **The rules are few and exact**, so a correct world model is short (about 30 lines). What a CWM agent buys is planning: once the model is verified, search over it finds the move-optimal solution.
 - **Mistakes are irreversible.** A box pushed into a corner can never be recovered (a deadlock), and only RESET escapes it. An agent that predicts the result of a push before playing it avoids paying for a dead end; an agent that acts and observes pays for every deadlock in actions.
-- **The efficiency baseline is exact**: each level's reference is its move-optimal solution length, not a human's play, so RHAE measures distance to the optimum.
+- **The efficiency baseline is exact**: each level's reference is its move-optimal solution length, not a human's play, so ROAE measures distance to the optimum.
 - No hidden state: the grid shows everything. What the agent cannot know in advance is the layout of the next level, as in ARC.
 
 ## Characteristics, and how they were checked

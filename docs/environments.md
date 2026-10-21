@@ -67,7 +67,7 @@ CWM validates the complete observation, not just its image. Its current assumpti
 - `obs.frame` is a one-element list holding the current grid of integer cells;
 - action 0 (RESET) restarts the current level; it is an ordinary game action, never scored (as ARC's scorecard);
 - completing the last level wins;
-- RHAE, LRHAE-Uncapped and the levels-over-actions curve compare actions per level with the reference (for Sokoban, the move-optimal solutions).
+- ROAE and LROAE (Relative Optimal Action Efficiency) and the levels-over-actions curve compare actions per level with each level's optimal solution length. They are ARC's RHAE and LRHAE-Uncapped with an optimal player in place of the human one; no agent beats the optimum, so no cap applies.
 
 The prompt (`problems/prompts/grid_game.md`) never names the game.
 

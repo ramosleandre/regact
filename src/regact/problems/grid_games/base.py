@@ -151,10 +151,17 @@ def _current_grid(frame: Any) -> list[list[int]] | None:
     return None
 
 
+def _optimal_names(scores: dict[str, float]) -> dict[str, float]:
+    """ARC's RHAE and LRHAE-Uncapped against an optimal player rather than a human: ROAE and
+    LROAE (Relative Optimal Action Efficiency). No agent beats the optimum, so no cap applies."""
+    names = {"rhae": "roae", "lrhae_uncapped": "lroae"}
+    return {names.get(key, key): value for key, value in scores.items()}
+
+
 class GridGameProblem(BaseProblem):
     """A grid game as a regact problem; subclasses set ``name`` and supply tasks and engine."""
 
-    main_metrics = ("rhae", "lrhae_uncapped", "relative_env_actions")
+    main_metrics = ("roae", "lroae", "relative_env_actions")
     progress_label = "Levels completed"
     actions: tuple[int, ...] = (1, 2, 3, 4)
     frame_note = "one integer per colour (0-15)"  # what a cell's integer stands for, in the prompt
@@ -330,7 +337,7 @@ class GridGameProblem(BaseProblem):
         rhae = rhae_from_results(
             {"episodes": raw_episodes}, baseline_actions=list(self._reference(task_name))
         )
-        return rhae.scores() if rhae is not None else {}
+        return _optimal_names(rhae.scores()) if rhae is not None else {}
 
     def derived_trace_metrics(
         self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
@@ -340,12 +347,14 @@ class GridGameProblem(BaseProblem):
         reference = self._reference(task_name)
         levels = [(actions, int(info.get("levels_completed", 0) or 0)) for actions, info in trace]
         per_level = actions_per_level_from_trace(levels)
-        return rhae_score(
-            baseline_actions=reference,
-            actions_per_level=per_level,
-            levels_completed=len(per_level),
-            total_levels=len(reference),
-        ).scores()
+        return _optimal_names(
+            rhae_score(
+                baseline_actions=reference,
+                actions_per_level=per_level,
+                levels_completed=len(per_level),
+                total_levels=len(reference),
+            ).scores()
+        )
 
     def build_prompt(
         self,
