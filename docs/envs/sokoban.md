@@ -16,7 +16,7 @@ Box-pushing puzzles: the player walks on a grid, pushes boxes (never pulls them)
 | Deterministic | yes, no randomness anywhere | the engine draws no random numbers; replaying the stored optimal plans reproduces the same frames (`tests/test_grid_games.py`) |
 | Fully observable | yes: grid + level index = state | the engine state is the player cell and the box cells, both drawn |
 | Episode length | no step limit, no lose state | `limits.max_actions_*` are regact's own |
-| Reset | RESET (action 0) restarts the current level; there is no framework reset command | as ARC, except that RESET counts as an action in RHAE (ARC's scorecard skips it) |
+| Reset | RESET (action 0) restarts the current level; it is not scored, and there is no framework reset command | as in ARC |
 | Reference | move-optimal plan per level | A* with an admissible box-to-goal matching heuristic, every plan replayed through the engine before it is stored |
 
 ## Tasks

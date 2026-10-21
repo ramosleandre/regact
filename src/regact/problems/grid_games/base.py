@@ -206,6 +206,9 @@ class GridGameProblem(BaseProblem):
     def reset_commands(self) -> dict[str, str]:
         return {}  # RESET is a game action
 
+    def counts_as_action(self, action: Any) -> bool:
+        return action != RESET  # as ARC's scorecard: RESET is never scored
+
     def obs_renderer(self, task_name: str, *, mode: ObsMode) -> ObsRenderer:
         if mode not in (ObsMode.RAW, ObsMode.RAW_LAST_FRAME_ONLY):
             raise RegactError(

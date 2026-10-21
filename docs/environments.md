@@ -65,7 +65,7 @@ CWM validates the complete observation, not just its image. Its current assumpti
 `problems/grid_games/` holds level-based games played on a small grid. A game supplies only its engine (`GridGame`: load a level, apply an action, tell whether the level is solved, draw the grid) and its tasks (`GridTask`: an ordered pack of levels plus a reference action count per level). The shared `GridGameProblem` gives every grid game ARC's conventions:
 
 - `obs.frame` is a one-element list holding the current grid of integer cells;
-- action 0 (RESET) restarts the current level and is an ordinary game action;
+- action 0 (RESET) restarts the current level; it is an ordinary game action, never scored (as ARC's scorecard);
 - completing the last level wins;
 - RHAE, LRHAE-Uncapped and the levels-over-actions curve compare actions per level with the reference (for Sokoban, the move-optimal solutions).
 

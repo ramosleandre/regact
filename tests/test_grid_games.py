@@ -75,6 +75,7 @@ def test_optimal_play_scores_rhae_one_and_the_reference_is_cumulative():
     assert problem.progress_reference("sokoban_p01") == [
         (float(sum(optimal[:k])), float(k)) for k in range(1, 4)
     ]
+    assert not problem.counts_as_action(RESET) and problem.counts_as_action(1)
 
 
 def test_the_prompt_and_helper_never_name_the_game():

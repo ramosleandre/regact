@@ -16,7 +16,7 @@
 | Level layout | procedural, pinned per level | each level stores its engine id and seed |
 | Step limit | lifted | the engine's 100-step limit is set to 10^9, so a level ends only when it is won; the step count is never observable |
 | Hidden state | objects the player stands on | only the top object of each cell is shown; levels with an object hidden under another at reset are excluded, so whatever is hidden was seen before |
-| Reset | RESET (action 0) restarts the current level and counts as an action | as in the other grid games |
+| Reset | RESET (action 0) restarts the current level; it is not scored | as in ARC and the other grid games |
 | Reference | shortest solution per level | breadth-first search on the real engine (20 s budget per level; unsolved levels are skipped), every plan replayed through regact's environment before it is stored |
 
 The engine's facing direction is not shown; it affects nothing in these levels.
