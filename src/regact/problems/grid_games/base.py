@@ -5,7 +5,7 @@ ordered pack of levels plus a reference action count per level). This layer turn
 regact problem with the conventions of ARC-AGI-3, so prompts, metrics, the viewer and the
 protocols treat every grid game alike:
 
-- ``obs.frame`` is a one-element list holding the current grid (each game says what a cell is);
+- ``obs.frame`` is the current grid, a list of rows (each game says what a cell is);
 - ``obs.info`` has ``state`` (``NOT_FINISHED`` / ``WIN``), ``levels_completed`` and
   ``win_levels``;
 - action 0 is RESET, an ordinary game action that restarts the current level (no framework
@@ -123,12 +123,12 @@ class GridGameEnv:
 
 
 class GridRenderer(ObsRenderer):
-    """The native grid as a one-element frame list, so ``obs.frame[-1]`` is the current grid."""
+    """The native grid as the frame itself: these games have one frame per step, no animation."""
 
     def render(self, native_obs: object, info: dict[str, Any] | None) -> Obs:
         info = dict(info or {})
         return Obs(
-            frame=[jsonify(native_obs)],
+            frame=jsonify(native_obs),
             available_actions=list(info.get("available_actions", [])),
             info=info,
         )
@@ -146,11 +146,9 @@ def _milestone_detector(env: Any) -> list[str]:
     return out
 
 
-def _current_grid(frame: Any) -> list[list[int]] | None:
-    if isinstance(frame, list) and frame and isinstance(frame[-1], list) and frame[-1]:
-        grid = frame[-1]
-        if isinstance(grid[0], list):
-            return grid
+def _current_grid(frame: Any) -> list[list[Any]] | None:
+    if isinstance(frame, list) and frame and all(isinstance(row, list) and row for row in frame):
+        return frame
     return None
 
 

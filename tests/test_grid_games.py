@@ -90,7 +90,7 @@ def test_the_prompt_and_helper_never_name_the_game():
     assert "Levels to win: 8" in prompt and 'obs["frame"]' in prompt
     native, info = problem.make_env("sokoban_p01").reset()
     obs = problem.obs_renderer("sokoban_p01", mode=ObsMode.RAW).render(native, info)
-    assert len(obs.frame) == 1 and problem.render_frame(obs).shape == (240, 240, 3)
+    assert len(obs.frame) == 10 and problem.render_frame(obs).shape == (240, 240, 3)  # the grid itself
 
 
 def _babaisai():

@@ -38,7 +38,7 @@ The benchmark version is **sokoban-bench-v1** (recorded as `version` in `data/so
 
 ## Observation and actions
 
-`obs.frame` is a one-element list holding the grid. The agent sees colour ids only, never the Sokoban symbols:
+`obs.frame` is the grid, a list of rows. The agent sees colour ids only, never the Sokoban symbols:
 
 | Cell | Colour id |
 |---|---|

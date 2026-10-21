@@ -50,8 +50,9 @@ Do not call this API inside submitted callbacks (controller.py, world_model/): t
 dataset access.
 
 - An observation is a dictionary: frame, reward, is_done, available_actions, info. It is exactly
-  what your controller and world model receive. frame is a list of grids made of plain Python
-  lists, not numpy: use np.array(obs["frame"][-1]) for the last grid.
+  what your controller and world model receive. Its values are plain Python lists and
+  dictionaries, not numpy (use np.array(...) to get an array); the game section of your
+  instructions describes frame.
 - A transition is one recorded step: observation --action--> next_observation.
 - Each distinct observation and transition has a positive integer ID. A repeated step adds no new
   ID, so IDs are not a time order. For what happened in what order, use list_episodes() and

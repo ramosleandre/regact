@@ -40,7 +40,7 @@ The engine's facing direction is not shown; it affects nothing in these levels.
 
 ## Observation and actions
 
-`obs.frame` is a one-element list holding the grid. Each cell holds one integer per kind of object or word block on top of it (the same kind always has the same integer); the table is in `data/babaisai_packs.json` and the agent never sees it. Code 0 is an empty cell. The video draws word blocks framed, so they read as blocks.
+`obs.frame` is the grid, a list of rows. Each cell holds one integer per kind of object or word block on top of it (the same kind always has the same integer); the table is in `data/babaisai_packs.json` and the agent never sees it. Code 0 is an empty cell. The video draws word blocks framed, so they read as blocks.
 
 Actions: 0 RESET, 1 up, 2 down, 3 left, 4 right. A move into a STOP object, or a push of a word against one, changes nothing (it still counts as an action).
 
