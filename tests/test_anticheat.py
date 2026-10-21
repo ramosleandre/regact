@@ -20,6 +20,15 @@ def test_path_within_confines_to_workdir(tmp_path: Path) -> None:
     assert not path_within("../secret.py", root)
 
 
+def test_camera_flags_reading_host_process_details() -> None:
+    """The /proc command lines, environments and mount tables give away the host paths."""
+    policy = default_policy()
+    for command in ("cat /proc/1/cmdline", "cat /proc/self/mountinfo", "cat /proc/*/environ"):
+        assert flag_tool_call("Bash", {"command": command}, policy), command
+    for command in ("cat /proc/meminfo", "nproc", "cat /proc/self/status"):
+        assert flag_tool_call("Bash", {"command": command}, policy) == [], command
+
+
 def test_camera_flags_forbidden_paths_and_imports() -> None:
     """Flags (for logging) the obvious attempts; it never blocks."""
     policy = default_policy()

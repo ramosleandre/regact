@@ -99,7 +99,7 @@ got, so an unconfined run is never silent.
 ## The camera (detection, not enforcement)
 
 Alongside the sandbox, a lightweight **detection camera** flags suspicious tool calls (a
-call reaching for a forbidden path/module) and blocked-egress denials. It is
+call reaching for a forbidden path/module, or reading the `/proc` command lines, environments or mount tables that still show the host paths behind `/workspace`) and blocked-egress denials. It is
 **detection-only** — it records flags and can send warnings to the agent; flagging itself does not block a call or invalidate a score. The sandbox and protocol handlers separately enforce permissions.
 
 `flagging_warning_cap` defaults to 3; 0 disables delivered warnings while retaining flags. Warnings quote the relevant command with middle truncation. Alan can receive them after completed tools; CLI agents receive queued warnings on the next outer Regact send cycle, if the task continues. Attribution can be uncertain for concurrent calls, in which case the warning identifies candidate commands rather than claiming certainty. See [Protocols](protocols.md#flagging).

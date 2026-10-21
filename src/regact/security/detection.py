@@ -14,6 +14,7 @@ already receives (no process inspection), and neither blocks:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from regact.security.policy import SecurityPolicy
@@ -27,6 +28,13 @@ _DENIAL_SIGNATURES = (
 )
 
 
+# Process and mount details under /proc (command lines, environments, mount tables) name the
+# host paths, hence the run, the model and the task, that the agent's workdir alias hides.
+_HOST_INSPECTION = re.compile(
+    r"/proc/(?:\d+|self|\*|\$\$|\[0-9\]\*)/(?:cmdline|environ|mountinfo|mounts|cwd)"
+)
+
+
 def flag_tool_call(name: str, args: dict[str, Any], policy: SecurityPolicy) -> list[str]:
     """Return human-readable flags found in a tool call's textual arguments (empty == clean)."""
     blob = _flatten(args).lower()
@@ -37,6 +45,8 @@ def flag_tool_call(name: str, args: dict[str, Any], policy: SecurityPolicy) -> l
     for module in policy.forbidden_imports:
         if f"import {module}" in blob or f"from {module}" in blob:
             flags.append(f"tool {name!r}: imports forbidden module {module!r}")
+    if match := _HOST_INSPECTION.search(blob):
+        flags.append(f"tool {name!r}: inspects host process details {match.group(0)!r}")
     return flags
 
 
