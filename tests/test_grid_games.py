@@ -70,7 +70,7 @@ def test_optimal_play_scores_rhae_one_and_the_reference_is_cumulative():
             actions += 1
             trace.append((actions, {"levels_completed": level if i == n - 1 else level - 1}))
     scores = problem.derived_trace_metrics("sokoban_p01", trace)
-    assert scores["roae"] == scores["lroae"] == scores["relative_env_actions"] == 1.0
+    assert scores["roae"] == scores["lroae"] == scores["mean_relative_actions"] == 1.0
     assert problem.progress_reference("sokoban_p01") == [
         (float(sum(optimal[:k])), float(k)) for k in range(1, 4)
     ]

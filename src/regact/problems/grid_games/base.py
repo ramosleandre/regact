@@ -162,7 +162,7 @@ def _optimal_names(scores: dict[str, float]) -> dict[str, float]:
 class GridGameProblem(BaseProblem):
     """A grid game as a regact problem; subclasses set ``name`` and supply tasks and engine."""
 
-    main_metrics = ("roae", "lroae", "relative_env_actions")
+    main_metrics = ("roae", "lroae", "mean_relative_actions")
     progress_label = "Levels completed"
     actions: tuple[int, ...] = (1, 2, 3, 4)
     frame_note = "each cell is an integer, one per colour (0-15)"  # what a cell is, in the prompt

@@ -293,7 +293,7 @@ def test_trace_metrics_score_all_task_actions() -> None:
     assert derived == {
         "rhae": round(weight, 3),
         "lrhae_uncapped": round(weight, 3),
-        "relative_env_actions": 1.0,
+        "mean_relative_actions": 1.0,
     }
     assert _problem().derived_trace_metrics("ls20", []) == {"rhae": 0.0, "lrhae_uncapped": 0.0}
 

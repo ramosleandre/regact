@@ -413,7 +413,7 @@ def test_main_metrics_come_from_the_problem(tmp_path: Path) -> None:
         json.dumps({"problem": {"name": "arc_agi", "kwargs": {}}})
     )
     main = game_metrics(load_game(exp, "ls20"))["main_metrics"]
-    assert main == ["rhae", "lrhae_uncapped", "relative_env_actions"]
+    assert main == ["rhae", "lrhae_uncapped", "mean_relative_actions"]
 
 
 def test_an_inserted_example_call_is_shown_but_not_counted(tmp_path: Path) -> None:

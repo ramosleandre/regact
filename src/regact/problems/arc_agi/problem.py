@@ -331,7 +331,7 @@ class ArcAgiProblem(BaseProblem):
     """ARC-AGI-3 as a regact problem (offline, local game data)."""
 
     name = "arc_agi"
-    main_metrics = ("rhae", "lrhae_uncapped", "relative_env_actions")
+    main_metrics = ("rhae", "lrhae_uncapped", "mean_relative_actions")
     progress_label = "Levels completed"
 
     def __init__(

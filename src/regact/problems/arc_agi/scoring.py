@@ -19,11 +19,11 @@ human the agent was::
 
     LRHAE-Uncapped = sum_l(r_l * l) / sum_l(l)
 
-Relative env actions compares totals instead of averaging per-level ratios: the agent's actions
-on the levels it completed, over the human baseline for those same levels (below 1 = fewer
-actions than the human; undefined until a level is completed)::
+Mean relative actions is the plain average, over the levels the agent completed, of its actions
+relative to the baseline's (below 1 = fewer actions than the human; every level counts the same;
+undefined until a level is completed)::
 
-    relative_env_actions = sum_{l solved}(a_l) / sum_{l solved}(h_l)
+    mean_relative_actions = mean_{l solved}(a_l / h_l)
 
 A dataset's score is the mean of its games' scores.
 
@@ -56,17 +56,23 @@ class RhaeResult:
     baseline_actions: tuple[int, ...]  # human baseline per level
 
     @property
-    def relative_env_actions(self) -> float | None:
-        """Agent actions over human actions, both summed on the levels the agent completed."""
+    def mean_relative_actions(self) -> float | None:
+        """Agent over human actions per completed level, every level counting the same."""
         solved = min(self.levels_completed, len(self.actions_per_level), len(self.baseline_actions))
-        human = sum(self.baseline_actions[:solved])
-        return sum(self.actions_per_level[:solved]) / human if human else None
+        ratios = [
+            a / h
+            for a, h in zip(
+                self.actions_per_level[:solved], self.baseline_actions[:solved], strict=True
+            )
+            if h > 0
+        ]
+        return sum(ratios) / len(ratios) if ratios else None
 
     def scores(self) -> dict[str, float]:
         """The game's derived metrics, rounded for reports."""
         out = {"rhae": round(self.rhae, 3), "lrhae_uncapped": round(self.lrhae_uncapped, 3)}
-        if (relative := self.relative_env_actions) is not None:
-            out["relative_env_actions"] = round(relative, 3)
+        if (relative := self.mean_relative_actions) is not None:
+            out["mean_relative_actions"] = round(relative, 3)
         return out
 
 
