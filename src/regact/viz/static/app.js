@@ -387,6 +387,9 @@ function metricSpecs(games) {
   // Its discounted area, where a reference player gives a scale to compare with (ARC).
   if (prog && games.some((g) => g.metrics.progress && (g.metrics.progress.reference || []).length))
     specs.push({ key: "progress_auc", label: "Area under " + prog.label.toLowerCase(), auc: true, def: true });
+  // Each level's actions over the reference player's on that level (mean relative actions, level by level).
+  if (prog && games.some((g) => g.metrics.progress && (g.metrics.progress.reference || []).length))
+    specs.push({ key: "relative_levels", label: "Relative actions over levels", levels: true, def: true });
   specs.push(STATUS_METRIC);
   const mains = new Set(games.flatMap((g) => g.metrics.main_metrics || []));
   for (const s of specs) s.main = !!(s.def || (s.score && mains.has(s.score)));
@@ -572,6 +575,72 @@ function curveRuns(exp, task, group, mask, X) {
     runs.push({ pts, done, won, end: Math.max(Number(X.end(m)) || 0, ...pts.map((q) => q[0])) });
   }
   return runs;
+}
+// Per run, the actions it spent on each level it completed over the reference player's actions on
+// that level; aggregated per level over the runs that completed it.
+function relativeLevelsChart(task, group, expColor, aggName, errMethod, mask) {
+  const X = CURVE_X["env actions"], agg = AGGREGATORS[aggName];
+  const ms = group.experiments.flatMap((exp) => (group.byExp.get(exp) && group.byExp.get(exp).get(task)) || []);
+  const reference = ((ms.find((m) => m.progress && (m.progress.reference || []).length) || {}).progress || {}).reference || [];
+  if (!reference.length) return null;
+  const baseline = reference.map(([x], i) => x - (i ? reference[i - 1][0] : 0));
+  const ratios = (run) => {   // [ratio per completed level], from the levels-over-actions points
+    const solved = [];
+    let best = 0;
+    for (const [x, v] of [...run.pts].sort((a, b) => a[0] - b[0])) while (best < v) { solved.push(x); best += 1; }
+    return solved.slice(0, baseline.length).map((x, i) => (x - (i ? solved[i - 1] : 0)) / baseline[i]);
+  };
+  const series = group.experiments.map((exp) => ({ exp, runs: curveRuns(exp, task, group, mask, X).map(ratios) }))
+    .filter((sr) => sr.runs.length);
+  if (!series.length) return null;
+  const L = baseline.length;
+  const perLevel = series.map(({ exp, runs }) => ({ exp, runs, levels: Array.from({ length: L }, (_, i) =>
+    runs.map((r) => r[i]).filter((v) => v != null && Number.isFinite(v))) }));
+  const values = perLevel.flatMap((sr) => sr.levels.flat());
+  const yMax = Math.max(1.5, ...values) * 1.05;
+  const room = (typeof window !== "undefined" && window.innerWidth) || 0;
+  const padL = 44, padR = 16, padT = 10, padB = 30, W = Math.max(420, Math.min(1100, room - 500)), H = 240;
+  const xOf = (i) => padL + (W - padL - padR) * (L > 1 ? i / (L - 1) : 0.5);
+  const yOf = (v) => padT + (H - padT - padB) * (1 - Math.min(1, v / yMax));
+  const s = svg("svg", { class: "chart", width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const step = yMax > 4 ? 1 : 0.5;
+  for (let v = 0; v <= yMax; v += step) {
+    s.append(svg("line", { class: "gridline", x1: padL, y1: yOf(v), x2: W - padR, y2: yOf(v) }));
+    s.append(svg("text", { class: "ylab", x: padL - 6, y: yOf(v) + 3, "text-anchor": "end" }, txt(String(v))));
+  }
+  for (let i = 0; i < L; i++)
+    s.append(svg("text", { class: "xlab", x: xOf(i), y: H - padB + 16, "text-anchor": "middle" }, txt("L" + (i + 1))));
+  s.append(svg("path", { class: "curve-ref", d: `M${xOf(0)},${yOf(1)} H${xOf(L - 1)}` }));
+  for (const { exp, runs, levels } of perLevel) {
+    const color = expColor(exp);
+    if (_graph.perRun.has(exp))
+      for (const r of runs) {
+        const d = r.map((v, i) => `${i ? "L" : "M"}${xOf(i)},${yOf(v)}`).join(" ");
+        if (d) s.append(svg("path", { class: "curve-run", stroke: color, d }));
+      }
+    const pts = levels.map((xs, i) => (xs.length ? [i, agg(xs), xs] : null)).filter(Boolean);
+    if (errMethod !== "none")
+      for (const [i, , xs] of pts) {
+        if (xs.length < 2) continue;
+        let lo, hi;
+        if (errMethod === "range") { lo = Math.min(...xs); hi = Math.max(...xs); }
+        else {
+          const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+          const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1));
+          lo = mean - sd; hi = mean + sd;
+        }
+        s.append(svg("line", { stroke: color, "stroke-width": 2, opacity: 0.5, x1: xOf(i), x2: xOf(i), y1: yOf(Math.max(0, lo)), y2: yOf(hi) }));
+      }
+    let d = "", prev = null;
+    for (const [i, v] of pts) { d += `${prev === i - 1 ? " L" : " M"}${xOf(i)},${yOf(v)}`; prev = i; }
+    s.append(svg("path", { class: "curve-line", stroke: color, d }));
+    for (const [i, v, xs] of pts) {
+      const dot = svg("circle", { cx: xOf(i), cy: yOf(v), r: 3.5, fill: color });
+      dot.append(svg("title", {}, txt(`${exp}\nlevel ${i + 1}: ${v.toFixed(2)} (${aggName} of ${xs.length} run${xs.length > 1 ? "s" : ""})`)));
+      s.append(dot);
+    }
+  }
+  return s;
 }
 const curveAt = (run, x) => { let v = 0; for (const [px, pv] of run.pts) if (px <= x) v = pv; return v; };
 let _clipIds = 0;
@@ -1010,6 +1079,15 @@ async function graphsView(games, onlyExp, scope) {
         }
         card.append(body);
         if (hasRef) card.append(h("div", "muted curve-note", "dashed: reference player (ARC: the human baseline; grid games: optimal solutions)"));
+      } else if (spec.levels) {
+        for (const task of g2.tasks) {
+          const chart = relativeLevelsChart(task, g2, expColor, _graph.agg, _graph.err, _graph.mask);
+          if (!chart) continue;
+          if (g2.tasks.length > 1) scroll.append(h("div", "muted", shortTask(task)));
+          scroll.append(chart);
+        }
+        card.append(body);
+        card.append(h("div", "muted curve-note", "agent / reference player actions on each level (1 = as many, dashed; lower is better); a level aggregates the runs that completed it (hover a point for how many)"));
       } else if (spec.auc) {
         const area = areaSpec(spec, g2, _graph.mask, _graph.curveX, _graph.gamma);
         card.append(h("div", "zoomrow",
