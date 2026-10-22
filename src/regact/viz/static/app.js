@@ -567,7 +567,9 @@ function curveRuns(exp, task, group, mask, X) {
     if (!m.progress || (mask && !done)) continue;
     const pts = m.progress.points.map((q) => [q[X.point], q.value]);
     if (pts.some((q) => q[0] == null)) continue;   // no such measure recorded for this run
-    runs.push({ pts, done, end: Math.max(Number(X.end(m)) || 0, ...pts.map((q) => q[0])) });
+    const levels = (m.progress.reference || []).length;   // the levels to win, when known
+    const won = levels > 0 && Math.max(0, ...pts.map((q) => q[1])) >= levels;
+    runs.push({ pts, done, won, end: Math.max(Number(X.end(m)) || 0, ...pts.map((q) => q[0])) });
   }
   return runs;
 }
@@ -699,9 +701,10 @@ function areaSpec(spec, group, mask, xName, gamma) {
   }
   return { ...spec, get: (m) => byRun.get(m), refOf: (task) => refs.get(task), horizons };
 }
-// RHAE and LRHAE-Uncapped of a run as if it had stopped after `horizon` env actions, computed as
-// problems/arc_agi/scoring.py does: a level completed later counts as not completed. `reference` is
-// the human's cumulative actions at each level, so it also gives the levels to win.
+// RHAE, LRHAE-Uncapped and mean relative actions of a run as if it had stopped after `horizon`
+// env actions, computed as problems/arc_agi/scoring.py does: a level completed later counts as not
+// completed. `reference` is the human's cumulative actions at each level, so it also gives the
+// levels to win.
 const _LEVEL_CAP = 1.15;
 function efficiencyScores(points, reference, horizon) {
   const solved = [];   // env actions when each level was first completed
@@ -710,7 +713,7 @@ function efficiencyScores(points, reference, horizon) {
     if (x > horizon) break;
     while (best < v) { solved.push(x); best += 1; }
   }
-  let total = 0, solvedWeight = 0, capped = 0, linear = 0;
+  let total = 0, solvedWeight = 0, capped = 0, linear = 0, relative = 0, nSolved = 0;
   reference.forEach(([x], i) => {
     const weight = i + 1, baseline = x - (i ? reference[i - 1][0] : 0);
     const actions = i < solved.length ? solved[i] - (i ? solved[i - 1] : 0) : 0;
@@ -720,17 +723,29 @@ function efficiencyScores(points, reference, horizon) {
       capped += Math.min(_LEVEL_CAP, ratio * ratio) * weight;
       linear += ratio * weight;
       solvedWeight += weight;
+      relative += actions / baseline;
+      nSolved += 1;
     }
   });
-  return total ? { rhae: Math.min(solvedWeight, capped) / total, lrhae_uncapped: linear / total } : null;
+  return total ? { rhae: Math.min(solvedWeight, capped) / total, lrhae_uncapped: linear / total,
+                   mean_relative_actions: nSolved ? relative / nSolved : null } : null;
 }
 // ROAE/LROAE are the same scores against an optimal player (grid games).
 const _COMPARABLE = { "derived:rhae": "rhae", "derived:lrhae_uncapped": "lrhae_uncapped",
-                      "derived:roae": "rhae", "derived:lroae": "lrhae_uncapped" };
+                      "derived:roae": "rhae", "derived:lroae": "lrhae_uncapped",
+                      "derived:mean_relative_actions": "mean_relative_actions" };
+// Where every experiment still has data: the end of each experiment's longest unfinished run, the
+// earliest of those. A run that won the game cannot progress further, so it limits nothing; when
+// every run won, nothing is cut (Infinity) and comparable equals all.
+function comparableHorizon(task, group, mask, X) {
+  const ends = group.experiments.map((exp) => curveRuns(exp, task, group, mask, X))
+    .filter((runs) => runs.length).map((runs) => Math.max(...runs.map((r) => (r.won ? Infinity : r.end))));
+  return ends.length ? Math.min(...ends) : null;
+}
 function comparableSpec(spec, group, mask) {
   const X = CURVE_X["env actions"], byRun = new Map(), horizons = new Map();
   for (const task of group.tasks) {
-    const horizon = areaHorizon(task, group, mask, X);
+    const horizon = comparableHorizon(task, group, mask, X);
     if (horizon == null) continue;
     horizons.set(task, horizon);
     for (const exp of group.experiments)
@@ -1019,8 +1034,11 @@ async function graphsView(games, onlyExp, scope) {
         scroll.append(groupedBarChart(shown, g2, expColor, _graph.agg, _graph.err, _graph.mask));
         card.append(body);
         if (shown.horizons) {
-          const upTo = [...shown.horizons].map(([t, x]) => `${shortTask(t)} ${fmt(Math.round(x))}`).join(", ");
-          card.append(h("div", "muted curve-note", `levels completed within the env actions where the shortest experiment ends (${upTo})`));
+          const cut = [...shown.horizons].filter(([, x]) => Number.isFinite(x));
+          const upTo = cut.map(([t, x]) => `${shortTask(t)} ${fmt(Math.round(x))}`).join(", ");
+          card.append(h("div", "muted curve-note", cut.length
+            ? `levels completed within the env actions where an experiment's unfinished runs end (${upTo}); games where every run won are not cut`
+            : "every run won its game: nothing is cut"));
         }
       }
       charts.append(card);
