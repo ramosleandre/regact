@@ -104,29 +104,18 @@ class BabaIsAIProblem(GridGameProblem):
         return ("baba",)
 
     def render_frame(self, obs: Any) -> Any | None:
-        """Each kind in its own colour; word blocks are drawn framed, so they read as blocks."""
+        """One tile per code, each different from every other, and meaning nothing: the picture
+        says no more than the integers (see :func:`code_tile`)."""
         import numpy as np
 
-        from regact.problems.grid_games.base import _RENDER_SCALE, _current_grid
-        from regact.problems.palette import ARC_PALETTE
+        from regact.problems.grid_games.base import _current_grid
 
         grid = _current_grid(obs.frame)
         if grid is None:
             return None
-        kinds = _load()[2]
-        scale = _RENDER_SCALE
-        out = np.zeros((len(grid) * scale, len(grid[0]) * scale, 3), dtype=np.uint8)
-        frame = scale // 6
-        for r, row in enumerate(grid):
-            for c, code in enumerate(row):
-                kind = kinds[code] if 0 <= code < len(kinds) else {"colour": 13, "word": False}
-                tile = out[r * scale : (r + 1) * scale, c * scale : (c + 1) * scale]
-                if kind["word"]:
-                    tile[:] = ARC_PALETTE[4]
-                    tile[frame:-frame, frame:-frame] = ARC_PALETTE[kind["colour"]]
-                else:
-                    tile[:] = ARC_PALETTE[kind["colour"]]
-        return out
+        return np.concatenate(
+            [np.concatenate([code_tile(code) for code in row], axis=1) for row in grid], axis=0
+        )
 
     def render_frame_for_viewer(self, obs: Obs, task_name: str) -> Any | None:
         """The engine's own tiles (word blocks carry their text): for people, not the agent."""
@@ -140,6 +129,38 @@ class BabaIsAIProblem(GridGameProblem):
         tiles = [[_tile(code) for code in row] for row in grid]
         rows = [np.concatenate(row, axis=1) for row in tiles]
         return np.concatenate(rows, axis=0).astype(np.uint8)
+
+
+# The agent's tile colours, assigned arbitrarily: no object keeps its engine colour, so a shared
+# colour means a shared code and nothing else. Black is the empty cell.
+_CODE_COLOURS = (9, 12, 11, 15, 6, 10, 13, 7, 1, 2, 3, 14, 0, 8)
+_UNKNOWN_COLOUR = 6
+
+
+@cache
+def code_tile(code: int) -> Any:
+    """The agent's tile of a code: codes 1-14 are flat colours, 15-28 the same colours with a
+    black hole; the unknown code is magenta with a black cross."""
+    import numpy as np
+
+    from regact.problems.grid_games.base import _RENDER_SCALE as scale
+    from regact.problems.palette import ARC_PALETTE
+
+    tile = np.zeros((scale, scale, 3), dtype=np.uint8)
+    tile[:] = ARC_PALETTE[5]
+    if code == _UNKNOWN_CODE:
+        tile[:] = ARC_PALETTE[_UNKNOWN_COLOUR]
+        for i in range(scale):
+            tile[i, i] = tile[i, scale - 1 - i] = ARC_PALETTE[5]
+    elif code > 0:
+        holed, index = divmod(code - 1, len(_CODE_COLOURS))
+        if holed > 1:
+            raise ValueError(f"no tile for code {code}: the code table outgrew the agent's tiles")
+        tile[1:-1, 1:-1] = ARC_PALETTE[_CODE_COLOURS[index]]
+        if holed:
+            third = scale // 3
+            tile[third:-third, third:-third] = ARC_PALETTE[5]
+    return tile
 
 
 @cache

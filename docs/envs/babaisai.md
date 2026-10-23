@@ -2,6 +2,8 @@
 
 [BabaIsAI](https://github.com/nacloos/baba-is-ai) (MIT, [paper](https://arxiv.org/abs/2407.13729)) is a small grid remake of *Baba Is You*: the rules of a level are sentences of word blocks on the board (`BABA IS YOU`, `DOOR IS WIN`, `WALL IS STOP`), and the player changes the rules by pushing the words. A level is won by moving the object that is YOU onto an object that is WIN. It is a [grid game](../environments.md#grid-games): ARC's conventions, RESET as action 0, and ROAE against an optimal player.
 
+**Status:** kept in the code, but not part of the benchmark. The levels are small (one 8x8 room or two rooms in 13x9), and in a pilot Sonnet 5.5 solved every pack and named the game's mechanism within a few tool calls, so it adds little beyond PuzzleScript.
+
 ## Why it is in the benchmark
 
 - **The rules are part of the state.** Pushing a word can make another object the player, remove a wall's STOP, or make a new object WIN. A world model must parse the sentences on the board after every move; a wrong guess about the grammar shows up as a prediction mismatch at once.
@@ -52,7 +54,7 @@ What the selection cut, per family (from `selection` in the data file). Exact re
 
 ## Observation and actions
 
-`obs.frame` is the grid, a list of rows. Each cell holds one integer per kind of object or word block on top of it (the same kind always has the same integer); the table is in `data/babaisai_packs.json` and the agent never sees it. Code 0 is an empty cell. The video draws word blocks framed, so they read as blocks.
+`obs.frame` is the grid, a list of rows. Each cell holds one integer per kind of object or word block on top of it (the same kind always has the same integer); the table is in `data/babaisai_packs.json` and the agent never sees it. Code 0 is an empty cell. The agent's picture gives each code its own tile and no meaning: codes 1-14 are flat colours assigned arbitrarily (no object keeps its engine colour), codes 15-28 the same colours with a black hole, so a picture always decodes back to its grid. The viewer's Human view uses the engine's own tiles.
 
 Actions: 0 RESET, 1 up, 2 down, 3 left, 4 right. A move into a STOP object, or a push of a word against one, changes nothing (it still counts as an action).
 

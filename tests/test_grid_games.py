@@ -3,6 +3,7 @@
 import json
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -121,6 +122,28 @@ def test_babaisai_hides_the_game_and_lifts_the_step_limit():
     obs = problem.obs_renderer(task, mode=ObsMode.RAW).render(*env.reset())
     frame = problem.render_frame(obs)
     assert frame.shape[2] == 3 and problem.secret_modules() == ("baba",)
+
+
+def test_babaisai_picture_identifies_its_observation():
+    """One tile per code, all different: every picture decodes back to its grid of codes."""
+    import numpy as np
+
+    from regact.problems.grid_games import babaisai
+
+    problem = _babaisai()
+    codes = [*range(len(babaisai._load()[2])), babaisai._UNKNOWN_CODE]
+    tiles = {babaisai.code_tile(code).tobytes(): code for code in codes}
+    assert len(tiles) == len(codes)
+    for task in babaisai._load()[0].values():
+        for env_id, seed in task.levels:
+            grid = [
+                [babaisai._load()[1].get(cell, babaisai._UNKNOWN_CODE) for cell in row]
+                for row in babaisai.encoded_rows(babaisai.make_engine(env_id, seed))
+            ]
+            picture = np.asarray(problem.render_frame(SimpleNamespace(frame=grid)))
+            rows = np.split(picture, len(grid), axis=0)
+            cells = [np.split(row, len(grid[0]), axis=1) for row in rows]
+            assert [[tiles[cell.tobytes()] for cell in row] for row in cells] == grid
 
 
 class _NoDraws:
