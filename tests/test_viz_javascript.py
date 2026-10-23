@@ -363,7 +363,8 @@ vm.runInContext(String.raw`
                  {experiment: 'slow', task: 't', metrics: run([[50, 1]], 200)}];
   const spec = metricSpecs(games).find((s) => s.key === 'derived:rhae');
   const shown = comparableSpec(spec, groupByExpTask(games), false);
-  if (shown.horizons.get('t') !== 70) throw Error('horizon ' + shown.horizons.get('t'));
+  // The fast run won its game, so only the unfinished slow run (ending at 200) sets the horizon.
+  if (shown.horizons.get('t') !== 200) throw Error('horizon ' + shown.horizons.get('t'));
   if (!near(shown.get(games[0].metrics), expected.all.rhae)) throw Error('fast run keeps its 3 levels');
 `, sandbox);
 """
