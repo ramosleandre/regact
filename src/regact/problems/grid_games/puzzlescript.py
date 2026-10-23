@@ -27,7 +27,6 @@ from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory, RegactError
 from regact.problems.base import register_problem
 from regact.problems.grid_games.base import (
-    _RENDER_SCALE,
     GridGame,
     GridGameProblem,
     GridTask,
@@ -40,7 +39,10 @@ _SERVER = Path(__file__).parent / "puzzlescript_node" / "serve.js"
 ENGINE_COMMIT = "666f92c9c7dfe5cdf86c3e7a64374f7ad667b087"  # increpare/PuzzleScript, 2026-10-16
 # Our directions (1 up, 2 down, 3 left, 4 right, 5 the game's "action") -> the engine's input codes.
 ENGINE_DIR = {1: 0, 2: 2, 3: 1, 4: 3, 5: 4}
-_OBJECT_COLOURS = (9, 12, 14, 8, 11, 6, 10, 15, 13, 7, 2, 1, 3)  # skips the background shades
+_BACKGROUND = 0  # the background object's id in every game of the set (checked by a test)
+# The agent's picture: a tile per cell, wide enough for three objects side by side.
+_TILE = 30
+_OBJECT_COLOURS = (9, 12, 11, 15, 6, 10, 13, 7, 1, 2, 3, 14, 0, 8)  # black is the background
 _SPRITE_SCALE = 5  # px per sprite pixel in the viewer's picture (a cell is 5x5 sprite pixels)
 
 
@@ -154,6 +156,18 @@ def _sprites(task_name: str) -> tuple[list[tuple[list, list]], list[int], tuple[
     return sprites, info["layers"], _rgb(info["background"])
 
 
+def object_stripe(stripe: Any, obj: int) -> None:
+    """Draw one object into its stripe of a tile: ids 1-14 a flat colour, 15-28 the same colour
+    with a black hole, inside a one-pixel black border."""
+    holed, index = divmod(obj - 1, len(_OBJECT_COLOURS))
+    if not 0 <= holed <= 1:
+        raise ValueError(f"no picture for object id {obj}: the game has too many objects")
+    height, width = stripe.shape[:2]
+    stripe[1:-1, 1:-1] = ARC_PALETTE[_OBJECT_COLOURS[index]]
+    if holed:
+        stripe[height // 3 : -(height // 3), width // 3 : width - width // 3] = ARC_PALETTE[5]
+
+
 class PuzzleScriptProblem(GridGameProblem):
     name = "puzzlescript"
     frame_note = (
@@ -175,22 +189,21 @@ class PuzzleScriptProblem(GridGameProblem):
         return PuzzleScriptGame(game_source(_load()[1][task.key]["sha256"]), task.levels)
 
     def render_frame(self, obs: Obs) -> Any | None:
-        """Each object id in its own colour; stacked objects as nested squares."""
+        """The background black; each other object of a cell a vertical stripe, in id order,
+        drawn by :func:`object_stripe`. Every cell content has its own tile."""
         import numpy as np
 
         grid = _current_grid(obs.frame, depth=3)
         if grid is None:
             return None
-        scale = _RENDER_SCALE
-        out = np.zeros((len(grid) * scale, len(grid[0]) * scale, 3), dtype=np.uint8)
+        out = np.zeros((len(grid) * _TILE, len(grid[0]) * _TILE, 3), dtype=np.uint8)
         for r, row in enumerate(grid):
             for c, objects in enumerate(row):
-                tile = out[r * scale : (r + 1) * scale, c * scale : (c + 1) * scale]
-                tile[:] = ARC_PALETTE[5]
-                for depth, obj in enumerate(sorted(objects)[1:] if len(objects) > 1 else objects):
-                    inset = depth * scale // 6
-                    colour = ARC_PALETTE[_OBJECT_COLOURS[obj % len(_OBJECT_COLOURS)]]
-                    tile[inset : scale - inset, inset : scale - inset] = colour
+                shown = [obj for obj in objects if obj != _BACKGROUND]
+                tile = out[r * _TILE : (r + 1) * _TILE, c * _TILE : (c + 1) * _TILE]
+                for k, obj in enumerate(shown):
+                    left = k * _TILE // len(shown)
+                    object_stripe(tile[:, left : (k + 1) * _TILE // len(shown)], obj)
         return out
 
     def render_frame_for_viewer(self, obs: Obs, task_name: str) -> Any | None:

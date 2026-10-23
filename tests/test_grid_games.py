@@ -251,3 +251,26 @@ def test_puzzlescript_viewer_draws_each_game_with_its_sprites():
         len(native) * 25,
         len(native[0]) * 25,
     )
+
+
+def test_puzzlescript_picture_identifies_its_observation():
+    """Every cell content (up to four objects on the background) has its own tile, so a picture
+    decodes back to its grid; the background, drawn black, is id 0 and alone on its layer."""
+    import itertools
+
+    import numpy as np
+
+    from regact.problems.grid_games import puzzlescript
+
+    problem = puzzlescript.PuzzleScriptProblem()
+    tiles = set()
+    for k in range(5):
+        for objects in itertools.combinations(range(1, 29), k):
+            cell = [[[puzzlescript._BACKGROUND, *objects]]]
+            tiles.add(np.asarray(problem.render_frame(SimpleNamespace(frame=cell))).tobytes())
+    assert len(tiles) == sum(len(list(itertools.combinations(range(28), k))) for k in range(5))
+    _, games = _puzzlescript()
+    for game in games:
+        _, layers, _ = puzzlescript._sprites(game["key"])
+        assert [obj for obj, layer in enumerate(layers) if layer == 0] == [puzzlescript._BACKGROUND]
+        assert len(layers) - 1 <= 2 * len(puzzlescript._OBJECT_COLOURS)

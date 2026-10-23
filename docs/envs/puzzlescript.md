@@ -43,7 +43,7 @@ A game is kept only when the search solves every one of these levels (60 s, then
 
 ## Observation and actions
 
-`obs.frame` is the grid, a list of rows; each cell is the sorted list of the integer ids of its objects (the background object is in every cell). Actions: 0 RESET, 1 up, 2 down, 3 left, 4 right, and 5, the game's own extra action, for games that have one. An action that changes nothing still counts. Pictures saved for the agent draw each object id in its own colour, stacked objects as nested squares, so they show nothing the observation does not; the viewer, videos and icons draw the games' own sprites.
+`obs.frame` is the grid, a list of rows; each cell is the sorted list of the integer ids of its objects (the background object is in every cell). Actions: 0 RESET, 1 up, 2 down, 3 left, 4 right, and 5, the game's own extra action, for games that have one. An action that changes nothing still counts. Pictures saved for the agent draw the background black and every other object of a cell as a vertical stripe, in id order: ids 1-14 a flat colour, 15-28 the same colour with a black hole, assigned arbitrarily. Every cell content has its own tile, so a picture decodes back to its grid and shows nothing the observation does not; the viewer, videos and icons draw the games' own sprites.
 
 ## Use it
 
