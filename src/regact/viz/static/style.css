@@ -235,3 +235,47 @@ main:has(.graphs) { max-width: none; }
 .panelnav .snapnote { margin-left: auto; font-size: 12px; }
 .linebtn { padding: 0 2px; margin-right: 5px; height: 14px; line-height: 0; background: none; border: 1px solid var(--line); border-radius: 3px; cursor: pointer; vertical-align: middle; }
 .linesample { display: inline-block; vertical-align: middle; margin-right: 6px; }
+
+/* replay: controls, slider + marker strip, frame (left) beside the conversation so far (right) */
+main:has(.replay) { max-width: none; }
+.rbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 8px; }
+.rrate { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.rpos { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.rslide { margin-bottom: 8px; }
+.rslider { width: 100%; accent-color: var(--accent); margin: 0; }
+.rstrip { display: block; width: 100%; overflow: visible; }
+.rstrip .rtick { cursor: pointer; }
+.rmain { display: grid; grid-template-columns: minmax(280px, 45%) 1fr; gap: 16px; align-items: start; }
+.rframe { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 10px; }
+.rimg { display: block; width: 100%; max-height: 50vh; object-fit: contain; image-rendering: pixelated; }
+.rcap { font-size: 12px; margin-top: 6px; }
+.rwarn { color: var(--bad); }
+.rleft { position: sticky; top: 64px; display: flex; flex-direction: column; gap: 10px; }
+.rmismatch { border-color: var(--bad); }
+.rmismatch .rwarn { font-size: 12px; margin-bottom: 6px; }
+.rmismatch .rimg { max-height: 26vh; }
+.rconv { height: 78vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 8px 10px; }
+.ritem { border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; padding: 6px 9px; background: var(--panel2); cursor: pointer; }
+.ritem:hover { border-color: var(--accent); }
+.ritem.rnow { box-shadow: 0 0 0 2px var(--accent); }
+.ritem pre { margin: 2px 0; font-size: 12px; max-height: 340px; overflow: hidden; }
+.ritem.rtext { background: var(--panel); }
+.ritem.rtext pre { font-size: 13px; color: var(--fg); }
+.ritem.rthinking pre { color: var(--think); }
+.ritem .rhead { display: flex; align-items: center; gap: 8px; font-size: 12px; font-family: ui-monospace, monospace; }
+.ritem .rhead b { color: var(--accent); }
+.ritem .rhead .tool-success { margin-left: auto; }
+.ritem pre.rargs { color: var(--fg); }
+.ritem pre.rres { color: var(--muted); border-top: 1px dashed var(--line); padding-top: 3px; }
+.ritem pre.rres.err { color: var(--bad); }
+.ritem.cwm-model { border-left: 4px solid #4ec9a4; }
+.ritem.cwm-plan { border-left: 4px solid #b589f6; }
+.ritem.cwm-explore { border-left: 4px solid #55aaff; }
+.ritem.cheat { border-left: 4px solid var(--bad); }
+.rthumb { display: block; max-height: 160px; max-width: 100%; margin-top: 4px; image-rendering: pixelated; }
+.rmodal { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 5vh 16px; }
+.rmodalbox { width: min(1000px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.rmodalhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.rclose { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.rfull { font-size: 13px; }
+@media (max-width: 800px) { .rmain { grid-template-columns: 1fr; } .rleft { position: static; } .rconv { height: 60vh; } }

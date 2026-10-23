@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from regact.viz import reader
+from regact.viz import reader, replay
 from regact.viz.metrics import game_metrics
 
 _STATIC = Path(__file__).parent / "static"
@@ -245,7 +245,9 @@ def build_app(experiment_dir: str) -> FastAPI:
         return cwm_call(name, lambda task: cwm_viewer.evidence(task, kind, identifier))
 
     @app.get("/api/game/cwm/evidence-image")
-    def cwm_evidence_image(name: str, kind: str, identifier: int, side: str = "observed") -> Any:
+    def cwm_evidence_image(
+        name: str, kind: str, identifier: int, side: str = "observed", view: str = "viewer"
+    ) -> Any:
         def read(task: Path) -> Any:
             evidence = cwm_viewer.evidence(task, kind, identifier)
             if kind == "observation":
@@ -262,7 +264,11 @@ def build_app(experiment_dir: str) -> FastAPI:
             if not isinstance(obs, dict) or "frame" not in obs:
                 raise ValueError("this evidence has no observation image for that side")
             return Response(
-                cwm_viewer.png(cwm_viewer.problem_for(task), obs, cwm_viewer.task_name_of(task)),
+                cwm_viewer.png(
+                    cwm_viewer.problem_for(task),
+                    obs,
+                    cwm_viewer.task_name_of(task) if view == "viewer" else None,
+                ),
                 media_type="image/png",
             )
 
@@ -282,6 +288,30 @@ def build_app(experiment_dir: str) -> FastAPI:
         ):
             raise HTTPException(404, detail="recorded tool image unavailable")
         return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+    @app.get("/api/game/replay")
+    def game_replay(name: str) -> dict[str, Any]:
+        _require_game(name)
+        view = reader.load_game(experiment_dir, name)
+        return replay.timeline(root / name, view, reader.problem_of(view.config))
+
+    @app.get("/api/game/replay/frame")
+    def replay_frame(name: str, obs: int, view: str = "agent") -> Any:
+        if view not in ("agent", "viewer"):
+            raise HTTPException(422, detail="view must be agent or viewer")
+
+        def read(task: Path) -> Any:
+            config = json.loads((task / "config.json").read_text())
+            problem = reader.problem_of(config)
+            if problem is None:
+                raise ValueError("this run's problem cannot be rebuilt here")
+            return Response(
+                replay.frame_png(task, problem, obs, view),
+                media_type="image/png",
+                headers={"Cache-Control": "private, max-age=86400"},
+            )
+
+        return cwm_call(name, read)
 
     @app.get("/api/game/cwm/source")
     def cwm_source(name: str, bundle: str, filename: str = "") -> Any:

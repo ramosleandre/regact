@@ -49,6 +49,7 @@ class TurnItem:
     kind: str  # "thinking" | "text" | "tool"
     text: str = ""  # for thinking / text
     tool: ToolCallView | None = None  # for tool
+    at: float | None = None  # UNIX seconds, when recorded (a tool's times are on the tool)
 
 
 @dataclass
@@ -343,20 +344,21 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
 
     for event in events:
         kind = event.get("type")
+        at = _epoch(event.get("ts"))
         if kind == "TextDelta":
-            current.items.append(TurnItem("text", text=str(event.get("text", ""))))
+            current.items.append(TurnItem("text", text=str(event.get("text", "")), at=at))
         elif kind == "ThinkingDelta":
-            current.items.append(TurnItem("thinking", text=str(event.get("text", ""))))
+            current.items.append(TurnItem("thinking", text=str(event.get("text", "")), at=at))
         elif kind == "SystemPrompt":
-            current.items.append(TurnItem("system", text=str(event.get("text", ""))))
+            current.items.append(TurnItem("system", text=str(event.get("text", "")), at=at))
         elif kind == "UserMessage":
-            current.items.append(TurnItem("user", text=str(event.get("text", ""))))
+            current.items.append(TurnItem("user", text=str(event.get("text", "")), at=at))
         elif kind == "ToolCall":
             call = ToolCallView(
                 id=str(event.get("id", "")),
                 name=str(event.get("name", "")),
                 input=event.get("input") or {},
-                started=_epoch(event.get("ts")),
+                started=at,
                 synthetic=bool(event.get("synthetic")),
             )
             current.items.append(TurnItem("tool", tool=call))
@@ -366,7 +368,7 @@ def _group_turns(events: list[dict[str, Any]]) -> list[TurnView]:
             if target is not None:
                 target.result = str(event.get("output", ""))
                 target.is_error = bool(event.get("is_error", False))
-                target.ended = _epoch(event.get("ts"))
+                target.ended = at
                 target.images = event.get("images") or []
         elif kind in ("IterationComplete", "TurnComplete"):  # "TurnComplete" = pre-rename bench 01
             current.usage = event.get("usage")

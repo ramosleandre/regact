@@ -146,10 +146,21 @@ def _milestone_detector(env: Any) -> list[str]:
     return out
 
 
-def _current_grid(frame: Any) -> list[list[Any]] | None:
+def _current_grid(frame: Any, depth: int = 2) -> list[list[Any]] | None:
+    """The grid of a frame nested ``depth`` lists deep (3 when cells are lists). A run recorded
+    before the frame became the grid itself wrapped it in a one-element list."""
+    while isinstance(frame, list) and len(frame) == 1 and _nesting(frame) > depth:
+        frame = frame[0]
     if isinstance(frame, list) and frame and all(isinstance(row, list) and row for row in frame):
         return frame
     return None
+
+
+def _nesting(value: Any) -> int:
+    n = 0
+    while isinstance(value, list) and value:
+        value, n = value[0], n + 1
+    return n
 
 
 def _optimal_names(scores: dict[str, float]) -> dict[str, float]:

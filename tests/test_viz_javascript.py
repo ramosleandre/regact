@@ -370,3 +370,27 @@ vm.runInContext(String.raw`
 """
     payload = json.dumps({"reference": reference, "points": points, "expected": expected})
     subprocess.run([node, "-e", script, str(source), payload], check=True, timeout=10)
+
+
+def test_replay_shows_everything_up_to_the_position():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = Path(__file__).parents[1] / "src/regact/viz/static/app.js"
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sandbox = {document: {getElementById: () => ({})}, window: {addEventListener: () => {}},
+  AbortController, DOMException, Intl, URL, fetch: async () => ({ok: true, json: async () => ({})})};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8').replace(/route\(\);\s*$/, ''), sandbox);
+vm.runInContext(String.raw`
+  const values = [null, 0, 0, 2, 5];
+  if (replayCount(values, -1) !== 1) throw Error('an item without a position is always shown');
+  if (replayCount(values, 0) !== 3 || replayCount(values, 4.9) !== 4 || replayCount(values, 9) !== 5)
+    throw Error('count up to the position');
+  const tl = {frames: [{env_actions: 3, seconds: 1.5}], items: [[0, 0, 7, 1, 2.5]]};
+  if (replayExtent(tl, 'env_actions') !== 7 || replayExtent(tl, 'seconds') !== 2.5) throw Error('extent');
+`, sandbox);
+"""
+    subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

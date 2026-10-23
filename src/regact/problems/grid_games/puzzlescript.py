@@ -178,7 +178,7 @@ class PuzzleScriptProblem(GridGameProblem):
         """Each object id in its own colour; stacked objects as nested squares."""
         import numpy as np
 
-        grid = _current_grid(obs.frame)
+        grid = _current_grid(obs.frame, depth=3)
         if grid is None:
             return None
         scale = _RENDER_SCALE
@@ -197,7 +197,7 @@ class PuzzleScriptProblem(GridGameProblem):
         """The game's own 5x5 sprites, layer by layer: for people, not the agent."""
         import numpy as np
 
-        grid = _current_grid(obs.frame)
+        grid = _current_grid(obs.frame, depth=3)
         if grid is None or task_name not in self.tasks():
             return self.render_frame(obs)
         sprites, layers, background = _sprites(task_name)
@@ -219,7 +219,7 @@ class PuzzleScriptProblem(GridGameProblem):
         return out
 
     def render_obs_text(self, obs: Obs) -> str | None:
-        grid = _current_grid(obs.frame)
+        grid = _current_grid(obs.frame, depth=3)
         if grid is None:
             return None
         info = obs.info or {}

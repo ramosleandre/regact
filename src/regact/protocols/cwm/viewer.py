@@ -9,7 +9,7 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import fields
 from datetime import datetime
@@ -158,6 +158,26 @@ def _timestamps(
     return out
 
 
+def active_clock(task: Path) -> Callable[[float], float]:
+    """Seconds the agent had worked by a given UNIX time: its sessions, without the gaps between
+    them (a resume after a usage limit). Without session events, it counts from the first event."""
+    sessions: list[list[float]] = []  # [start, end] of each stretch the agent worked
+    seen = 0.0
+    for at, name in _timestamps(task / "logs/events.jsonl", "event", ()):
+        if name == "session_start":
+            if sessions and sessions[-1][1] == float("inf"):
+                sessions[-1][1] = seen  # it died without a session_end: it worked until its last event
+            sessions.append([at, float("inf")])
+        elif name == "session_end" and sessions:
+            sessions[-1][1] = at
+        seen = at
+    if not sessions:
+        first = _timestamps(task / "logs/transcript.jsonl", "type", ())
+        origin = first[0][0] if first else 0.0
+        return lambda at: max(0.0, at - origin)
+    return lambda at: sum(max(0.0, min(end, at) - start) for start, end in sessions)
+
+
 def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]]:
     with database(task) as db:
         trace = store_info_trace(db, problem.counts_as_action)
@@ -172,16 +192,7 @@ def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]
         at
         for at, _ in _timestamps(task / "logs/transcript.jsonl", "type", ("ToolCall",), "synthetic")
     ]
-    sessions: list[list[float]] = []  # [start, end] of each stretch the agent worked
-    seen = 0.0
-    for at, name in _timestamps(task / "logs/events.jsonl", "event", ()):
-        if name == "session_start":
-            if sessions and sessions[-1][1] == float("inf"):
-                sessions[-1][1] = seen  # it died without a session_end: it worked until its last event
-            sessions.append([at, float("inf")])
-        elif name == "session_end" and sessions:
-            sessions[-1][1] = at
-        seen = at
+    clock = active_clock(task)
     points: list[dict[str, Any]] = []
     best = 0.0
     for step, (actions, info) in enumerate(trace, start=1):
@@ -195,9 +206,7 @@ def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]
                 "value": value,
                 "env_actions": actions,
                 "tool_calls": None if at is None else bisect.bisect_right(calls, at),
-                "seconds": None
-                if at is None
-                else round(sum(max(0.0, min(end, at) - start) for start, end in sessions), 1),
+                "seconds": None if at is None else round(clock(at), 1),
             }
         )
     return points

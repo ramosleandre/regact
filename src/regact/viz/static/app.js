@@ -1227,7 +1227,7 @@ async function renderGameGraphs(name) {
 }
 
 // ---------------------------------------------------------------- per-game shell
-const TABS = [["", "Overview"], ["conversation", "Conversation"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
+const TABS = [["", "Overview"], ["conversation", "Conversation"], ["replay", "Replay"], ["artifacts", "Artifacts"], ["logs", "Logs"], ["graphs", "Graphs"]];
 
 function shell(name, active, body) {
   crumb.textContent = name;
@@ -1794,6 +1794,251 @@ function controllerReplay(game, id) {
   return box;
 }
 
+// ---------------------------------------------------------------- replay tab
+// The whole run as a video: the real frame at a position on the chosen x-axis, beside the
+// conversation up to that position. /api/game/replay places every frame and conversation item on
+// the three axes; items are [turn, item, env_actions, tool_calls, seconds], nondecreasing.
+const _REPLAY_AXES = { env_actions: "Env actions", tool_calls: "Tool calls", seconds: "Time" };
+const _REPLAY_COLUMN = { env_actions: 2, tool_calls: 3, seconds: 4 };
+const _REPLAY_RATES = { env_actions: [1, 2, 4, 8, 16, 32], tool_calls: [0.5, 1, 2, 4, 8], seconds: [10, 30, 60, 120, 300, 600] };
+const _REPLAY_TEXT_MAX = 1500;   // agent text and reasoning: a large preview, the rest on click
+const _REPLAY_TOOL_MAX = 300;    // a tool call's command and result previews
+const _MARKER_COLORS = { progress: "#e0c060", model: "#4ec9a4", model_refused: "#9aa3b2", mismatch: "#e06c6c" };
+const _MARKER_LABELS = { progress: "level / progress", model: "model accepted", model_refused: "model refused", mismatch: "prediction mismatch" };
+
+// Number of entries whose value is <= x, values nondecreasing; a null value is always shown.
+function replayCount(values, x) {
+  let lo = 0, hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (values[mid] == null || values[mid] <= x) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+function replayExtent(tl, axis) {
+  let max = 0;
+  for (const f of tl.frames) if (f[axis] != null) max = Math.max(max, f[axis]);
+  for (const row of tl.items) { const v = row[_REPLAY_COLUMN[axis]]; if (v != null) max = Math.max(max, v); }
+  return max;
+}
+
+function replayPosition(axis, x) {
+  if (axis === "seconds") return dur(x);
+  return `${fmt(Math.round(x))} ${axis === "env_actions" ? "env actions" : "tool calls"}`;
+}
+
+function replayPreview(text, max) {
+  const s = String(text || "");
+  return s.length > max ? s.slice(0, max) + " …" : s;
+}
+
+// Like segBtns, with display labels: options are [value, label] pairs.
+function replaySeg(label, options, current, onPick) {
+  const seg = h("span", "seg", h("span", "muted", label));
+  const btns = [];
+  for (const [value, text] of options) {
+    const b = h("button", "aggbtn" + (value === current ? " on" : ""), text);
+    b.onclick = () => { for (const other of btns) other.classList.toggle("on", other === b); onPick(value); };
+    btns.push(b);
+    seg.append(b);
+  }
+  return seg;
+}
+
+function replayModal(title, body) {
+  const overlay = h("div", "rmodal");
+  const box = h("div", "rmodalbox");
+  const close = h("button", "rclose", "Close");
+  const done = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") done(); };
+  close.onclick = done;
+  overlay.onclick = (e) => { if (e.target === overlay) done(); };
+  document.addEventListener("keydown", onKey);
+  box.append(h("div", "rmodalhead", h("b", null, title), close), body);
+  overlay.append(box);
+  document.body.append(overlay);
+  pageCleanups.push(done);
+}
+
+// One conversation item as a compact card; a click shows it in full.
+function replayItem(it, gameName) {
+  if (it.kind === "tool" && it.tool) {
+    const tool = it.tool;
+    const style = _CWM_TOOL_STYLE[tool.framework_tool];
+    const card = h("div", "ritem rtool" + (style ? " " + style : "") + (tool.tag === "cheat" ? " cheat" : ""));
+    const head = h("div", "rhead");
+    if (tool.framework_tool) {
+      head.append(h("span", "tag tag-" + (style || "cwm"), commandLabel(tool)));
+      if (tool.succeeded) head.append(h("span", "tool-success", "✓"));
+    } else if (tool.tag) head.append(h("span", "tag tag-" + tool.tag, _TAG_LABEL[tool.tag]));
+    head.append(h("b", null, tool.name));
+    card.append(head);
+    const cmd = shellCommand(tool.input || {});
+    const args = cmd !== null ? parseHeredocs(cmd).text
+      : typeof tool.input?.file_path === "string" ? tool.input.file_path : JSON.stringify(tool.input || {});
+    card.append(h("pre", "rargs", replayPreview(args, _REPLAY_TOOL_MAX)));
+    if (tool.result != null) card.append(h("pre", "rres" + (tool.is_error ? " err" : ""), replayPreview(tool.result, _REPLAY_TOOL_MAX)));
+    for (const attachment of tool.images || []) {
+      if (!attachment.filename) continue;
+      const img = h("img", "rthumb"); img.alt = "Image returned to the agent"; img.loading = "lazy";
+      img.src = `/api/game/tool-image?name=${encodeURIComponent(gameName)}&filename=${encodeURIComponent(attachment.filename)}`;
+      card.append(img);
+    }
+    card.onclick = () => replayModal(tool.name, toolBlock(tool, gameName));
+    return card;
+  }
+  const label = { thinking: "\u{1F4AD} reasoning", system: "⚙ system prompt", user: "\u{1F4E8} sent to the agent" }[it.kind];
+  const card = h("div", "ritem r" + it.kind);
+  if (label) card.append(h("div", "rhead muted", label));
+  const short = it.kind === "system" ? 200 : _REPLAY_TEXT_MAX;
+  card.append(h("pre", null, replayPreview(it.text, short)));
+  card.onclick = () => replayModal(label || "agent text", h("pre", "rfull", it.text));
+  return card;
+}
+
+async function renderReplay(name) {
+  const d = await gameDetail(name);
+  const tl = await api("/api/game/replay?name=" + encodeURIComponent(name));
+  const frameUrl = (f, view) => `/api/game/replay/frame?name=${encodeURIComponent(name)}&obs=${f.obs}&view=${view}`;
+  const rows = tl.items.filter(([turn, item]) => d.turns[turn]?.items?.[item]);
+  const items = rows.map(([turn, item]) => d.turns[turn].items[item]);
+  let axis = tl.axes[0], view = tl.views[0], x = 0, playing = null, carry = 0, placed = false;
+  let values = [], frameValues = [];
+
+  const page = h("div", "replay");
+  const bar = h("div", "rbar");
+  const slider = h("input", "rslider"); slider.type = "range"; slider.min = 0;
+  const strip = svg("svg", { class: "rstrip", height: 14 });
+  const position = h("span", "rpos");
+  const frameBox = h("div", "rframe");
+  const mismatchBox = h("div", "rframe rmismatch");
+  mismatchBox.hidden = true;
+  const conv = h("div", "rconv");
+  page.append(bar, h("div", "rslide", slider, strip), h("div", "rmain", h("div", "rleft", frameBox, mismatchBox), conv));
+
+  const playBtn = h("button", "aggbtn", "▶ Play");
+  const rate = h("select", "rrate");
+  bar.append(replaySeg("x-axis", tl.axes.map((a) => [a, _REPLAY_AXES[a]]), axis, (a) => setAxis(a)), playBtn, rate, position);
+  if (tl.views.length > 1) {
+    const views = tl.views.map((v) => [v, v === "viewer" ? "Human view" : "Agent view"]);
+    bar.append(replaySeg("view", views, view, (v) => { view = v; drawFrame(true); }));
+  }
+  const legendItems = [...new Set(tl.markers.map((m) => m.kind))].map((k) => ({ label: _MARKER_LABELS[k] || k, color: _MARKER_COLORS[k] || "#9aa3b2" }));
+  if (legendItems.length) page.insertBefore(legend(legendItems), page.children[2]);
+
+  // Frame panel
+  const img = h("img", "rimg"); img.alt = "Real environment frame";
+  const caption = h("div", "muted rcap");
+  if (tl.frames.length) frameBox.append(img, caption);
+  else frameBox.append(h("div", "muted", "No recorded frames for this run: only runs with an experience store (CWM and vanilla protocols) keep every real step. The conversation still replays."));
+
+  let shownFrame = -1;
+  function drawFrame(force = false) {
+    if (!tl.frames.length) return;
+    const k = Math.max(0, replayCount(frameValues, x) - 1);
+    if (k === shownFrame && !force) return;
+    shownFrame = k;
+    const f = tl.frames[k];
+    img.src = frameUrl(f, view);
+    for (let j = k + 1; j <= k + 3 && j < tl.frames.length; j++) new Image().src = frameUrl(tl.frames[j], view);
+    const action = f.action == null ? (f.reset ? "reset" : "start") : "action " + (typeof f.action === "object" ? JSON.stringify(f.action) : f.action);
+    caption.textContent = `frame ${k + 1}/${tl.frames.length} · ${action} · ${fmt(f.env_actions)} env actions`;
+    clear(mismatchBox);
+    mismatchBox.hidden = f.diagnostic == null;
+    if (f.diagnostic != null) {
+      const pred = h("img", "rimg"); pred.alt = "What the model predicted";
+      pred.src = `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${f.diagnostic}&side=predicted&view=${view}`;
+      pred.onerror = () => pred.replaceWith(h("div", "muted", "prediction image unavailable"));
+      mismatchBox.append(h("div", "rwarn", "Prediction mismatch: the model predicted this frame instead"), pred);
+    }
+  }
+
+  // Conversation panel: nodes are built once, on first display, and appended or detached.
+  const nodes = [];
+  let shownItems = 0;
+  function drawConversation() {
+    const k = replayCount(values, x);
+    while (shownItems < k) {
+      if (!nodes[shownItems]) nodes[shownItems] = replayItem(items[shownItems], name);
+      conv.append(nodes[shownItems++]);
+    }
+    while (shownItems > k) nodes[--shownItems].remove();
+    for (const node of conv.querySelectorAll(".rnow")) node.classList.remove("rnow");
+    const latest = k ? values[k - 1] : null;
+    for (let j = k - 1; j >= 0 && values[j] === latest; j--) nodes[j].classList.add("rnow");
+    conv.scrollTop = conv.scrollHeight;
+  }
+
+  function draw() {
+    position.textContent = `${replayPosition(axis, x)} / ${replayPosition(axis, Number(slider.max))}`;
+    drawFrame();
+    drawConversation();
+  }
+
+  function drawStrip() {
+    clear(strip);
+    const max = Number(slider.max) || 1;
+    // Levels get their own lane, so a model update at the same moment cannot cover them.
+    const lanes = tl.markers.some((m) => m.kind === "progress") && tl.markers.some((m) => m.kind !== "progress");
+    strip.setAttribute("height", lanes ? 22 : 14);
+    for (const m of tl.markers) {
+      if (m[axis] == null) continue;
+      const y = lanes && m.kind !== "progress" ? 12 : 0;
+      const tick = svg("rect", { x: `${(m[axis] / max) * 100}%`, y, width: 3, height: lanes ? 10 : 14, fill: _MARKER_COLORS[m.kind] || "#9aa3b2", class: "rtick" });
+      tick.append(svg("title", {}, txt(`${m.label} · ${replayPosition(axis, m[axis])}`)));
+      tick.onclick = () => { x = m[axis]; slider.value = x; draw(); };
+      strip.append(tick);
+    }
+  }
+
+  function setAxis(a) {
+    axis = a;
+    values = rows.map((row) => row[_REPLAY_COLUMN[axis]]);
+    frameValues = tl.frames.map((f) => f[axis]);
+    const max = replayExtent(tl, axis);
+    slider.max = max;
+    slider.step = axis === "seconds" ? Math.max(1, max / 2000) : 1;
+    // Keep the place: the frame shown stays the frame shown.
+    const f = tl.frames[shownFrame];
+    x = placed && f && f[axis] != null ? f[axis] : Math.min(x, max);
+    placed = true;
+    slider.value = x;
+    clear(rate);
+    for (const r of _REPLAY_RATES[axis]) {
+      const o = h("option", null, axis === "seconds" ? `${r}x` : `${r} / s`); o.value = r; rate.append(o);
+    }
+    rate.value = _REPLAY_RATES[axis][2];
+    drawStrip();
+    draw();
+  }
+
+  slider.oninput = () => { x = Number(slider.value); draw(); };
+  function stop() { if (playing) clearInterval(playing); playing = null; playBtn.textContent = "▶ Play"; }
+  playBtn.onclick = () => {
+    if (playing) return stop();
+    if (x >= Number(slider.max)) x = 0;
+    playBtn.textContent = "⏸ Pause";
+    carry = 0;
+    playing = setInterval(() => {
+      if (!page.isConnected) return stop();
+      carry += Number(rate.value) / 10;
+      const step = axis === "seconds" ? carry : Math.floor(carry);
+      if (!step) return;
+      carry -= step;
+      x = Math.min(Number(slider.max), x + step);
+      slider.value = x;
+      draw();
+      if (x >= Number(slider.max)) stop();
+    }, 100);
+  };
+  pageCleanups.push(stop);
+
+  shell(name, "replay", page);
+  if (!items.length) conv.append(h("div", "muted", "no transcript"));
+  setAxis(axis);
+}
+
 // ---------------------------------------------------------------- artifacts tab
 // A classic file tree: folders first, closed until clicked; onFile(file, element) opens a file.
 function fileTree(files, onFile) {
@@ -1914,6 +2159,7 @@ async function route() {
     await gameDetail(name);
     const tab = parts[2] || "";
     if (tab === "conversation") await renderConversation(name);
+    else if (tab === "replay") await renderReplay(name);
     else if (tab === "artifacts") await renderArtifacts(name);
     else if (tab === "logs") await renderLogs(name);
     else if (tab === "graphs") await renderGameGraphs(name);
