@@ -126,6 +126,11 @@ Isolation prevents runtime database lookup, but cannot prevent an agent copying 
   disables OS confinement; setting `sandbox_opts.network_isolation=false` disables
   the egress block while retaining filesystem confinement when sandboxing is on.
   The scripted backend evaluates in-process without an evaluator sandbox.
+- The **CWM and vanilla workers** (which run the agent's world model and controllers) need an
+  OS sandbox even when `sandbox=false`, and the run refuses to start without one. Where none
+  can exist and the platform itself is the boundary (Kaggle: no internet, a sandboxed gateway),
+  `sandbox_opts.allow_unisolated_workers=true` runs them as plain subprocesses, keeping only the
+  worker's own limits (memory, time). Off by default; never set it where a sandbox is available.
 
 ## HPC diagnostics
 

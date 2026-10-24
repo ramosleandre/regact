@@ -87,6 +87,7 @@ class _ArcGymShim:
         self._GameAction = GameAction
         self._GameState = GameState
         self._last: Any = getattr(arc_env, "_last_response", None)
+        self._stepped = False  # whether the game moved since make() reset it
 
     def current(self) -> tuple[Any, dict[str, Any]] | None:
         """The observation without taking an action (the frame from creation/last step)."""
@@ -106,6 +107,9 @@ class _ArcGymShim:
         """
         game = getattr(self._env, "_game", None)
         if game is None:
+            # Online, make() already reset the game: until a move, that frame is the reset.
+            if kind == "environment" and not self._stepped and self._last is not None:
+                return self._last, self._info(self._last)
             raise ValueError("Explicit ARC reset modes require the local/offline engine")
         method = {"environment": "full_reset", "level": "level_reset"}.get(kind)
         if method is None:
@@ -126,6 +130,7 @@ class _ArcGymShim:
                 del game.handle_reset
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        self._stepped = True
         game_action, data = self._decode(action)
         obs = self._env.step(game_action, data=data)
         if obs is not None:
@@ -378,7 +383,7 @@ class ArcAgiProblem(BaseProblem):
 
     @property
     def _is_online(self) -> bool:
-        return self._operation_mode in ("online", "normal")
+        return self._operation_mode in ("online", "normal", "competition")
 
     def _arcade_instance(self) -> Any:
         if self._arcade is None:

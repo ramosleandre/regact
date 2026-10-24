@@ -349,3 +349,20 @@ def test_factory_crash_scores_every_episode(tmp_path):
     )
     assert result.aggregate["n_episodes"] == result.aggregate["n_errors"] == 3
     assert result.aggregate["success_rate"] == 0
+
+
+def test_online_environment_reset_before_any_move_is_the_make_time_frame():
+    """Online there is no local engine to reset: make() already reset the game, so until a move
+    that frame is the environment reset; a level reset, or one after a move, still refuses."""
+    frame = SimpleNamespace(state=None, levels_completed=0, win_levels=3)
+    shim = _ArcGymShim(SimpleNamespace(_last_response=frame), max_levels=None)
+    assert shim.reset_explicit("environment")[0] is frame
+    with pytest.raises(ValueError):
+        shim.reset_explicit("level")
+    shim._stepped = True
+    with pytest.raises(ValueError):
+        shim.reset_explicit("environment")
+
+
+def test_competition_mode_counts_as_online():
+    assert ArcAgiProblem(operation_mode="competition")._is_online

@@ -646,3 +646,41 @@ def test_noop_after_reset_does_not_create_artificial_dataset_novelty(rig, monkey
     assert c.current_id == c.initial_id
     assert c.store.summary()["n_unique_observations"] == 1
     assert c.store.summary()["n_total_observations"] == 2
+
+
+def test_unisolated_workers_validate_a_model_where_no_sandbox_exists(tmp_path):
+    """sandbox_opts.allow_unisolated_workers runs the workers as plain subprocesses (Kaggle)."""
+    cfg = RunConfig(
+        AgentConfig(AgentName.SCRIPTED),
+        ProblemConfig("fake", seed=0),
+        protocol=ProtocolConfig("cwm", {"n_unique_observations_in_initial_collection": 3}),
+        sandbox_opts={"backend": "none", "allow_unisolated_workers": True},
+    )
+    (tmp_path / "config.json").write_text(json.dumps(redacted_config_dict(cfg)))
+    register_problem("fake", lambda _: Problem())
+    protocol = build_protocol(cfg)
+    protocol.validate()
+    _build_server(
+        cfg,
+        Problem(),
+        "counter",
+        protocol=protocol,
+        workdir=str(tmp_path / "workdir"),
+        output_dir=str(tmp_path),
+    )
+    Workspace(str(tmp_path / "workdir")).bootstrap(
+        [],
+        templates=protocol.templates,
+        expose_environment=False,
+        command_script=protocol.command_script,
+        problem_name="fake",
+        task_name="counter",
+        env_base_url="http://unused",
+        game_id="counter",
+        lifecycle=Lifecycle.MULTI_INSTANCE,
+    )
+    c = protocol.coordinator
+    try:
+        accept(c)
+    finally:
+        c.close("test_finished")

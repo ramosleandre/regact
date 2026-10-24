@@ -513,6 +513,7 @@ class ManagedCoordinator:
             budget_seconds=seconds,
             load_model=self.uses_model,
             clock=clock,
+            allow_unisolated=bool(self.config.sandbox_opts.get("allow_unisolated_workers", False)),
         )
 
     def data(self, body: dict[str, Any]) -> Any:

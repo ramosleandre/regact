@@ -39,9 +39,12 @@ class ManagedProtocol(ExperimentProtocol):
         if (
             resolve(SandboxRuntime(self.config.sandbox_opts.get("backend", "auto")))
             is SandboxRuntime.NONE
+            and not self.config.sandbox_opts.get("allow_unisolated_workers", False)
         ):
             raise ValueError(
-                "Managed controller protocols require OS-isolated workers, even when the agent sandbox is disabled"
+                "Managed controller protocols require OS-isolated workers, even when the agent "
+                "sandbox is disabled (where none exists, e.g. Kaggle, opt in with "
+                "sandbox_opts.allow_unisolated_workers=true)"
             )
         if (
             self.config.limits.max_actions_per_task is not None

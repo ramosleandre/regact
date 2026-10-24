@@ -45,6 +45,7 @@ class Worker:
         budget_seconds: float | None = None,
         load_model: bool = True,
         clock: budgets.AgentClock | None = None,
+        allow_unisolated: bool = False,
     ) -> None:
         # The subprocess changes cwd to private scratch; bundle paths must survive that.
         bundle = bundle.resolve()
@@ -61,7 +62,7 @@ class Worker:
         self.buffer = b""
         self.scratch = tempfile.TemporaryDirectory(prefix="regact-cwm-worker-")
         backend = resolve(runtime)
-        if backend is SandboxRuntime.NONE:
+        if backend is SandboxRuntime.NONE and not allow_unisolated:
             self.scratch.cleanup()
             raise WorkerError(
                 "CWM execution requires a usable OS sandbox", kind="isolation_unavailable"

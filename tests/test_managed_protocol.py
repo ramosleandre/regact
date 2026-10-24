@@ -499,3 +499,18 @@ def test_a_run_records_where_it_was_at_each_progress(make_rig, monkeypatch):
     assert shown["label"] == "Steps" and len(shown["points"]) >= 2
     assert all(p["env_actions"] == 2 * p["value"] for p in shown["points"])
     assert viewer.progress(c.output, c.problem, c.task, points)["points"] is points
+
+
+@pytest.mark.parametrize("protocol_name", ["vanilla", "cwm"])
+def test_workers_without_an_os_sandbox_need_an_explicit_opt_in(protocol_name):
+    def config(**opts):
+        return RunConfig(
+            AgentConfig(AgentName.SCRIPTED),
+            ProblemConfig("fake"),
+            protocol=ProtocolConfig(protocol_name, {}),
+            sandbox_opts={"backend": "none", **opts},
+        )
+
+    with pytest.raises(ValueError, match="allow_unisolated_workers"):
+        build_protocol(config()).validate()
+    build_protocol(config(allow_unisolated_workers=True)).validate()
