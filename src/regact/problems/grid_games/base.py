@@ -62,6 +62,10 @@ class GridGame(ABC):
     def close(self) -> None:  # noqa: B027 - most engines hold nothing to release
         """Release the engine's resources, if it holds any."""
 
+    def info(self) -> dict[str, Any]:
+        """What the game adds to ``obs.info`` beyond the shared fields; none by default."""
+        return {}
+
 
 @dataclass(frozen=True)
 class GridTask:
@@ -115,6 +119,7 @@ class GridGameEnv:
     def _info(self) -> dict[str, Any]:
         won = self._level >= self._n_levels
         return {
+            **self._game.info(),
             "available_actions": [] if won else [RESET, *self._actions],
             "state": "WIN" if won else "NOT_FINISHED",
             "levels_completed": self._level,

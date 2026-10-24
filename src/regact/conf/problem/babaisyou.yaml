@@ -1,0 +1,8 @@
+name: babaisyou
+tasks: []               # empty = every campaign stage (babaisyou_00 .. babaisyou_03)
+lifecycle: single_instance
+obs_mode: raw
+info_mode: informative
+seed: null              # ignored: the levels are fixed
+kwargs:
+  max_levels: null      # N = only the first N levels of each stage

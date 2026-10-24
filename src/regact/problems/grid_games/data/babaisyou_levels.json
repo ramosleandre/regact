@@ -1,0 +1,527 @@
+{
+ "version": "babaisyou-bench-v1",
+ "source": "github.com/stared/baba-is-harbor at 2adb73ad35d139ab490e2a8513631c43dec16095 (levels from Baba Is You)",
+ "built_by": "scripts/grid_games/build_babaisyou_packs.py",
+ "rejected": [],
+ "packs": [
+  {
+   "key": "babaisyou_00",
+   "stage": "map",
+   "levels": [
+    {
+     "id": "stage-00-level-00",
+     "title": "baba is you",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-00/environment/level.json",
+     "sha256": "65b829b6f9069744c88f3e57fa68281f2b25dd4f3243edea53f3ecf8dd77e96c",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-00/solution/solve.sh",
+     "solution_sha256": "5a352dff5ebfec0d95d7cd4020226b0434abd0ad2ddd4938586ea8229954636d",
+     "reference": 8
+    },
+    {
+     "id": "stage-00-level-01",
+     "title": "where do i go?",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-01/environment/level.json",
+     "sha256": "0ea4ba25bcc286979d7c68eb6b35b970e412c340244a54793907ae06ba7f727a",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-01/solution/solve.sh",
+     "solution_sha256": "f12f793c0f4d8dbe1890a20f52ec6fcda8f8b63bd8b045a92918d8d6dc5ce1c4",
+     "reference": 64
+    },
+    {
+     "id": "stage-00-level-02",
+     "title": "now what is this?",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-02/environment/level.json",
+     "sha256": "550d2f4d816d670995ee66c24ae3d1f9749b7dce153f408bcd2f6c5c20709a19",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-02/solution/solve.sh",
+     "solution_sha256": "f34b93d9f62416c3196570e5ca6562b3325dbd8a0f7a06746aff2df39d55e687",
+     "reference": 37
+    },
+    {
+     "id": "stage-00-level-03",
+     "title": "out of reach",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-03/environment/level.json",
+     "sha256": "5d1390bab61806c8cea24e7477a9dd4c614f283b55d35c469e2cb8fa0d6f988f",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-03/solution/solve.sh",
+     "solution_sha256": "9ade6b15b9be8a1e82a379839664ae3433e65a2a82a01a865b1ffd1ed46d81e6",
+     "reference": 55
+    },
+    {
+     "id": "stage-00-level-04",
+     "title": "still out of reach",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-04/environment/level.json",
+     "sha256": "1b8732af480c4ad138a7a1ea21dc3b893016d2c68477f5fae2f7269400ede54a",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-04/solution/solve.sh",
+     "solution_sha256": "a1da04ad0a1dc5aaa33e5515be621aadd9077e79d7fa1fae52cc8280f1a95bd9",
+     "reference": 37
+    },
+    {
+     "id": "stage-00-level-05",
+     "title": "volcano",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-05/environment/level.json",
+     "sha256": "94638f480117514406ce34fb71396086c8482ed3f9033ee92f812c19a55e961a",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-05/solution/solve.sh",
+     "solution_sha256": "de4696568d46e03edcad85f2087d4d40522c89e46ef9b9f341759047b0d794f3",
+     "reference": 75
+    },
+    {
+     "id": "stage-00-level-06",
+     "title": "off limits",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-06/environment/level.json",
+     "sha256": "77daa49d744b7fd1128b26e6a8aa98c900e621b974c73572062b1a32639234a4",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-06/solution/solve.sh",
+     "solution_sha256": "b9d2e66165d06fbfc8116e1b795bbaf83d533b02c79f4498b1ad96f5aa00fb6f",
+     "reference": 27
+    },
+    {
+     "id": "stage-00-level-07",
+     "title": "grass yard",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-07/environment/level.json",
+     "sha256": "10dccb60f235cfcece67447f4b0602f1006ec7d7747820b9b7ba9306253a806e",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-07/solution/solve.sh",
+     "solution_sha256": "ea9013975de3f7d19d9f9f0ae308b7a140e0d7f42b7804bd63db07ef0243a9ee",
+     "reference": 80
+    },
+    {
+     "id": "stage-00-level-08",
+     "title": "slideshow",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-08/environment/level.json",
+     "sha256": "9e5f01fb203d106878718925537161657d0e367a372242566be63c7578225ea1",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-08/solution/solve.sh",
+     "solution_sha256": "0706bd012195217b77b0e25cb88225d0a85a04e59d1465032d7611ae0e48b7a4",
+     "reference": 22
+    },
+    {
+     "id": "stage-00-level-09",
+     "title": "fragile existence",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-09/environment/level.json",
+     "sha256": "b468f46f0084b276f4af6e7bea13a025366496b38c5e082737b15bca844f37b3",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-09/solution/solve.sh",
+     "solution_sha256": "76f022d0d49381deac99629e238f1067c6718df56f35fed6ae90e48f12e1c1b1",
+     "reference": 170
+    },
+    {
+     "id": "stage-00-level-10",
+     "title": "hostile environment",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-10/environment/level.json",
+     "sha256": "51c2f98dbead5fe5d2bb3963489eef08505ba60d4a1fcfb93c599f693e718c96",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-level-10/solution/solve.sh",
+     "solution_sha256": "a6245d5f45a781de4209c81530faa894bca9ade97a12423828098b66199d0b86",
+     "reference": 117
+    },
+    {
+     "id": "stage-00-bonus-10",
+     "title": "?",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-bonus-10/environment/level.json",
+     "sha256": "4cd43bd42ce0af47d554096f50129feb51dad777ab01498c89661b4e73470809",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-00-bonus-10/solution/solve.sh",
+     "solution_sha256": "a23665a2da75dcbb658ab64b5045a414d7ca7a7931dfadab3029b51cae44e657",
+     "reference": 21
+    }
+   ]
+  },
+  {
+   "key": "babaisyou_01",
+   "stage": "the lake",
+   "levels": [
+    {
+     "id": "stage-01-level-01",
+     "title": "icy waters",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-01/environment/level.json",
+     "sha256": "f6d2709a6d45e24ba155f162e5996422505af927bd852846ec537272ae1606aa",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-01/solution/solve.sh",
+     "solution_sha256": "e913541303d1a5d8fe5b7ed5178558e482c9773246ff15827ad3a281b9d387e9",
+     "reference": 32
+    },
+    {
+     "id": "stage-01-level-02",
+     "title": "turns",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-02/environment/level.json",
+     "sha256": "8f63e7090fc0ba9d632969708be022d3b1d9286454dae6d128da12a066584513",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-02/solution/solve.sh",
+     "solution_sha256": "e83c462074f9354a54c14f2bd36ae781d23dc13d4772f8aa2a8833f068eb568c",
+     "reference": 149
+    },
+    {
+     "id": "stage-01-level-03",
+     "title": "affection",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-03/environment/level.json",
+     "sha256": "363e373f1a8624480f91ae6b99777fe6fc96ed1e15cf4875ac49328e4d04e604",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-03/solution/solve.sh",
+     "solution_sha256": "b53a0cde7dcb1dac6d41462c85199ca62eae020f1e52fec92548f2b0ed59f25c",
+     "reference": 36
+    },
+    {
+     "id": "stage-01-level-04",
+     "title": "pillar yard",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-04/environment/level.json",
+     "sha256": "8fa8f988e595db6b3d471cb837f0bcd442078aef88c969d375b09fb4e917249c",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-04/solution/solve.sh",
+     "solution_sha256": "e402009ff3836ef9a2f952071fd6912a51cac2cc18cb710f9bb64aba7f8f1f59",
+     "reference": 66
+    },
+    {
+     "id": "stage-01-level-05",
+     "title": "brick wall",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-05/environment/level.json",
+     "sha256": "82e9ef09a2c2aa0f032e983b459944c616451ae19fc18809893007987948cd87",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-05/solution/solve.sh",
+     "solution_sha256": "990ce82a9bc7825741978da25f9396cb84ef1ae6085de15f2efbb91d4fe2e589",
+     "reference": 20
+    },
+    {
+     "id": "stage-01-level-06",
+     "title": "lock",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-06/environment/level.json",
+     "sha256": "dddc5469c4e6ca1c868274d293035eaa15b20423fcb8b561d53c73c4eb919c7b",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-06/solution/solve.sh",
+     "solution_sha256": "37e46174d293f3b77a894ab3d31e3c56af29f2ab6826b6eaa494004bfe41236c",
+     "reference": 121
+    },
+    {
+     "id": "stage-01-level-07",
+     "title": "novice locksmith",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-07/environment/level.json",
+     "sha256": "594edbb87679a8180c251587035f10e22b39fbf9a62f0584fceed2a1f0cbbf43",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-07/solution/solve.sh",
+     "solution_sha256": "ee101453a0a998d44038f131d1cc8bba1dc492d2e87a794ce7c1c499335e9e6e",
+     "reference": 77
+    },
+    {
+     "id": "stage-01-level-08",
+     "title": "locked in",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-08/environment/level.json",
+     "sha256": "11b92f2ad67d4228bc44c0e2104fa2ed3192fab3df2bc720dde676b44afd61e0",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-08/solution/solve.sh",
+     "solution_sha256": "e7bb241e45ceaaa50ffea2d11aeea393b6f60b383ca2e1bd9781764c331eb969",
+     "reference": 104
+    },
+    {
+     "id": "stage-01-level-09",
+     "title": "changeless",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-09/environment/level.json",
+     "sha256": "6ecee2a92cd216a162464e808758318e49a8fb61f17657b4cad9ea107dc27e79",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-09/solution/solve.sh",
+     "solution_sha256": "65a0f2d2f60141e402b94026f29c1fa47b284542d3c8671eef3c569a17e69f73",
+     "reference": 107
+    },
+    {
+     "id": "stage-01-level-10",
+     "title": "two doors",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-10/environment/level.json",
+     "sha256": "7f3f207ced28d3df0384a347a3b636d029c75c7fba95a509bbd5df4bf9578120",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-10/solution/solve.sh",
+     "solution_sha256": "b714bc4c4284423d9485e78f967ac948005fa3b77d7151ad7b076f9e9ce5ff93",
+     "reference": 79
+    },
+    {
+     "id": "stage-01-level-11",
+     "title": "jelly throne",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-11/environment/level.json",
+     "sha256": "f8ee16770e4746e53fb641090ccb7b0dba2b1776c85c85842dc8411f4dc751a3",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-11/solution/solve.sh",
+     "solution_sha256": "69ad881fe73ed487ee5b0ce10416d50e8fabaaa7f7b06c980805fad2dca9a883",
+     "reference": 73
+    },
+    {
+     "id": "stage-01-level-12",
+     "title": "crab storage",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-12/environment/level.json",
+     "sha256": "330409c311c8db6c7c5bb8c4f287036d3f87a515d698ba4a6dd4a65a8249c104",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-12/solution/solve.sh",
+     "solution_sha256": "4fdcb7ea02cdba24a27446e197958f1412942b835ecac3484013eb8983c0aca1",
+     "reference": 124
+    },
+    {
+     "id": "stage-01-level-13",
+     "title": "burglary",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-13/environment/level.json",
+     "sha256": "5d5717dd86bd554966631a5c6ffc29d6ee8c752bb7781cc4f4eabad15e5dc64a",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-level-13/solution/solve.sh",
+     "solution_sha256": "ca713a7922155fe5602c6b805f91eb1b280909def9231155a9952b35e52c7ef5",
+     "reference": 138
+    },
+    {
+     "id": "stage-01-bonus-00",
+     "title": "submerged ruins",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-bonus-00/environment/level.json",
+     "sha256": "51d825f3d092412a9bb589ecaabc772921219d014c549ea5a0825df600b4ae44",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-bonus-00/solution/solve.sh",
+     "solution_sha256": "bdc063061bf91ca95b0a51fc1012dc042579cf746f189b134556b4d19f0d4bb6",
+     "reference": 97
+    },
+    {
+     "id": "stage-01-bonus-01",
+     "title": "sunken temple",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-bonus-01/environment/level.json",
+     "sha256": "eadf898b7cc3b1b54675110bb6103d0ae5c5ed1244969202fb9a7670a06acf80",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-01-bonus-01/solution/solve.sh",
+     "solution_sha256": "e9af6e5209655efdd6be1b867e7a7681674900f0eb0d2207867c324a5b5a6e52",
+     "reference": 215
+    }
+   ]
+  },
+  {
+   "key": "babaisyou_02",
+   "stage": "solitary island",
+   "levels": [
+    {
+     "id": "stage-02-level-00",
+     "title": "poem",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-00/environment/level.json",
+     "sha256": "c117659920b6622c63c26255381cde04fbac6b8ae6733a536ef1b050498ee98b",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-00/solution/solve.sh",
+     "solution_sha256": "9e148f8903fcc3024a3e5d703f7bd207615955aa8a8fc7fef71114653b153580",
+     "reference": 93
+    },
+    {
+     "id": "stage-02-level-01",
+     "title": "float",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-01/environment/level.json",
+     "sha256": "4fd5692e3320644ba9f7597005f4923f8c180bc1716672a697236e50353768c1",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-01/solution/solve.sh",
+     "solution_sha256": "2bb71c0b8c0c037b3c9d35898c5b2e53f7490fb0d68ea81b12602e667e0e75fb",
+     "reference": 29
+    },
+    {
+     "id": "stage-02-level-02",
+     "title": "warm river",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-02/environment/level.json",
+     "sha256": "6075d9008d9b5b2b8f4e2e1a3ea24a9ae5705ee2a4cd06b68b0062af23902425",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-02/solution/solve.sh",
+     "solution_sha256": "ca44c926110a9b2ec504474e697d54dbfdc9e7d39c5fe1ef4885e90d0dabbe13",
+     "reference": 29
+    },
+    {
+     "id": "stage-02-level-03",
+     "title": "bridge building",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-03/environment/level.json",
+     "sha256": "4c2b4dce9412bb32dc2c7a3fb2c9e631423e7b479d4ce42de82d5de65d1c386e",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-03/solution/solve.sh",
+     "solution_sha256": "c44c4544fd49afe1d278de9449f40fb31c288fcf4e6dad2ad2b032ee27bb03c9",
+     "reference": 27
+    },
+    {
+     "id": "stage-02-level-04",
+     "title": "bridge building?",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-04/environment/level.json",
+     "sha256": "78fede4447323c889242404a96a34dcdbcc5d8fbc4729222ba4e6e9fd8c6d63b",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-04/solution/solve.sh",
+     "solution_sha256": "1eaac71a77fb4699c46f54f01ef30d825bfcde587df1512b06603e35cac9f765",
+     "reference": 38
+    },
+    {
+     "id": "stage-02-level-05",
+     "title": "victory spring",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-05/environment/level.json",
+     "sha256": "e022476d560f0c0615bc8dc0bee06a5dbed008306f11a41985239fc804dc6a76",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-05/solution/solve.sh",
+     "solution_sha256": "c1c3dff56445b3dff30e364080fb88e34ec5715005457eeb828c062e1da71bd9",
+     "reference": 72
+    },
+    {
+     "id": "stage-02-level-06",
+     "title": "assembly team",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-06/environment/level.json",
+     "sha256": "f4b6550edeed69301d0c54352f271a725a5c9c4228569093049079597d643c00",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-06/solution/solve.sh",
+     "solution_sha256": "8fdbe860797fad7bf3f6caf496c7dd4dcc8fc87434f04aa53cfe24b373051d5d",
+     "reference": 37
+    },
+    {
+     "id": "stage-02-level-07",
+     "title": "catch the thief!",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-07/environment/level.json",
+     "sha256": "3d2775d466492adee09e0b08c047dee11e9245da31d541e566420db0bc471409",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-07/solution/solve.sh",
+     "solution_sha256": "014ec772a34019b97a0b2095a819fb349b45a67482a8cc9bceef305028e37b29",
+     "reference": 84
+    },
+    {
+     "id": "stage-02-level-08",
+     "title": "tiny pond",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-08/environment/level.json",
+     "sha256": "8cf4b97fd5d350c66f8dc1849cb5de12b2cd061e565a8c1bafec04b79a28692b",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-08/solution/solve.sh",
+     "solution_sha256": "27462e33caadbb09f46d044edc33d84b495fec788e715a8c5e470cfa1fa176a1",
+     "reference": 84
+    },
+    {
+     "id": "stage-02-level-09",
+     "title": "research facility",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-09/environment/level.json",
+     "sha256": "05281e49cc8550a5a560f02c74831c1417d812b949aee9ae4eb04392fa93d1cd",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-09/solution/solve.sh",
+     "solution_sha256": "d282e3b2cb7c40c14c1a2d5f1fbefe4562abaa5680b6a36e40e3d2499578f2fa",
+     "reference": 65
+    },
+    {
+     "id": "stage-02-level-10",
+     "title": "wireless connection",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-10/environment/level.json",
+     "sha256": "9631c7c19c1919bc525ccfee44b414f907e56b8e6a4c35368c1941ce3f3651e8",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-10/solution/solve.sh",
+     "solution_sha256": "8cd24adf39fe1eaf10f3f39c94a0b2ace64d57ecf348b71e0f47d298d1877744",
+     "reference": 68
+    },
+    {
+     "id": "stage-02-level-11",
+     "title": "prison",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-11/environment/level.json",
+     "sha256": "bbb6bc33a9f286222ce3a33885e78b1e0d40a164baf93f237e5a033f50343e48",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-level-11/solution/solve.sh",
+     "solution_sha256": "3232f491999f1f6a6927624fe50331c6bca5ee548fed16e0e0f5e470e919b938",
+     "reference": 117
+    },
+    {
+     "id": "stage-02-bonus-00",
+     "title": "boiling river",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-00/environment/level.json",
+     "sha256": "9420364ba6b259e650e81145c419c2ff4a343ff07afe22da14862a18ecded46d",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-00/solution/solve.sh",
+     "solution_sha256": "7950bb9ad4271c4292ca9e04546cbcdd126d4dc970474bcff383e30a1470249a",
+     "reference": 85
+    },
+    {
+     "id": "stage-02-bonus-01",
+     "title": "...bridges?",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-01/environment/level.json",
+     "sha256": "eb28dee71e9e995f243831e7a98cb18fac5fe405120d3aac8eb01060da0cffca",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-01/solution/solve.sh",
+     "solution_sha256": "4cf2a861b9e6c2076170e36a15e55387e8cf6f68bcd2f0729cd3ac87349af479",
+     "reference": 32
+    },
+    {
+     "id": "stage-02-bonus-02",
+     "title": "tiny isle",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-02/environment/level.json",
+     "sha256": "e7d70c0b967ae317d6adf6211de748178c5e56fe4100b768767c159b6e40fd1c",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-02/solution/solve.sh",
+     "solution_sha256": "22a9e67df93f444a3e53c0db4873278181365dd0a487781ad3d563c6d5949fff",
+     "reference": 97
+    },
+    {
+     "id": "stage-02-bonus-03",
+     "title": "dim signal",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-03/environment/level.json",
+     "sha256": "fa2f558fec597f728228e97defd3df97a9f8a0ef40a790910691054dd2731499",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-03/solution/solve.sh",
+     "solution_sha256": "45461c20c8332eed5d621dd81497363f0fc9109a584dd09fbac23d0381dd328e",
+     "reference": 112
+    },
+    {
+     "id": "stage-02-bonus-04",
+     "title": "dungeon",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-04/environment/level.json",
+     "sha256": "ee36cdee2821d48e2c9dfb94a6c42b5c5590502bfb0dd601cd7d825406295e08",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-04/solution/solve.sh",
+     "solution_sha256": "44f3b568b21a3796fb2f4703b70fe9129c41e343c6e92e23c89b599dd6edd49d",
+     "reference": 51
+    },
+    {
+     "id": "stage-02-bonus-05",
+     "title": "evaporating river",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-05/environment/level.json",
+     "sha256": "340a612765796fb3ad8ac2107b4d126a8ab4673017fa565239c6c41adb4f7e29",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-02-bonus-05/solution/solve.sh",
+     "solution_sha256": "a948356ec2e19af994a7c396cdfdb61874037d792df49c9726d26d7d6b774c48",
+     "reference": 80
+    }
+   ]
+  },
+  {
+   "key": "babaisyou_03",
+   "stage": "temple ruins",
+   "levels": [
+    {
+     "id": "stage-03-level-01",
+     "title": "fragility",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-01/environment/level.json",
+     "sha256": "b535ac165dee17f504652e63e1e40760603c6f1c7ebb74d123fdfc33d77f1f10",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-01/solution/solve.sh",
+     "solution_sha256": "ac48b47ef1fd07d24f634dd50a7757ebe97de946c948edc8b7d48e4b8a124305",
+     "reference": 81
+    },
+    {
+     "id": "stage-03-level-02",
+     "title": "tunnel vision",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-02/environment/level.json",
+     "sha256": "945b7df57f8ab636cf6078b5679448229bbd00ad3f111681455ee9ded681c28a",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-02/solution/solve.sh",
+     "solution_sha256": "85f7a852b437d4b0931c7f495bb03027cc93a416f98d8a2e621294348355f64a",
+     "reference": 47
+    },
+    {
+     "id": "stage-03-level-03",
+     "title": "a present for you",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-03/environment/level.json",
+     "sha256": "3c3c3c33c778cc334f503faa7ddc2916ddee258f1495c1e4a5b16b1c923c73ea",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-03/solution/solve.sh",
+     "solution_sha256": "5b3c70ddced8853c766986dd594d018a911b6013f1022dd66ce22b7a9db6110c",
+     "reference": 61
+    },
+    {
+     "id": "stage-03-level-04",
+     "title": "unreachable shores",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-04/environment/level.json",
+     "sha256": "570750488f07728f37c657c398c28f5b3de8038c1a7c28913f166eb2bb390519",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-04/solution/solve.sh",
+     "solution_sha256": "30d8b07ecba0f855b4004708d8dff6a3dbaae5af519d0cba836c36f9a1e9983b",
+     "reference": 100
+    },
+    {
+     "id": "stage-03-level-05",
+     "title": "but where's the key",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-05/environment/level.json",
+     "sha256": "bd9490ef70d0d38c95608ce3dff694a8b877346476cad7827ead5cc661aad584",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-05/solution/solve.sh",
+     "solution_sha256": "dfabbe883e0d5bdefc937ffce02577d0cd7a1b74c8b7488ea117ecafdfd9a0bb",
+     "reference": 157
+    },
+    {
+     "id": "stage-03-level-06",
+     "title": "love is out there",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-06/environment/level.json",
+     "sha256": "1dded8cab81adf8b769730cc06dac406901449c10ff1095852e26dec1f8a9d50",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-06/solution/solve.sh",
+     "solution_sha256": "c1fa3f4268a311f671dda63c06877d41f75319d54ef1954c0b0aa3d5ce5f7663",
+     "reference": 95
+    },
+    {
+     "id": "stage-03-level-07",
+     "title": "perilous gang",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-07/environment/level.json",
+     "sha256": "b0333875c31a25eef5359fed55698e275b813dcd5f3ba495e0b78bf05919dae3",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-07/solution/solve.sh",
+     "solution_sha256": "c6dec81f3c48b3bcab58e4658a6d9410cd3cb0459f643337b2108ed3284a97cf",
+     "reference": 81
+    },
+    {
+     "id": "stage-03-level-08",
+     "title": "double moat",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-08/environment/level.json",
+     "sha256": "5d4fdeaef8727e7626d2fb2c7ff1de477a6d166de7bea28e3114ff876139de8c",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-08/solution/solve.sh",
+     "solution_sha256": "3178f5caa90acb080c8fef79b3c0c6edb2dfd88a4379cb99b9b99839b332a731",
+     "reference": 82
+    },
+    {
+     "id": "stage-03-level-09",
+     "title": "walls of gold",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-09/environment/level.json",
+     "sha256": "e990c30361cdfba6178367a482660baf5364c0cd62fc8b3e7d4b467c13a4a808",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-level-09/solution/solve.sh",
+     "solution_sha256": "ce9b05c90a0ac830cd992da6a5e65392b25e7decef922a40796aaad6e15bbc92",
+     "reference": 77
+    },
+    {
+     "id": "stage-03-bonus-00",
+     "title": "further fields",
+     "url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-bonus-00/environment/level.json",
+     "sha256": "d855df5a0c63fe050ed9c12e21e44ec14cd4280c93079166923d4e104ee62f1b",
+     "solution_url": "https://raw.githubusercontent.com/stared/baba-is-harbor/2adb73ad35d139ab490e2a8513631c43dec16095/tasks/stage-03-bonus-00/solution/solve.sh",
+     "solution_sha256": "e27bf9c012d08ce736fafa163d8e15f0b3c9f61ef80852e1001f7b074e2786a3",
+     "reference": 188
+    }
+   ]
+  }
+ ]
+}
