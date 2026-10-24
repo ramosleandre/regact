@@ -1,0 +1,10 @@
+# Antigravity CLI (agy).
+name: antigravity
+model: null                # e.g. gemini-3.8-flash-high; null = the account's default (`agy models`)
+base_url: null
+
+# Whether the model reads images (adds agy's file viewer, which also shows images).
+vision: false
+args:
+  auth: login              # login (signed-in account; unsandboxed only for now) | api_key (GEMINI_API_KEY)
+  reasoning_effort: null   # low | medium | high | xhigh | max; null = agy's default

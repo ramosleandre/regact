@@ -1,12 +1,13 @@
 # Agents
 
-The **agent** is the backend that writes the code. regact ships four:
+The **agent** is the backend that writes the code. regact ships five:
 
 | `agent=` | What it is | Needs |
 |---|---|---|
 | `scripted` | deterministic test backend, no LLM | nothing |
 | `claude` | Claude Code CLI | the `claude` CLI, authenticated |
 | `codex` | codex CLI | the `codex` CLI, authenticated |
+| `antigravity` | Antigravity CLI (`agy`, Google) | the `agy` CLI, signed in, or `GEMINI_API_KEY` |
 | `alan` | Alan Code, run in a sandboxable child process against an OpenAI-compatible endpoint | `make install-agents` |
 
 Agent selection is independent of the [experiment protocol](protocols.md). The selected protocol supplies its instructions and framework commands. A backend's `tool_protocol` describes how it invokes tools; it does not select `vanilla`, `cwm` or `policy_search`.
@@ -24,6 +25,9 @@ make run ARGS="agent=claude agent.model=sonnet agent.args.effort=medium"
 # codex
 make run ARGS="agent=codex agent.args.reasoning_effort=high"
 
+# Antigravity, with the signed-in account (unsandboxed, see below)
+make run ARGS="agent=antigravity agent.model=gemini-3.8-flash-high sandbox=false"
+
 # Alan against a local server (SimpleLM/vLLM)
 make run ARGS="agent=alan agent.model=openai/<MODEL> agent.base_url=http://127.0.0.1:9876/v1"
 ```
@@ -33,6 +37,7 @@ The config groups are in [`conf/agent/`](../src/regact/conf/agent/):
 - **`claude.yaml`** — `model` (`opus`/`sonnet`/a full id), `args.permission_mode`,
   `args.effort` (`low…max`).
 - **`codex.yaml`** — `model`, `args.reasoning_effort`, and `args.subagents_enabled`. Supported model/effort combinations depend on the installed CLI and account; the YAML is a preset, not a complete model catalogue.
+- **`antigravity.yaml`** — `model` (an id from `agy models`), `args.auth` and `args.reasoning_effort`. regact gives agy its system prompt and a tool allowlist through an agent definition in a fresh per-task home: shell and file tools only (no web search, URL reader, browser, image generation or subagents; the file viewer only with `vision: true`, since it also shows images). Inside the sandbox that home is read-only except the folders agy writes, so the agent cannot widen its own tools. `auth: login` uses the signed-in account, whose token agy keeps in the desktop keyring; the sandbox cannot reach the keyring, so login runs need `sandbox=false` for now. `auth: api_key` uses `GEMINI_API_KEY` (billed as API usage) and runs sandboxed. agy's stream leaves out written file contents and the model's thinking; its own transcript, which has both, is kept in `logs/agy_transcripts/`.
 - **`alan.yaml`** — `model` (`openai/<name>`), `base_url`, `api_key`, and `args`
   (`permission_mode`, `max_output_tokens`, `context_window`, `backend`).
 - **`scripted.yaml`** — just `name`.
@@ -42,11 +47,12 @@ For a manual remote session, read the endpoint emitted by the Alan runner and us
 
 ### Installing the CLI agents
 
-`claude` and `codex` are external programs — install and authenticate once:
+`claude`, `codex` and `agy` are external programs — install and authenticate once:
 
 ```bash
 npm install -g @anthropic-ai/claude-code   # then: claude   (login flow, cached)
 npm install -g @openai/codex               # then: codex login   (or OPENAI_API_KEY)
+curl -fsSL https://antigravity.google/cli/install.sh | bash   # then: agy   (sign-in flow)
 ```
 
 regact passes **no** API key to the CLIs by default — they use their own cached auth.

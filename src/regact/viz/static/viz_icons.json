@@ -9,7 +9,8 @@
   "agents": {
     "claude": "static/icons_agents/claude.png",
     "alan": "static/icons_agents/alan.png",
-    "codex": "static/icons_agents/codex.png"
+    "codex": "static/icons_agents/codex.png",
+    "antigravity": "static/icons_agents/antigravity.png"
   },
   "families": {
     "Qwen": "static/icons_models/qwen.png",
@@ -23,10 +24,11 @@
     "Gemma": "static/icons_models/gemma.png",
     "sonnet": "static/icons_models/anthropic.png",
     "opus": "static/icons_models/anthropic.png",
-  "haiku": "static/icons_models/anthropic.png",
-  "fable": "static/icons_models/anthropic.png",
+    "haiku": "static/icons_models/anthropic.png",
+    "fable": "static/icons_models/anthropic.png",
     "gpt": "static/icons_models/gpt.png",
-    "MiMo": "static/icons_models/mimo.png"
+    "MiMo": "static/icons_models/mimo.png",
+    "gemini": "static/icons_models/gemini.png"
   },
   "_params_note": "params_b for models whose name embeds no size (parseable ones like -70B-/-235B- are read from the name). Authoritative from ClusterControl docs/model_study.md; `estimate: true` = inferred from a same-family sibling (shown with a ~ in the viz), confirm with model_inspect.py on the served dir. DeepSeek-V4-Flash and MiniMax-M2.7 are intentionally omitted (no grounded size) -> mid-size icon until filled.",
   "models": {

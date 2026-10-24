@@ -22,6 +22,7 @@ class AgentName(StrEnum):
     ALAN = "alan"
     CLAUDE = "claude"
     CODEX = "codex"
+    ANTIGRAVITY = "antigravity"
     SCRIPTED = "scripted"  # deterministic backend for tests
 
 

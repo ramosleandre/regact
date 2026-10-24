@@ -217,4 +217,8 @@ def build_agent(config: AgentConfig) -> CodeAgent:
         from regact.agent.codex_adapter import CodexAgent
 
         return CodexAgent(config.args, vision=config.vision)
+    if config.name is AgentName.ANTIGRAVITY:
+        from regact.agent.agy_adapter import AgyAgent
+
+        return AgyAgent(config.args, vision=config.vision)
     raise ValueError(f"unknown agent {config.name!r}")
