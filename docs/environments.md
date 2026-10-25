@@ -11,7 +11,7 @@ and score an episode. regact ships these (each new one has its own page under [`
 | `sokoban` | sokoban-bench-v1: 8 packs of 8 Boxoban levels (grid game, [page](envs/sokoban.md)) | `single_instance` | nothing |
 | `babaisai` | babaisai-bench-v1: 8 packs of 8 BabaIsAI levels (grid game, [page](envs/babaisai.md)) | `single_instance` | `make install-babaisai` |
 | `puzzlescript` | PuzzleScript gallery games (grid game, [page](envs/puzzlescript.md)) | `single_instance` | Node, `make install-puzzlescript` |
-| `babaisyou` | babaisyou-bench-v1: the first 4 campaign stages of Baba Is You, 55 levels (grid game, [page](envs/babaisyou.md)) | `single_instance` | `make install-babaisyou` |
+| `babaisyou` | babaisyou-bench-v2: the campaign worlds 0-9 of Baba Is You, 153 levels (grid game, [page](envs/babaisyou.md)) | `single_instance` | `make install-babaisyou` |
 
 ## Use an environment
 
@@ -77,7 +77,7 @@ The prompt (`problems/prompts/grid_game.md`) never names the game.
 
 **BabaIsAI** (`problem=babaisai`, [page](envs/babaisai.md)) plays packs of BabaIsAI levels, where the rules are word blocks the player pushes; the reference is each level's shortest solution.
 
-**Baba Is You** (`problem=babaisyou`, [page](envs/babaisyou.md)) plays the campaign levels of the game itself, with regact's own engine checked against solutions verified on the real game; nothing is masked (objects and words by name, the active rules listed), and the reference is that verified solution. The levels are fetched at install time, not redistributed.
+**Baba Is You** (`problem=babaisyou`, [page](envs/babaisyou.md)) plays the campaign levels of the game itself (worlds 0-9), with regact's own engine checked against solutions verified on the real game (worlds 0-3) and the wiki's solutions (worlds 4-9); nothing is masked (objects and words by name, the active rules listed), and the reference is a known winning solution. The levels are fetched at install time, not redistributed.
 
 **PuzzleScript** (`problem=puzzlescript`, [page](envs/puzzlescript.md)) plays puzzlescript.net gallery games with the original engine under Node; every game has rules of its own, and the reference is each level's shortest solution. The games are fetched at install time, not redistributed.
 

@@ -3,10 +3,11 @@
 Usage:
     python scripts/grid_games/install_babaisyou.py
 
-Downloads every level listed in ``problems/grid_games/data/babaisyou_levels.json``, and its
-solution checked on the real game, from their pinned URLs into ``REGACT_BABAISYOU_DIR``
-(default ``~/.cache/regact/babaisyou``). A file whose SHA-256 differs from the recorded one is
-refused. The levels are the game's designs: they are fetched, not redistributed.
+Downloads every level listed in ``problems/grid_games/data/babaisyou_levels.json``, and the
+solutions checked on the real game (worlds 0-3), from their pinned URLs into
+``REGACT_BABAISYOU_DIR`` (default ``~/.cache/regact/babaisyou``). A file whose SHA-256 differs
+from the recorded one is refused. The levels are the game's designs: they are fetched, not
+redistributed.
 """
 
 from __future__ import annotations
@@ -37,9 +38,10 @@ if __name__ == "__main__":
     levels = [level for pack in data["packs"] for level in pack["levels"]]
     for level in levels:
         fetch(level["url"], level["sha256"], bbu.level_path(level["sha256"]))
-        fetch(
-            level["solution_url"],
-            level["solution_sha256"],
-            bbu.solution_path(level["solution_sha256"]),
-        )
+        if "solution_url" in level:
+            fetch(
+                level["solution_url"],
+                level["solution_sha256"],
+                bbu.solution_path(level["solution_sha256"]),
+            )
     print(f"{len(levels)} levels -> {bbu.data_dir()}")

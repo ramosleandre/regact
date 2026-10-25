@@ -1,30 +1,42 @@
 # Baba Is You (`problem=babaisyou`)
 
-The campaign levels of [Baba Is You](https://hempuli.com/baba/) (Hempuli, 2019), played by regact's own engine. The rules of a level are sentences of word blocks on the board (`BABA IS YOU`, `FLAG IS WIN`, `WALL IS STOP`); pushing the words changes the rules. Unlike [BabaIsAI](babaisai.md), these are the game's real levels, with its full grammar (`AND`, `NOT`, `HAS`, `TEXT`, `LEVEL`) and its properties, and nothing is masked: the difficulty is the reasoning. It is a [grid game](../environments.md#grid-games): RESET as action 0, a win after the last level of a task.
+The campaign levels of [Baba Is You](https://hempuli.com/baba/) (Hempuli, 2019), worlds 0 to 9, played by regact's own engine. The rules of a level are sentences of word blocks on the board (`BABA IS YOU`, `FLAG IS WIN`, `WALL IS STOP`); pushing the words changes the rules. Unlike [BabaIsAI](babaisai.md), these are the game's real levels, with its full grammar and its properties, and nothing is masked: the difficulty is the reasoning. It is a [grid game](../environments.md#grid-games): RESET as action 0, a win after the last level of a task.
 
-## The engine and how it was checked
+## The engine
 
-No open-source engine plays the real levels without the game itself, so regact has its own (`problems/grid_games/babaisyou/engine.py`), written from the [Baba Is You wiki](https://babaiswiki.fandom.com/wiki/Order_of_Operations)'s order of operations:
+No open-source engine plays the real levels without the game itself, so regact has its own (`problems/grid_games/babaisyou/engine.py`), written from the [Baba Is You wiki](https://babaiswiki.fandom.com/wiki/Order_of_Operations)'s order of operations.
 
-- each turn, the YOU objects move (in the game's object order: columns left to right, top to bottom), then the MOVE objects (one that bumps into something turns around and moves back);
-- a move into a tile checks OPEN/SHUT (both destroyed), then WEAK (a weak solid object does not block; a weak object that cannot move breaks), then PUSH (chains), then STOP; the border is solid;
-- the rules are read again, transformations (`X IS Y`, `X IS TEXT`; `X IS X` protects) apply, and the same-tile interactions resolve in the game's order, each deleting before the next looks: SINK, WEAK, HOT/MELT, DEFEAT, OPEN/SHUT, BONUS, then WIN; HAS leaves its object behind; FLOAT objects only interact with FLOAT objects; an object that is both sides of a pair (YOU and DEFEAT, HOT and MELT, OPEN and SHUT) destroys itself;
-- the level counts as being on every tile at once (`LEVEL IS HOT` melts every MELT object, `LEVEL IS WIN` wins at once, on the level's own float layer).
+- Grammar: `NOUN IS PROPERTY`, `NOUN IS NOUN` (a transformation), `NOUN HAS NOUN`, `NOUN MAKE NOUN`, with `AND`, `NOT`, the conditions `ON`, `NEAR`, `FACING`, and the nouns `TEXT`, `LEVEL`, `EMPTY` (every free tile), `ALL` and `GROUP`; objects that are `WORD` count as their own word. A sentence never starts inside the subject or conditions of another (`KEKE ON GRASS IS DEFEAT` does not also say `GRASS IS DEFEAT`).
+- A turn: the YOU objects move (in the game's object order; a mover blocked by another mover tries again once that one has moved, so a line of movers moves as one), then MOVE objects (turning around once when blocked), then SHIFT carries what stands on a belt; the rules are read and transformations apply once (`X IS X` protects; a rule that a transformation spells acts only next turn, as in the game since 2020); then TELE, the SHIFT turn, FALL, the directions (`UP`, ...), and the same-tile interactions in the game's order, each deleting before the next looks: MORE, SINK, WEAK, HOT/MELT, DEFEAT, OPEN/SHUT, MAKE, BONUS, then WIN.
+- A move into a tile checks OPEN/SHUT (both destroyed), then SWAP, then WEAK, then PUSH (chains; a stack moves together), then STOP and PULL (solid); what the mover leaves behind is pulled if PULL. FLOAT objects only interact with FLOAT objects; HAS leaves its object behind; the level counts as being on every tile at once (`LEVEL IS WIN`, `LEVEL IS HOT`, ...).
+- `EMPTY`'s properties act through a temporary object on every free tile during movement (`EMPTY IS YOU` moves the free tiles, `EMPTY IS PUSH` makes them solid). With three or more teleporters of one kind the game picks the destination at random; the engine draws it from a generator seeded by the level and the turn.
 
-The check: [baba-is-harbor](https://github.com/stared/baba-is-harbor) extracted the levels from the game's files with a solution for each, verified on the real game engine. Every one of those 55 solutions wins in regact's engine, at the same move as in the game (`tests/test_babaisyou.py`; in two levels the stored solution keeps pressing after the win, which the game ignores too). Off those paths the engine is as faithful as the wiki's description: mechanics absent from these levels (conditions such as `ON`/`NEAR`/`FACING`, `TELE`, `SHIFT`, `PULL`, `SWAP`, `MORE`, ...) are not implemented.
+## How it was checked
+
+1. **Real-game solutions (worlds 0-3, 55 levels).** [baba-is-harbor](https://github.com/stared/baba-is-harbor) extracted the levels from the game's files with a solution for each, verified on the real game. Every one wins in regact's engine at the same move as in the game.
+2. **Rules at the start (all levels).** For 129 of the 131 levels whose wiki page lists their initial rules, the engine reads the same rules (up to the names harbor gives a few reskinned objects, e.g. the wiki's ROBOT is `statue` here). The two others: a wiki omission (Jump) and Ghost Guard, which harbor's extraction corrupted (excluded).
+3. **The wiki's solutions (worlds 4-9, 98 levels).** For each level, an agent followed the wiki's solution in this engine until it won, and reported any behaviour the real game would not show. Each confirmed report became a fix and a test (the condition parse, rows and stacks of movers, pull inside a push chain, EMPTY's properties, ALL, the timing of transformations, ...), re-checked against the 55 real-game solutions; the wiki's own move list for Babas Are You reproduces step by step. These solutions win here; that they would win in the game is checked only as far as the wiki's prose goes.
+
+`tests/test_babaisyou.py` replays every level's solution and covers each mechanic on a small board.
 
 ## Tasks
 
-The benchmark version is **babaisyou-bench-v1** (`data/babaisyou_levels.json`): one task per campaign stage, its levels in the game's numbering, bonus levels last.
+The benchmark version is **babaisyou-bench-v2** (`data/babaisyou_levels.json`), 153 levels: one task per world, its levels in the game's numbering, bonus and extra levels last.
 
-| Task | Stage | Levels | Reference moves per level |
-|---|---|---|---|
-| babaisyou_00 | map | 12 | 8 64 37 55 37 75 27 80 22 170 117 21 |
-| babaisyou_01 | 1. the lake | 15 | 32 149 36 66 20 121 77 104 107 79 73 124 138 97 215 |
-| babaisyou_02 | 2. solitary island | 18 | 93 29 29 27 38 72 37 84 84 65 68 117 85 32 97 112 51 80 |
-| babaisyou_03 | 3. temple ruins | 10 | 81 47 61 100 157 95 81 82 77 188 |
+| Task | World | Levels | Main / bonus / extra | Median reference moves | Reference from |
+|---|---|---|---|---|---|
+| babaisyou_00 | map | 12 | 11/1/0 | 46 | real game |
+| babaisyou_01 | the lake | 15 | 13/2/0 | 97 | real game |
+| babaisyou_02 | solitary island | 18 | 12/6/0 | 70 | real game |
+| babaisyou_03 | temple ruins | 10 | 9/1/0 | 82 | real game |
+| babaisyou_04 | forest of fall | 19 | 11/3/5 | 119 | wiki, this engine |
+| babaisyou_05 | deep forest | 21 | 14/2/5 | 160 | wiki, this engine |
+| babaisyou_06 | rocket trip | 15 | 13/2/0 | 146 | wiki, this engine |
+| babaisyou_07 | flower garden | 12 | 10/2/0 | 188 | wiki, this engine |
+| babaisyou_08 | chasm | 16 | 0/7/9 | 170 | wiki, this engine |
+| babaisyou_09 | volcanic cavern | 15 | 14/1/0 | 189 | wiki, this engine |
 
-The reference is the move at which the verified solution wins: a solution made by a person, not a proven optimum, so the scores keep ARC's names (RHAE, LRHAE-Uncapped, mean relative actions) and an agent can beat the reference. `problem.kwargs.max_levels=N` keeps the first N levels of each stage.
+A level's reference is the move at which its solution wins: a person's solution for worlds 0-3, an agent's for worlds 4-9 (about twice as long), never a proven optimum, so the scores keep ARC's names (RHAE, LRHAE-Uncapped, mean relative actions) and an agent can beat the reference. `problem.kwargs.max_levels=N` keeps the first N levels of each world.
 
 ## Observation and actions
 
@@ -34,16 +46,16 @@ The reference is the move at which the verified solution wins: a solution made b
 - word blocks in capitals: `"BABA"`, `"IS"`, `"YOU"`;
 - `"edge"` for the level border.
 
-`obs.info["active_rules"]` lists the rules in force, sorted (`["BABA IS YOU", "FLAG IS WIN", ...]`), as the game lights the words that form them. Entries within a cell are sorted too: the engine's internal order means nothing to a player. HIDE objects are not shown, as in the game. The informative prompt names the game.
+`obs.info["active_rules"]` lists the rules in force, sorted (`["BABA IS YOU", "FLAG IS WIN", "KEKE ON GRASS IS DEFEAT", ...]`), as the game lights the words that form them. Entries within a cell are sorted too: the engine's internal order means nothing to a player. HIDE objects are not shown, as in the game. The informative prompt names the game.
 
 Actions: 0 RESET (restarts the current level, never scored), 1 up, 2 down, 3 left, 4 right, 5 wait (the game's idle key: nothing you control moves, the rest of the level takes its turn). Undo is not available.
 
-The agent's picture writes each entry in its tile (words white on black, objects on a colour of their own, a mark for the facing); the engine package is hidden from the agent's sandbox (`secret_modules`).
+The agent's picture writes each entry in its tile (words white on black, objects on a colour of their own, a mark for the facing); the engine package, which also holds the worlds 4-9 solutions, is hidden from the agent's sandbox (`secret_modules`).
 
 ## Use it
 
 ```bash
-make install-babaisyou   # fetch the 55 levels and their solutions (pinned URLs, SHA-256 checked)
+make install-babaisyou   # fetch the 153 levels and the real-game solutions (pinned URLs, SHA-256 checked)
 make run ARGS="agent=claude problem=babaisyou protocol=cwm features=none \
   'problem.tasks=[babaisyou_00]' problem.kwargs.max_levels=3"
 ```
@@ -56,9 +68,11 @@ The levels are the game's designs: they are fetched at install from baba-is-harb
 python scripts/grid_games/build_babaisyou_packs.py [--source <local clone>]
 ```
 
-It replays every solution through the engine and keeps a level only if it wins; change `VERSION` when the levels change. baba-is-harbor also lists stages 4-9 (99 more levels) but without verified solutions, so they are not included yet.
+It replays every solution through the engine and keeps a level only if it wins; change `VERSION` when the levels change.
 
 ## Limitations
 
-- The engine covers the mechanics of these 55 levels; later stages need more (conditions, TELE, SHIFT, PULL, ...), each to be checked against the game.
+- Worlds 4-9 are checked against the wiki's descriptions, not the game: a detail the wiki does not state (e.g. a MOVE object at the edge of a belt, the exact order of empty tiles moving) may differ from the game.
+- Ghost Guard (world 4) is excluded: its file lost three words in extraction.
+- Three or more teleporters of one kind make the game random; the engine's draw is reproducible but cannot match the game's.
 - Contamination: the game and its walkthroughs predate every model's training data. The levels and their solutions are well known.

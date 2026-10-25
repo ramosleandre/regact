@@ -27,6 +27,8 @@ from regact.problems.grid_games.babaisyou import engine
 from regact.problems.grid_games.base import GridGame, GridGameProblem, GridTask
 
 _DATA = Path(__file__).parents[1] / "data" / "babaisyou_levels.json"
+# Solutions for the levels harbor has none for (worlds 4-9), kept in this hidden package.
+SOLUTIONS = Path(__file__).parent / "solutions.json"
 # Our actions -> the game's inputs: 1 up, 2 down, 3 left, 4 right, 5 wait (the game's idle key).
 INPUT = {1: "u", 2: "d", 3: "l", 4: "r", 5: engine.WAIT}
 FACING = {engine.RIGHT: "right", engine.UP: "up", engine.LEFT: "left", engine.DOWN: "down"}
@@ -71,7 +73,8 @@ def _level(sha256: str) -> dict[str, Any]:
             ErrorCategory.ENV_RUNTIME,
             "Baba Is You levels are not installed: run make install-babaisyou",
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    level: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return level
 
 
 def cell_entry(o: engine.Obj) -> str:
@@ -84,10 +87,10 @@ def cell_entry(o: engine.Obj) -> str:
 
 
 def board(state: engine.State) -> list[list[list[str]]]:
-    props = engine.properties(state)
+    props, _ = engine.object_properties(state)
     rows: list[list[list[str]]] = [[[] for _ in range(state.width)] for _ in range(state.height)]
     for o in state.objects:
-        if "hide" not in props.get(o.name, set()):
+        if "hide" not in props[o.id]:
             rows[o.y][o.x].append(cell_entry(o))
     for row in rows:  # the engine's own order within a tile means nothing to a player
         for cell in row:
@@ -96,8 +99,14 @@ def board(state: engine.State) -> list[list[list[str]]]:
 
 
 def rule_text(rule: engine.Rule) -> str:
-    parts = [("NOT " if rule.subject_not else "") + rule.subject, rule.verb]
-    parts.append(("NOT " if rule.target_not else "") + rule.target)
+    def word(name: str, negated: bool) -> str:
+        return ("NOT " if negated else "") + name
+
+    parts = [word(rule.subject, rule.subject_not)]
+    for c in rule.conditions:
+        parts.append(word(c.kind, c.negated))
+        parts.append(" AND ".join(word(n, negated) for n, negated in c.args))
+    parts += [rule.verb, word(rule.target, rule.target_not)]
     return " ".join(parts).upper()
 
 
