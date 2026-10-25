@@ -399,7 +399,7 @@ async def test_an_interrupted_task_is_resumed_in_place_and_a_finished_one_is_ski
     other_seed = dataclasses.replace(
         resumed, problem=dataclasses.replace(config.problem, seed=(config.problem.seed or 0) + 1)
     )
-    with pytest.raises(RuntimeError, match="different experiment .problem"):
+    with pytest.raises(RuntimeError, match=r"different experiment .problem"):
         await run_task(other_seed, _Problem(), "corridor", output_dir=out, agent=Resumable([]))
     second = Resumable([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
     assert (
@@ -435,7 +435,9 @@ async def test_a_task_whose_conversation_is_lost_continues_with_a_new_agent_on_r
     failing = [AgentError(ErrorCategory.AGENT_API, "down"), IterationComplete()]
     out = str(tmp_path)
     first = ScriptedAgent([[ToolCall("1", "Advance", {})], failing, failing, failing])
-    assert await run_task(config, _Problem(), "corridor", output_dir=out, agent=first) == "agent_api"
+    assert (
+        await run_task(config, _Problem(), "corridor", output_dir=out, agent=first) == "agent_api"
+    )
 
     resumed = dataclasses.replace(config, resume=out)
     with pytest.raises(RuntimeError, match="resume_fresh_agent=true"):
@@ -449,3 +451,37 @@ async def test_a_task_whose_conversation_is_lost_continues_with_a_new_agent_on_r
     assert "interrupted and has now been resumed" not in second.sent[0]
     state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
     assert state["fresh_agent_resumes"] == 1 and state["tool_calls_total"] == 3
+
+
+async def test_resume_fresh_agent_always_replaces_a_kept_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(registry, "_REGISTRY", {})
+    monkeypatch.setattr(_ToyProtocol, "resumable", True)
+    register_protocol("toy", _ToyProtocol)
+
+    class Resumable(ScriptedAgent):
+        resumed_with: dict[str, Any] | None = None
+
+        def resume_token(self) -> dict[str, Any] | None:
+            return {"session_id": "conversation-1"}
+
+        def resume_from(self, token: dict[str, Any]) -> None:
+            self.resumed_with = token
+
+    config = _config(protocol=ProtocolConfig(name="toy"))
+    failing = [AgentError(ErrorCategory.AGENT_API, "unparsable tool call"), IterationComplete()]
+    out = str(tmp_path)
+    first = Resumable([[ToolCall("1", "Advance", {})], failing, failing, failing])
+    assert (
+        await run_task(config, _Problem(), "corridor", output_dir=out, agent=first) == "agent_api"
+    )
+
+    resumed = dataclasses.replace(config, resume=out, resume_fresh_agent="always")
+    second = Resumable([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
+    reason = await run_task(resumed, _Problem(), "corridor", output_dir=out, agent=second)
+    assert reason == "toy_complete"
+    assert second.resumed_with is None  # the kept conversation was not reopened
+    assert "taking over a task" in second.sent[0]
+    state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
+    assert state["fresh_agent_resumes"] == 1

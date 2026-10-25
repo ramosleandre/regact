@@ -495,6 +495,8 @@ async def run_task(
             agent = agent or build_agent(config.agent)
             # A task stopped before its agent ever ran has no conversation: its agent starts anew.
             token = experiment.agent_resume if resuming else None
+            if config.resume_fresh_agent == "always":
+                token = None  # the kept conversation is what broke: a new agent takes over
             if token is not None:
                 # Before anything asks the agent for its paths: the sandbox binds the home the
                 # conversation lives in, not a fresh one.

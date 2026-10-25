@@ -11,7 +11,7 @@ import dataclasses
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 # Config fields whose values are secrets and must never be written to run artifacts.
 _SECRET_FIELDS = frozenset({"api_key"})
@@ -166,8 +166,10 @@ class RunConfig:
     resume: str | None = None
     resume_any_version: bool = False
     # A task whose agent conversation was not kept is refused; true continues it with a NEW agent
-    # in the old workdir, on the old recorded data and budgets (not comparable to a plain run).
-    resume_fresh_agent: bool = False
+    # in the old workdir, on the old recorded data and budgets (not comparable to a plain run);
+    # "always" does so even when the conversation was kept (one that broke, e.g. on a truncated
+    # tool call, would fail again).
+    resume_fresh_agent: bool | Literal["always"] = False
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap

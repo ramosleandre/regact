@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from regact.config.schema import (
     AgentConfig,
@@ -57,6 +57,14 @@ def _limits_from(raw: Mapping[str, Any]) -> LimitsConfig:
         if name in fields:
             fields[name] = _int_or_none(fields[name])
     return LimitsConfig(**fields)
+
+
+def _fresh_agent_mode(value: Any) -> bool | Literal["always"]:
+    if value == "always":
+        return "always"
+    if value is None or isinstance(value, bool):
+        return bool(value)
+    raise ValueError(f"resume_fresh_agent must be true, false or always, not {value!r}")
 
 
 def _sandbox_bool(value: Any) -> bool:
@@ -159,7 +167,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         dry_run=bool(data.get("dry_run", False)),
         resume=data.get("resume"),
         resume_any_version=bool(data.get("resume_any_version", False)),
-        resume_fresh_agent=bool(data.get("resume_fresh_agent", False)),
+        resume_fresh_agent=_fresh_agent_mode(data.get("resume_fresh_agent", False)),
         limits=_limits_from(data.get("limits") or {}),
         sandbox=_sandbox_bool(data.get("sandbox", False)),
         sandbox_opts=dict(data.get("sandbox_opts") or {}),
