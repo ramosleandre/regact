@@ -691,3 +691,87 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     env = codex._launch_env()
     assert "CODEX_THREAD_ID" not in env and "OPENAI_BASE_URL" not in env
     assert env["OPENAI_API_KEY"] == "key" and env["CODEX_HOME"] == codex._config_dir()
+
+
+def _rollout_line(kind: str, **payload) -> str:
+    if kind == "event":
+        return json.dumps({"type": "event_msg", "payload": payload}) + "\n"
+    return json.dumps({"type": "response_item", "payload": {"type": kind, **payload}}) + "\n"
+
+
+def _rollout(cut: bool) -> list[str]:
+    return [
+        json.dumps({"type": "session_meta", "payload": {"id": "th-1"}}) + "\n",
+        _rollout_line("message", role="user", content=[{"type": "input_text", "text": "go"}]),
+        _rollout_line("reasoning", summary=[]),
+        _rollout_line("function_call", name="shell", call_id="c1", arguments='{"command": "ls"}'),
+        _rollout_line("function_call_output", call_id="c1", output="a.py"),
+        _rollout_line("event", type="token_count"),
+        _rollout_line("reasoning", summary=[]),
+        _rollout_line(
+            "function_call",
+            name="shell",
+            call_id="c2",
+            arguments='{"command": "python - <<EOF\\nprint(' if cut else '{"command": "pwd"}',
+        ),
+    ]
+
+
+def test_drop_cut_reply_removes_only_a_reply_cut_mid_tool_call() -> None:
+    from regact.agent.codex_adapter import drop_cut_reply
+
+    cut = _rollout(cut=True)
+    assert drop_cut_reply(cut) == cut[:5]  # back to the last tool output, reasoning included
+    assert drop_cut_reply(_rollout(cut=False)) is None  # complete arguments: nothing to drop
+    # Codex answers the cut call with a parse error; the retries add user messages.
+    failed = [
+        *cut,
+        _rollout_line("function_call_output", call_id="c2", output="failed to parse function"),
+        _rollout_line("message", role="user", content=[{"type": "input_text", "text": "retry"}]),
+    ]
+    assert drop_cut_reply(failed) == cut[:5]
+    went_on = [*failed, _rollout_line("message", role="assistant", content=[])]
+    assert drop_cut_reply(went_on) is None  # the serve took it and the model went on
+
+
+def test_codex_resume_drops_a_cut_reply_from_the_saved_conversation(tmp_path) -> None:
+    agent = CodexAgent({"codex_home": str(tmp_path / "home")})
+    agent._cwd = str(tmp_path / "workdir")
+    home = agent._config_dir()
+    path = Path(home, "sessions", "2026", "10", "26", "rollout-2026-10-26T01-02-03-th-1.jsonl")
+    path.parent.mkdir(parents=True)
+    path.write_text("".join(_rollout(cut=True)))
+    log = tmp_path / "agent_cli.log"
+    agent._cli_log = open(log, "a", encoding="utf-8")  # noqa: SIM115
+    agent._session_id = "th-1"
+    argv, _ = agent._command("Your last request failed; continue.")
+    assert argv[argv.index("resume") + 1] == "th-1"
+    assert path.read_text() == "".join(_rollout(cut=True)[:5])
+    assert agent.cut_replies_dropped == 1
+    agent._command("again")  # a healthy conversation is left alone
+    assert agent.cut_replies_dropped == 1
+    agent._cli_log.close()
+    assert "removed a reply cut mid tool call" in log.read_text()
+
+
+def test_codex_keeps_its_conversation_for_a_resume(tmp_path) -> None:
+    agent = CodexAgent({"codex_home": str(tmp_path / "home")})
+    workdir = tmp_path / "run" / "workdir"
+    workdir.mkdir(parents=True)
+    agent._cwd = str(workdir)
+    home = agent._config_dir()
+    Path(home, "sessions").mkdir()
+    Path(home, "sessions", "rollout-x-th-9.jsonl").write_text("{}\n")
+    agent._session_id = "th-9"
+    token = agent.resume_token()
+    assert token == {"session_id": "th-9", "home": home}
+    agent.keep_session = True
+    asyncio.run(agent.close())
+    assert os.path.isdir(home)  # kept for the resume
+    assert (tmp_path / "run" / "logs" / "codex_rollouts" / "rollout-x-th-9.jsonl").exists()
+
+    later = CodexAgent({"codex_home": str(tmp_path / "home")})
+    later.resume_from(token)
+    assert later._config_dir() == home and later._session_id == "th-9"
+    with pytest.raises(RuntimeError, match="codex home is gone"):
+        CodexAgent().resume_from({"session_id": "x", "home": str(tmp_path / "nowhere")})
