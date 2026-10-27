@@ -718,9 +718,11 @@ def test_codex_tool_ids_stay_unique_across_processes() -> None:
 def test_agent_environ_keeps_only_the_backends_own_credential(monkeypatch) -> None:
     from regact.security.runtime import agent_environ
 
-    for name in ("GITHUB_TOKEN", "OPENROUTER_API_KEY", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY"):
+    helpers = ("SSH_AUTH_SOCK", "GIT_ASKPASS", "VSCODE_GIT_IPC_HANDLE", "DBUS_SESSION_BUS_ADDRESS")
+    secrets = ("GITHUB_TOKEN", "OPENROUTER_API_KEY", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY")
+    for name in (*secrets, *helpers):
         monkeypatch.setenv(name, "secret")
     monkeypatch.setenv("SOME_PROXY", "kept")
     env = agent_environ(("OPENROUTER_API_KEY",))
     assert env["OPENROUTER_API_KEY"] == "secret" and env["SOME_PROXY"] == "kept"
-    assert not {"GITHUB_TOKEN", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY"} & set(env)
+    assert not {"GITHUB_TOKEN", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY", *helpers} & set(env)
