@@ -37,9 +37,12 @@ logger = logging.getLogger(__name__)
 
 Argv = list[str]
 Wrapper = Callable[[Argv], Argv]
-# Variable names that carry credentials: shells export many (tokens, API keys), and an agent that
-# prints its environment would copy them into transcripts and logs.
-_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSW|API_KEY|_KEY$|CREDENTIAL|COOKIE")
+# Variable names that carry credentials (an agent that prints its environment would copy them into
+# transcripts and logs) or reach a credential helper (ssh-agent, git askpass, the keyring).
+_SECRET_NAME = re.compile(
+    r"TOKEN|SECRET|PASSW|API_KEY|_KEY$|CREDENTIAL|COOKIE"
+    r"|^SSH_AUTH_SOCK$|ASKPASS|_IPC_|^GPG_AGENT|^DBUS_SESSION_BUS_ADDRESS$"
+)
 
 
 class SandboxRuntime(StrEnum):
