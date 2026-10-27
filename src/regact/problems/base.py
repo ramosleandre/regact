@@ -41,6 +41,12 @@ class BaseProblem(ABC):
         an episode. Runs record when each new value was first reached."""
         return None
 
+    def cap_levels(self, max_levels: int | None, native_env: Any = None) -> None:
+        """Make the games made from now on, and ``native_env`` (one of them) at once, stop after
+        ``max_levels`` levels (None: at the game's end). An extended task (config.extend) replays
+        its recorded part under the cap it ran with, then raises the cap on the live game."""
+        raise NotImplementedError(f"problem {self.name} has no level cap to raise")
+
     def progress_reference(self, task_name: str) -> list[tuple[float, float]]:
         """A reference player's ``(env actions, progress value)`` points, when one exists."""
         return []

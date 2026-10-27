@@ -323,6 +323,37 @@ async def test_claude_config_home_is_per_task_and_cleaned(tmp_path, monkeypatch)
     assert not os.path.exists(d1)  # cleaned on teardown
 
 
+async def test_claude_conversation_outlives_its_home(tmp_path, monkeypatch) -> None:
+    """close() copies the conversation to logs/claude_projects, so a resume whose home was deleted
+    (a solved task, extended later) continues it in a new home seeded from that copy."""
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    root = tmp_path / "claude-home"
+    root.mkdir()
+    (root / ".credentials.json").write_text("{}")
+    run = tmp_path / "run"
+    (run / "workdir").mkdir(parents=True)
+    first = ClaudeAgent({"claude_home": str(root)})
+    first._cwd = str(run / "workdir")
+    home = first._config_dir()
+    Path(home, "projects", "-run-workdir").mkdir(parents=True)
+    Path(home, "projects", "-run-workdir", "s1.jsonl").write_text("turns\n")
+    first._session_id = "s1"
+    token = first.resume_token()
+    await first.close()  # not resumable: the home goes
+    assert not os.path.exists(home)
+    assert (run / "logs" / "claude_projects" / "-run-workdir" / "s1.jsonl").exists()
+
+    second = ClaudeAgent({"claude_home": str(root)})
+    second.resume_from(token)
+    restored = second._config_dir()
+    assert restored != home and Path(restored, ".credentials.json").read_text() == "{}"
+    assert Path(restored, "projects", "-run-workdir", "s1.jsonl").read_text() == "turns\n"
+    assert second._session_id == "s1"
+
+    with pytest.raises(RuntimeError, match="home is gone"):
+        ClaudeAgent({"claude_home": str(root)}).resume_from({**token, "saved": None})
+
+
 @pytest.mark.parametrize("prompt", [None, "", 'Quotes " and \\ paths\nLéandre 😀', "x" * 200_000])
 async def test_codex_task_prompt_available_on_initial_and_resumed_launch(
     tmp_path, monkeypatch, prompt

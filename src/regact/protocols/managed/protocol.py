@@ -18,6 +18,7 @@ class ManagedProtocol(ExperimentProtocol):
 
     exposes_environment = False
     resumable = True
+    extendable = True
     command_script = "framework/commands.py"
     coordinator_type = ManagedCoordinator
 

@@ -17,6 +17,8 @@ from typing import Any
 
 # None: the process died before recording a reason.
 _RESUMABLE_EXITS = (None, "interrupted", "usage_limit", "agent_api", "loop_crash")
+# Ends that config.extend continues, with raised limits.
+_EXTENDABLE_EXITS = ("solved", "tool_call_limit")
 
 
 @dataclass
@@ -48,6 +50,7 @@ class ExperimentState:
     agent_resume: dict[str, Any] | None = None  # what continues the agent's conversation
     resumed_at: list[float] = field(default_factory=list)  # UNIX time of each resume
     fresh_agent_resumes: int = 0  # resumes that had to start a new agent conversation
+    extensions: list[dict[str, Any]] = field(default_factory=list)  # each config.extend launch
     usage_limit_waits: int = 0  # times the run slept until a backend usage limit reset
     usage_limit_waited_s: float = 0.0  # seconds slept that way; not counted in duration_s
     turn: int = 0  # 1-indexed turn in progress (0 before the first)
@@ -68,6 +71,10 @@ class ExperimentState:
         if self.exit_reason == "walltime_limit":  # the task's own budget is a final end
             return self.exit_detail == "experiment_deadline"
         return self.exit_reason in _RESUMABLE_EXITS
+
+    def extendable(self) -> bool:
+        """Whether the task ended at a limit that config.extend may raise."""
+        return self.exit_reason in _EXTENDABLE_EXITS
 
     @classmethod
     def load(cls, path: str) -> ExperimentState:

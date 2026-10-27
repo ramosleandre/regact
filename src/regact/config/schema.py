@@ -167,6 +167,9 @@ class RunConfig:
     # A task whose agent conversation was not kept is refused; true continues it with a NEW agent
     # in the old workdir, on the old recorded data and budgets (not comparable to a plain run).
     resume_fresh_agent: bool = False
+    # With resume: also continue tasks that ended solved or at their tool-call limit, under raised
+    # limits and problem.kwargs.max_levels (null: to the game's end). See docs/experiments.md.
+    extend: bool = False
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     sandbox: bool = False  # confine agent+eval subprocesses, deny egress; fail if no backend
     sandbox_opts: dict[str, Any] = field(default_factory=dict)  # expert: backend=seatbelt|bwrap

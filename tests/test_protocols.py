@@ -449,3 +449,103 @@ async def test_a_task_whose_conversation_is_lost_continues_with_a_new_agent_on_r
     assert "interrupted and has now been resumed" not in second.sent[0]
     state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
     assert state["fresh_agent_resumes"] == 1 and state["tool_calls_total"] == 3
+
+
+async def test_a_finished_task_is_extended_only_on_request_and_only_upwards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(registry, "_REGISTRY", {})
+    monkeypatch.setattr(_ToyProtocol, "resumable", True)
+    monkeypatch.setattr(_ToyProtocol, "extendable", True)
+    register_protocol("toy", _ToyProtocol)
+
+    class Resumable(ScriptedAgent):
+        resumed_with: dict[str, Any] | None = None
+
+        def resume_token(self) -> dict[str, Any] | None:
+            return {"session_id": "conversation-1"}
+
+        def resume_from(self, token: dict[str, Any]) -> None:
+            self.resumed_with = token
+
+    base = _config(protocol=ProtocolConfig(name="toy"), limits=LimitsConfig(max_tool_calls=1))
+    problem = dataclasses.replace(base.problem, kwargs={"max_levels": 2})
+    capped = dataclasses.replace(base, problem=problem)
+    out = str(tmp_path)
+    first = Resumable([[ToolCall("1", "Advance", {})]])
+    assert await run_task(capped, _Problem(), "corridor", output_dir=out, agent=first) == (
+        "tool_call_limit"
+    )
+
+    def launch(max_levels: int | None, **changes: Any) -> RunConfig:
+        problem = dataclasses.replace(capped.problem, kwargs={"max_levels": max_levels})
+        limits = LimitsConfig(max_tool_calls=10)
+        return dataclasses.replace(capped, resume=out, problem=problem, limits=limits, **changes)
+
+    skipped = Resumable([])
+    assert await run_task(launch(None), _Problem(), "corridor", output_dir=out, agent=skipped) == (
+        "tool_call_limit"
+    )
+    assert skipped.sent == []  # a finished task, without extend=true
+    with pytest.raises(RuntimeError, match="only raises max_levels"):
+        await run_task(
+            launch(1, extend=True), _Problem(), "corridor", output_dir=out, agent=skipped
+        )
+
+    second = Resumable([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
+    extending = launch(None, extend=True)
+    reason = await run_task(extending, _Problem(), "corridor", output_dir=out, agent=second)
+    assert reason == "toy_complete"
+    assert second.resumed_with == {"session_id": "conversation-1"}
+    assert second.sent[0].startswith(
+        "The task goes on: the game no longer stops after level 2 but continues to its last "
+        "level, and the budget is 10 tool calls in total."
+    )
+    state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
+    (extension,) = state["extensions"]
+    assert extension["ended"] == "tool_call_limit" and extension["tool_calls"] == 1
+    assert extension["max_levels"] == [2, None] and extension["agent"] == "continued"
+    assert state["problem_kwargs"] == {"max_levels": None} and state["tool_calls_total"] == 3
+    assert json.loads((tmp_path / "config.resume1.json").read_text())["extend"] is True
+
+    # Its later launches compare with the raised cap, not with config.json's.
+    again = Resumable([])
+    assert await run_task(launch(None), _Problem(), "corridor", output_dir=out, agent=again) == (
+        "toy_complete"
+    )
+    assert again.sent == []
+
+
+async def test_an_extension_whose_conversation_is_lost_tells_the_new_agent_what_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(registry, "_REGISTRY", {})
+    monkeypatch.setattr(_ToyProtocol, "resumable", True)
+    monkeypatch.setattr(_ToyProtocol, "extendable", True)
+    register_protocol("toy", _ToyProtocol)
+    base = _config(protocol=ProtocolConfig(name="toy"), limits=LimitsConfig(max_tool_calls=1))
+    problem = dataclasses.replace(base.problem, kwargs={"max_levels": 3})
+    capped = dataclasses.replace(base, problem=problem)
+    out = str(tmp_path)
+    first = ScriptedAgent([[ToolCall("1", "Advance", {})]])
+    assert await run_task(capped, _Problem(), "corridor", output_dir=out, agent=first) == (
+        "tool_call_limit"
+    )
+    extending = dataclasses.replace(
+        capped,
+        resume=out,
+        extend=True,
+        resume_fresh_agent=True,
+        problem=dataclasses.replace(capped.problem, kwargs={"max_levels": None}),
+        limits=LimitsConfig(max_tool_calls=10),
+    )
+    second = ScriptedAgent([[ToolCall("2", "Advance", {})], [ToolCall("3", "Advance", {})]])
+    reason = await run_task(extending, _Problem(), "corridor", output_dir=out, agent=second)
+    assert reason == "toy_complete"
+    assert (
+        "started under smaller limits, and that now goes on: the game no longer stops after "
+        "level 3" in second.sent[0]
+    )
+    assert "1 tool calls" in second.sent[0] and "interrupted" not in second.sent[0]
+    state = json.loads((tmp_path / "logs/experiment_state.json").read_text())
+    assert state["extensions"][0]["agent"] == "new" and state["fresh_agent_resumes"] == 1

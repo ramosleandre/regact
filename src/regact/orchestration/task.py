@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from regact.agent.base import CodeAgent, build_agent
@@ -198,6 +198,17 @@ _TAKE_OVER_MESSAGE = (
     "{minutes} minutes of the budget are already spent. Start by reading the files in the "
     "working directory. {notice}"
 )
+_EXTEND_MESSAGE = (
+    "The task goes on: {change}. Your working directory, the recorded data and the game's "
+    "position are as you left them."
+)
+_TAKE_OVER_EXTENDED_MESSAGE = (
+    "You are taking over a task that another agent session started under smaller limits, and that "
+    "now goes on: {change}. That session's conversation is lost; its files in your working "
+    "directory and the recorded data are intact, and the game is at the position it reached. "
+    "{calls} tool calls and about {minutes} minutes of the budget are already spent. Start by "
+    "reading the files in the working directory. {notice}"
+)
 # Launch settings a resume may change; anything else must equal the task's config.json.
 _RESUME_MAY_CHANGE = frozenset(
     {
@@ -206,6 +217,7 @@ _RESUME_MAY_CHANGE = frozenset(
         "resume",
         "resume_any_version",
         "resume_fresh_agent",
+        "extend",
         "output_root",
         "experiment_name",
         "parallel_workers",
@@ -214,6 +226,27 @@ _RESUME_MAY_CHANGE = frozenset(
 )
 # Where the model is served, not which model: a resumed run may reach it on another port.
 _RESUME_MAY_CHANGE_AGENT = ("base_url", "api_key")
+
+
+def _extension_change(before: int | None, config: RunConfig) -> str:
+    """What an extension changed, for the agent: the level cap and the tool-call budget."""
+    cap = config.problem.kwargs.get("max_levels")
+    parts = []
+    if cap != before:
+        until = "its last level" if cap is None else f"level {cap}"
+        parts.append(f"the game no longer stops after level {before} but continues to {until}")
+    if config.limits.max_tool_calls is not None:
+        parts.append(f"the budget is {config.limits.max_tool_calls} tool calls in total")
+    return ", and ".join(parts) or "its limits are raised"
+
+
+def _latest_launch_config(output_dir: str, resumes: int) -> dict[str, Any] | None:
+    """The config the task's latest launch recorded (config.resumeN.json), None before a resume."""
+    path = os.path.join(output_dir, f"config.resume{resumes}.json")
+    if resumes == 0 or not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return cast(dict[str, Any], json.load(handle))
 
 
 def _address_notice(previous_port: int | None, port: int | None) -> str:
@@ -320,8 +353,14 @@ async def run_task(
         if config.resume is not None and os.path.exists(state_path)
         else None
     )
+    # The end this launch continues past, when it extends a finished task (config.extend).
+    extended_from = (
+        previous.exit_reason
+        if previous is not None and config.extend and previous.extendable()
+        else None
+    )
     if previous is not None:
-        if not previous.resumable():
+        if not previous.resumable() and extended_from is None:
             return str(previous.exit_reason)  # finished in the earlier launch
         if not protocol.resumable:
             raise RuntimeError(f"protocol {protocol.name} cannot resume a task")
@@ -336,13 +375,33 @@ async def run_task(
     recorded = json.loads(json.dumps(redacted_config_dict(config), default=str))
     config_name = "config.json"
     if previous is not None:
-        # config.json stays the record of what the task started with.
+        # config.json stays the record of what the task started with; the latest launch's record
+        # holds the level cap it reached.
         with open(os.path.join(output_dir, "config.json"), encoding="utf-8") as handle:
             original = json.load(handle)
+        latest = _latest_launch_config(output_dir, len(previous.resumed_at)) or original
+        cap_before = latest["problem"]["kwargs"].get("max_levels")
+        cap = config.problem.kwargs.get("max_levels")
+        if cap != cap_before:
+            if not config.extend:
+                raise RuntimeError(
+                    f"{output_dir}: problem.kwargs.max_levels differs from the task's "
+                    f"({cap} vs {cap_before}); pass extend=true to raise it"
+                )
+            if cap is not None and (cap_before is None or cap < cap_before):
+                raise RuntimeError(
+                    f"{output_dir}: extend=true only raises max_levels ({cap_before} -> {cap})"
+                )
+            if not protocol.extendable:
+                raise RuntimeError(f"protocol {protocol.name} cannot raise a task's level cap")
+
         def identity(cfg: dict[str, Any], key: str) -> Any:
             value = cfg.get(key)
             if key == "agent" and isinstance(value, dict):
                 return {k: v for k, v in value.items() if k not in _RESUME_MAY_CHANGE_AGENT}
+            if key == "problem" and isinstance(value, dict):
+                kwargs = {k: v for k, v in value.get("kwargs", {}).items() if k != "max_levels"}
+                return {**value, "kwargs": kwargs}
             return value
 
         changed = [
@@ -397,6 +456,23 @@ async def run_task(
                 ),
             )
             experiment.env_port = None if in_process else _loopback_port(conn.base_url)
+            if extended_from is not None:
+                experiment.extensions.append(
+                    {
+                        "at": time.time(),
+                        "ended": extended_from,
+                        "tool_calls": experiment.tool_calls_total,
+                        "env_moves": experiment.env_moves,
+                        "duration_s": experiment.duration_s,
+                        "main_metrics": experiment.main_metrics,
+                        "max_levels": [
+                            experiment.problem_kwargs.get("max_levels"),
+                            config.problem.kwargs.get("max_levels"),
+                        ],
+                        "max_tool_calls": config.limits.max_tool_calls,
+                    }
+                )
+                experiment.problem_kwargs = dict(config.problem.kwargs)
             if resuming:
                 experiment.exit_reason = experiment.exit_detail = None
                 experiment.last_error_category = None
@@ -491,6 +567,8 @@ async def run_task(
             took_over = resuming and not continued and experiment.turn > 0
             if took_over:
                 experiment.fresh_agent_resumes += 1
+            if extended_from is not None:
+                experiment.extensions[-1]["agent"] = "continued" if continued else "new"
             caps = agent.capabilities()
             # Every non-native protocol reaches the framework tools over the workdir control CLI, so
             # the channel MUST be bound for it (uses_control_cli is the shared predicate the prompt
@@ -645,13 +723,23 @@ async def run_task(
                 rendered_first_obs = None
                 if config.first_obs_in_prompt:
                     rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
-                first_message = (
-                    f"{_RESUME_MESSAGE} {session.resume_notice()}".strip()
-                    if continued
-                    else builder.build_first_message(rendered_first_obs)
+                change = (
+                    _extension_change(experiment.extensions[-1]["max_levels"][0], config)
+                    if extended_from is not None
+                    else None
                 )
+                if continued:
+                    resumed = (
+                        _RESUME_MESSAGE if change is None else _EXTEND_MESSAGE.format(change=change)
+                    )
+                    first_message = f"{resumed} {session.resume_notice()}".strip()
+                else:
+                    first_message = builder.build_first_message(rendered_first_obs)
                 if took_over:
-                    first_message += "\n\n" + _TAKE_OVER_MESSAGE.format(
+                    first_message += "\n\n" + (
+                        _TAKE_OVER_MESSAGE if change is None else _TAKE_OVER_EXTENDED_MESSAGE
+                    ).format(
+                        change=change,
                         calls=experiment.tool_calls_total,
                         minutes=round(experiment.duration_s / 60),
                         notice=session.resume_notice(),

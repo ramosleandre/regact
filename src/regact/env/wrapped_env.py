@@ -75,6 +75,15 @@ class WrappedEnv:
             raise ValueError(f"Environment does not support {kind} resets")
         return self.reset(seed=seed)
 
+    def refresh(self) -> Obs:
+        """Start an episode where the game stands, without an action: its current observation,
+        rendered again (after the native env changed how it reports it, e.g. a raised level cap)."""
+        peek = getattr(self._native, "current", None)
+        result = peek() if callable(peek) else None
+        if result is None:
+            raise ValueError(f"{type(self._native).__name__} cannot show its current observation")
+        return self._apply_reset_result(result)
+
     def _apply_reset_result(self, result: Any) -> Obs:
         if isinstance(result, tuple) and len(result) == 2:
             native_obs, info = result
@@ -126,6 +135,10 @@ class WrappedEnv:
         if self._record_frames:
             self._capture_frame()
         return obs
+
+    @property
+    def native(self) -> Any:
+        return self._native
 
     @property
     def is_done(self) -> bool:

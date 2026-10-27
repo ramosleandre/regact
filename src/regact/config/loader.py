@@ -160,6 +160,7 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
         resume=data.get("resume"),
         resume_any_version=bool(data.get("resume_any_version", False)),
         resume_fresh_agent=bool(data.get("resume_fresh_agent", False)),
+        extend=bool(data.get("extend", False)),
         limits=_limits_from(data.get("limits") or {}),
         sandbox=_sandbox_bool(data.get("sandbox", False)),
         sandbox_opts=dict(data.get("sandbox_opts") or {}),
@@ -173,4 +174,6 @@ def run_config_from_mapping(data: Mapping[str, Any]) -> RunConfig:
             "agent=alan_remote needs sandbox_opts.network_isolation=false: its HTTP endpoint "
             "listens inside the sandbox's network namespace, which the host cannot reach"
         )
+    if config.extend and config.resume is None:
+        raise ValueError("extend=true continues the tasks of resume=<run dir>; pass both")
     return config

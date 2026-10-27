@@ -84,6 +84,8 @@ _RUN_TOKEN_ENV = "REGACT_CLAUDE_OAUTH_TOKEN"
 _RUN_TOKEN_FILE = "oauth_token"
 _CLI_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # what the Claude CLI itself reads
 _KEPT_HOME_MAX_AGE_S = 14 * 24 * 3600  # a conversation kept for a resume, then never resumed
+# The conversation, copied under the run's logs/ at close: what continues it once its home is gone.
+_SAVED_CONVERSATION = "claude_projects"
 _RESET_JUST_PASSED = timedelta(minutes=30)  # an error seen this soon after its own reset time
 
 
@@ -164,6 +166,7 @@ class ClaudeAgent(_CliAgent):
         raw_home = str(self._args.get("claude_home") or "~/.regact/claude-home")
         self._home_root = os.path.realpath(os.path.expanduser(raw_home))
         self._session_home: str | None = None  # this task's fresh config dir (created on demand)
+        self._restore_conversation: str | None = None  # a saved conversation for the new home
         self._usage: dict[str, Any] | None = None
 
     def _real_creds(self) -> str:
@@ -232,6 +235,8 @@ class ClaudeAgent(_CliAgent):
                 shutil.rmtree(kept, ignore_errors=True)
         self._session_home = home
         self._share_credentials()
+        if self._restore_conversation is not None:
+            shutil.copytree(self._restore_conversation, os.path.join(home, "projects"))
         return home
 
     def _config_dir(self) -> str:
@@ -294,16 +299,21 @@ class ClaudeAgent(_CliAgent):
         self._env_overrides["CLAUDE_CONFIG_DIR"] = config_dir
 
     async def close(self) -> None:
-        """Drop the per-task config home on teardown (nothing reads claude's native session dir
-        post-run; the normalized transcript is already in logs/), so seeded auth + session state do
-        not accumulate - unless the task may be resumed (``keep_session``). A token this task
-        refreshed is first handed to the other credential files (see _share_credentials).
+        """Drop the per-task config home on teardown, so seeded auth + session state do not
+        accumulate - unless the task may be resumed (``keep_session``). Its conversation is first
+        copied to logs/claude_projects, which continues it once the home is gone (a later extension,
+        see config.extend). A token this task refreshed is first handed to the other credential
+        files (see _share_credentials).
         """
         await super().close()
         if self._session_home is None:
             return
         self._share_credentials()
         self._usage = claude_usage(self._session_home)  # before the home and its logs are deleted
+        projects = os.path.join(self._session_home, "projects")
+        if (saved := self._saved_conversation()) is not None and os.path.isdir(projects):
+            with contextlib.suppress(OSError):  # best-effort: the home itself may still be kept
+                shutil.copytree(projects, saved, dirs_exist_ok=True)
         if not self.keep_session:
             shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
@@ -332,18 +342,30 @@ class ClaudeAgent(_CliAgent):
             return False
         return True
 
+    def _saved_conversation(self) -> str | None:
+        if not self._cwd:
+            return None
+        run_dir = os.path.dirname(os.path.abspath(self._cwd))
+        return os.path.join(run_dir, "logs", _SAVED_CONVERSATION)
+
     def resume_token(self) -> dict[str, Any] | None:
         if self._session_id is None:
             return None
-        return {"session_id": self._session_id, "home": self._session_home}
+        return {
+            "session_id": self._session_id,
+            "home": self._session_home,
+            "saved": self._saved_conversation(),
+        }
 
     def resume_from(self, token: dict[str, Any]) -> None:
-        home = token.get("home")
-        if home is not None:
-            if not os.path.isdir(home):
-                raise RuntimeError(f"the conversation's Claude home is gone: {home}")
+        home, saved = token.get("home"), token.get("saved")
+        if home is not None and os.path.isdir(home):
             self._session_home = home
             self._share_credentials()
+        elif home is not None:
+            if saved is None or not os.path.isdir(saved):
+                raise RuntimeError(f"the conversation's Claude home is gone: {home}")
+            self._restore_conversation = saved  # into the new home, see _make_session_home
         self._session_id = token["session_id"]
 
     def usage_limit_reset(self, message: str) -> float | None:

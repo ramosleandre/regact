@@ -375,6 +375,12 @@ class ExperienceStore:
             )
         ]
 
+    def episode_metadata(self, episode_id: int) -> dict[str, Any]:
+        row = self.db.execute("SELECT metadata FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        if row is None:
+            raise ValueError(self.unknown("episodes", "episode", episode_id))
+        return cast(dict[str, Any], json.loads(row[0] or "{}"))
+
     def episode_steps(self, episode_id: int) -> list[dict[str, Any]]:
         """The episode's recorded steps in time order: action, resulting observation, hashes."""
         return [

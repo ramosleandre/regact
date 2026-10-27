@@ -117,6 +117,7 @@ class ExperimentProtocol(ABC):
     name: str
     exposes_environment: bool = True
     resumable: bool = False  # can continue an interrupted task (config.resume)
+    extendable: bool = False  # can raise a resumed task's level cap (config.extend)
     command_script: str = "framework/control.py"
 
     async def __aenter__(self) -> ExperimentProtocol:

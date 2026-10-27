@@ -11,7 +11,7 @@ import threading
 import time
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
 
@@ -46,7 +46,7 @@ from regact.protocols.cwm.validation import diagnostic_pointer
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.grants import GRANT_WAIT_LOGGED_SECONDS, CommandGrants
 from regact.protocols.managed.prompting import reset_commands
-from regact.protocols.managed.resume import rebuild_environment
+from regact.protocols.managed.resume import EXTENSION, rebuild_environment
 from regact.security.runtime import SandboxRuntime
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
@@ -174,20 +174,28 @@ class ManagedCoordinator:
                 f"this task was recorded by regact {recorded[:14] or 'of an unknown commit'}, not "
                 f"{running[:14]}; check that commit out, or pass resume_any_version=true"
             )
+        # Replayed under the level cap the task first ran with, raised again at each extension.
+        self.max_levels = self._recorded_max_levels()
+        target = self.config.problem.kwargs.get("max_levels")
+        episodes = self.store.episodes()
+        if self.max_levels != target or any(e["purpose"] == EXTENSION for e in episodes):
+            self.problem.cap_levels(self.max_levels)
         rebuild_environment(
             self.store,
             self.env,
             seed=self.config.problem.seed,
             single_instance=self.single_instance,
+            extend=self._raise_cap,
         )
-        episodes = self.store.episodes()
         self.initial_id = episodes[0]["initial_obs_id"]
         self.initial = self.store.observation(self.initial_id)
         self.reset_actions = sum(e["purpose"].startswith("reset_") for e in episodes)
         last = episodes[-1]["episode_id"]
         self.current_id = self.store.episode_ids(last)[0][-1]
         self.episode = last if self.single_instance else None
-        self.store.reopen(self.episode)
+        extending = self.max_levels != target
+        # Reopening the episode an extension follows would wipe how it ended.
+        self.store.reopen(None if extending else self.episode)
         for step in self.store.milestone_steps():
             for name in step.pop("milestones"):
                 if name not in self._seen_milestones:
@@ -203,6 +211,38 @@ class ManagedCoordinator:
         self.phase = self.store.last_phase() or self.initial_phase
         self.after_restore()
         self.event("task_resumed", episode_id=last, current_observation_id=self.current_id)
+        if extending:
+            self._extend(target)
+
+    def _recorded_max_levels(self) -> int | None:
+        """The level cap the task started under: config.json records its first launch."""
+        path = self.output / "config.json"
+        if not path.exists():
+            return cast(int | None, self.config.problem.kwargs.get("max_levels"))
+        return cast(int | None, json.loads(path.read_text())["problem"]["kwargs"].get("max_levels"))
+
+    def _raise_cap(self, live: Any, max_levels: int | None) -> dict[str, Any]:
+        self.problem.cap_levels(max_levels, live.native)
+        self.max_levels = max_levels
+        return cast(dict[str, Any], live.refresh().to_json())
+
+    def _extend(self, max_levels: int | None) -> None:
+        """config.extend: the game goes on past the cap the task ran with, from where it stands,
+        in a new episode whose first observation reports the raised cap."""
+        if not self.single_instance or self.env.live is None or self.episode is None:
+            raise RuntimeError("raising a task's level cap needs its live single_instance game")
+        before = self.current_id
+        obs = self._raise_cap(self.env.live, max_levels)
+        self.store.finish_episode(self.episode, EXTENSION, {})
+        self.episode, self.current_id = self.store.start_episode(
+            obs, EXTENSION, {"max_levels": max_levels, "previous_observation_id": before}
+        )
+        self.event(
+            "task_extended",
+            max_levels=max_levels,
+            episode_id=self.episode,
+            current_observation_id=self.current_id,
+        )
 
     def after_restore(self) -> None:
         """Protocol state beyond the shared one (the accepted CWM)."""

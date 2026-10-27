@@ -366,6 +366,7 @@ class ArcAgiProblem(BaseProblem):
         # Every game is treated as having at most this many levels: completing the last one is
         # the win, and the baseline, the scores and the prompt know no level after it.
         self._max_levels = int(max_levels) if max_levels is not None else None
+        self._env_max_levels = self._max_levels  # what new games stop at; see cap_levels
         self._arcade: Any = None
         if self._is_online:
             # Online (Kaggle gateway): no local metadata — the served arcade
@@ -429,7 +430,12 @@ class ArcAgiProblem(BaseProblem):
                 ErrorCategory.ENV_RUNTIME,
                 f"Arcade.make({task.game_id!r}) returned None (check environments_dir)",
             )
-        return _ArcGymShim(arc_env, max_levels=self._max_levels)
+        return _ArcGymShim(arc_env, max_levels=self._env_max_levels)
+
+    def cap_levels(self, max_levels: int | None, native_env: Any = None) -> None:
+        self._env_max_levels = max_levels
+        if native_env is not None:
+            native_env._max_levels = max_levels
 
     def get_task_names(self) -> list[str]:
         return list(self._tasks)

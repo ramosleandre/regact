@@ -36,7 +36,7 @@ async def test_the_conversation_home_is_kept_for_a_resumable_task_and_reused(tmp
     home = first._config_dir()
     first._session_id = "conversation-1"
     token = first.resume_token()
-    assert token == {"session_id": "conversation-1", "home": home}
+    assert token == {"session_id": "conversation-1", "home": home, "saved": None}  # no workdir
     first.keep_session = True
     await first.close()
     assert (root / "session").is_dir() and len(list((root / "session").iterdir())) == 1

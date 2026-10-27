@@ -8,6 +8,7 @@ the store is not the one the task ran with.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from regact.env.session import EnvSession
@@ -16,6 +17,8 @@ from regact.protocols.cwm.config import FeedbackConfig
 from regact.protocols.cwm.differences import summarize
 
 _RESETS = {"reset_level": "level", "reset_environment": "environment"}
+# An episode that starts where the previous one stopped, once the task's level cap was raised.
+EXTENSION = "extension"
 
 
 class RebuildMismatch(Exception):
@@ -31,7 +34,12 @@ class RebuildMismatch(Exception):
 
 
 def rebuild_environment(
-    store: ExperienceStore, env: EnvSession, *, seed: int | None, single_instance: bool
+    store: ExperienceStore,
+    env: EnvSession,
+    *,
+    seed: int | None,
+    single_instance: bool,
+    extend: Callable[[Any, int | None], dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Replay the store's resets and actions on ``env``, which must not have been made yet.
 
@@ -43,14 +51,20 @@ def rebuild_environment(
     instance, in either lifecycle; any other start (the initial collection, a multi_instance
     exploration) makes the environment through its lifecycle policy and resets it. Replaying
     everything, not only what follows the last environment start, also restores the wrapper's
-    action counters.
+    action counters. An extension episode raises the live game's level cap through ``extend``
+    (live environment, new cap -> the current observation) instead of resetting.
     """
     if env.live is not None:
         raise ValueError("rebuild_environment needs an environment session that was never made")
     obs: dict[str, Any] | None = None
     for episode in store.episodes():
         kind = _RESETS.get(episode["purpose"])
-        if kind is None:
+        if episode["purpose"] == EXTENSION:
+            if env.live is None or extend is None:
+                raise ValueError(f"episode {episode['episode_id']}: an extension with no game")
+            live = env.live
+            obs = extend(live, store.episode_metadata(episode["episode_id"])["max_levels"])
+        elif kind is None:
             live = env.live if single_instance and env.live is not None else env.make()
             obs = live.reset_explicit("environment", seed=seed).to_json()
         else:

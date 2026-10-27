@@ -230,3 +230,131 @@ def test_only_an_experiment_deadline_makes_a_walltime_end_resumable():
     ):
         state.exit_reason, state.exit_detail = reason, detail
         assert state.resumable() is expected, reason
+
+
+class Levels:
+    """Each action completes one of the game's 5 levels; a cap ends the game earlier and reports
+    only that many, as ARC's level cap does."""
+
+    def __init__(self, max_levels):
+        self.max_levels, self.n = max_levels, 0
+
+    def current(self):
+        total = 5 if self.max_levels is None else min(5, self.max_levels)
+        info = {"available_actions": [1], "levels_completed": min(self.n, total)}
+        info["win_levels"] = total
+        return [self.n] * 30, info
+
+    def reset(self, seed=None):
+        self.n = 0
+        return self.current()
+
+    def step(self, a):
+        self.n += 1
+        obs, info = self.current()
+        won = info["levels_completed"] >= info["win_levels"]
+        return obs, float(won), won, False, info
+
+    def close(self):
+        pass
+
+
+def leveled(tmp_path, max_levels, previous=None, **config):
+    """A vanilla task on a game capped at ``max_levels``; with ``previous``, its later launch."""
+    import dataclasses
+    import json
+
+    from regact.config.schema import (
+        AgentConfig,
+        AgentName,
+        ProblemConfig,
+        ProtocolConfig,
+        RunConfig,
+    )
+    from regact.features.base import FeatureContext
+    from regact.protocols.registry import build_protocol
+    from test_cwm_protocol import Problem
+
+    class LevelProblem(Problem):
+        env_cap = max_levels
+
+        def make_env(self, task):
+            return Levels(self.env_cap)
+
+        def cap_levels(self, cap, native_env=None):
+            self.env_cap = cap
+            if native_env is not None:
+                native_env.max_levels = cap
+
+    root, work = tmp_path / "task", tmp_path / "task" / "workdir"
+    problem = ProblemConfig(
+        "fake", seed=0, lifecycle=Lifecycle.SINGLE_INSTANCE, kwargs={"max_levels": max_levels}
+    )
+    cfg = RunConfig(
+        AgentConfig(AgentName.SCRIPTED),
+        problem,
+        protocol=ProtocolConfig("vanilla", {"n_unique_observations_in_initial_collection": 1}),
+    )
+    if previous is None:
+        work.mkdir(parents=True)
+        (root / "config.json").write_text(json.dumps({"problem": {"kwargs": problem.kwargs}}))
+    else:
+        cfg = dataclasses.replace(cfg, resume=str(root), **config)
+    definition = build_protocol(cfg)
+    lp = LevelProblem()
+    env = EnvSession(
+        make_native=lambda: lp.make_env("counter"),
+        key="counter",
+        renderer=lp.obs_renderer(),
+        lifecycle=SingleInstancePolicy(),
+    )
+    c = definition.coordinator_type(cfg, definition.options, env, lp, "counter", root, work)
+    if previous is None:
+        for f in definition.templates(
+            FeatureContext(problem_name="fake", task_name="counter", workdir=str(work))
+        ):
+            (work / f.relpath).parent.mkdir(parents=True, exist_ok=True)
+            (work / f.relpath).write_text(f.content)
+        c.collect_initial()
+    return c
+
+
+def test_an_extended_task_goes_on_past_its_level_cap_in_a_new_episode(tmp_path):
+    c = leveled(tmp_path, 2)
+    exploration(c, (1, 1))
+    assert c.tool("RunController", {})["real_actions"] == 2
+    assert c.terminal == "solved"
+    won = c.store.observation(c.current_id)
+    assert won["is_done"] and won["info"]["win_levels"] == 2
+    c.close("solved")
+
+    r = leveled(tmp_path, None, previous=c, extend=True)
+    try:
+        assert r.terminal is None
+        first, extension = r.store.episodes()
+        assert extension["purpose"] == "extension" and extension["episode_id"] == r.episode
+        # The recorded part stays as it was: the cap-2 win ends the first episode.
+        assert r.store.observation(first["initial_obs_id"])["info"]["win_levels"] == 2
+        ended = r.store.db.execute("SELECT stop_reason FROM episodes WHERE id=1").fetchone()[0]
+        assert ended == "environment_done"
+        start = r.store.observation(r.current_id)
+        assert start["frame"] == won["frame"] and not start["is_done"]
+        assert start["info"]["levels_completed"] == 2 and start["info"]["win_levels"] == 5
+        exploration(r, (1,))
+        assert r.tool("RunController", {})["real_actions"] == 1
+        stepped = r.store.observation(r.current_id)["info"]
+        assert (stepped["levels_completed"], stepped["win_levels"]) == (3, 5)
+        r.persist()
+    finally:
+        killed(r)
+
+    # A later resume replays the extension too, and does not extend again.
+    again = leveled(tmp_path, None, previous=r)
+    try:
+        assert [e["purpose"] for e in again.store.episodes()] == [first["purpose"], "extension"]
+        assert again.current_id == r.current_id
+        exploration(again, (1, 1))
+        assert again.tool("RunController", {})["real_actions"] == 2
+        assert again.terminal == "solved"
+    finally:
+        again.close("test_finished")
