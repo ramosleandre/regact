@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 from regact.agent.base import CodeAgent
 from regact.agent.events import AgentError, AgentEvent
 from regact.obs.errors import ErrorCategory
+from regact.security.runtime import agent_environ
 from regact.tools.base import Tool
 
 _STDOUT_LINE_LIMIT = 64 * 1024 * 1024
@@ -103,12 +104,12 @@ class _CliAgent(CodeAgent):
         """Write any backend-native confinement config into the workdir. Default: none."""
 
     def _launch_env(self) -> dict[str, str]:
-        """The CLI's environment: the launcher's, minus the variables the CLI reads as its own
-        settings (so a run behaves the same from any shell, including one opened inside another
-        agent session), plus what this adapter sets."""
+        """The CLI's environment: the launcher's, minus its credentials and the variables the CLI
+        reads as its own settings (so a run behaves the same from any shell, including one opened
+        inside another agent session), plus what this adapter sets."""
         inherited = {
             name: value
-            for name, value in os.environ.items()
+            for name, value in agent_environ(self._env_keep).items()
             if name in self._env_keep or not name.startswith(self._env_drop)
         }
         return {**inherited, **self._env_overrides}

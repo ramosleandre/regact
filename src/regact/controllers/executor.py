@@ -32,6 +32,7 @@ from regact.envclient.errors import InvalidActionError
 from regact.envclient.obs import Obs
 from regact.obs.errors import ErrorCategory
 from regact.obs.result import EpisodeResult, EvalResult
+from regact.security.runtime import agent_environ
 
 # The agent's own modules, zipped per submission: a solution.py importing its policy from
 # code_library/ would otherwise leave the real controller unrecorded. One file keeps inodes flat.
@@ -525,7 +526,7 @@ class SandboxedExecutor:
             argv += ["--seed", str(self._seed)]
         tmp = os.path.join(self._workdir, "tmp")
         os.makedirs(tmp, exist_ok=True)
-        env = {**os.environ, "PYTHONPATH": _src_dir(), "TMPDIR": tmp}
+        env = {**agent_environ(), "PYTHONPATH": _src_dir(), "TMPDIR": tmp}
         try:
             proc = subprocess.run(
                 self._wrap(argv),

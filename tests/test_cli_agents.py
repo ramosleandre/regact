@@ -722,3 +722,14 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     env = codex._launch_env()
     assert "CODEX_THREAD_ID" not in env and "OPENAI_BASE_URL" not in env
     assert env["OPENAI_API_KEY"] == "key" and env["CODEX_HOME"] == codex._config_dir()
+
+
+def test_agent_environ_keeps_only_the_backends_own_credential(monkeypatch) -> None:
+    from regact.security.runtime import agent_environ
+
+    for name in ("GITHUB_TOKEN", "OPENROUTER_API_KEY", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY"):
+        monkeypatch.setenv(name, "secret")
+    monkeypatch.setenv("SOME_PROXY", "kept")
+    env = agent_environ(("OPENROUTER_API_KEY",))
+    assert env["OPENROUTER_API_KEY"] == "secret" and env["SOME_PROXY"] == "kept"
+    assert not {"GITHUB_TOKEN", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY"} & set(env)
