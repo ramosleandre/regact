@@ -26,6 +26,7 @@ import functools
 import glob
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,9 @@ Wrapper = Callable[[Argv], Argv]
 # Where bwrap shows the agent its workdir: the host path names the experiment, the model and the
 # task, which the agent must not see.
 AGENT_WORKDIR = "/workspace"
+# Variable names that carry credentials: shells export many (tokens, API keys), and an agent that
+# prints its environment would copy them into transcripts and logs.
+_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSW|API_KEY|_KEY$|CREDENTIAL|COOKIE")
 
 
 class SandboxRuntime(StrEnum):
@@ -47,6 +51,16 @@ class SandboxRuntime(StrEnum):
     NONE = "none"  # no sandbox: when none is configured or available
     SEATBELT = "seatbelt"  # macOS sandbox-exec
     BWRAP = "bwrap"  # Linux bubblewrap (mount namespace)
+
+
+def agent_environ(keep: Sequence[str] = ()) -> dict[str, str]:
+    """The launcher's environment for a process that runs the agent or its code: without credential
+    variables, except ``keep`` (what the agent's own backend authenticates with)."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in keep or not _SECRET_NAME.search(name)
+    }
 
 
 def detect() -> SandboxRuntime:

@@ -36,6 +36,7 @@ from regact.agent.capabilities import TOOL_PROTOCOLS, Capabilities
 from regact.agent.events import AgentError, AgentEvent
 from regact.obs.errors import ErrorCategory
 from regact.obs.transcript import event_from_json
+from regact.security.runtime import agent_environ
 from regact.tools.base import Tool
 
 _STDOUT_LINE_LIMIT = 64 * 1024 * 1024
@@ -135,7 +136,10 @@ class AlanSubprocessAgent(CodeAgent):
         argv = [sys.executable, "-m", "regact.agent.alan_runner"]
         if runtime_wrap is not None:
             argv = runtime_wrap(argv)  # the whole child runs inside the OS sandbox
-        child_env = {**os.environ, **(env or {})}
+        # Without an api_key, litellm reads the key of the model's provider from the environment.
+        provider = model.split("/")[0].upper() if model and "/" in model else "OPENAI"
+        keys = ("OPENAI_API_KEY", f"{provider}_API_KEY")
+        child_env = {**agent_environ(keys), **(env or {})}
         # The child imports alancode from where THIS process found it (a pinned checkout on the
         # parent's PYTHONPATH, not only the venv's install), the same dirs host_read_paths binds.
         child_env["PYTHONPATH"] = os.pathsep.join(

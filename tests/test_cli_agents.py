@@ -660,6 +660,8 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     monkeypatch.setenv("OPENAI_BASE_URL", "http://elsewhere")
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.setenv("SOME_PROXY", "kept")
+    for name in ("REGACT_CLAUDE_OAUTH_TOKEN", "GITHUB_TOKEN", "OPENROUTER_API_KEY", "HF_TOKEN"):
+        monkeypatch.setenv(name, "a secret of the launcher's shell")
 
     monkeypatch.setenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "1")
     claude = ClaudeAgent(
@@ -681,6 +683,9 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     assert env["MAX_THINKING_TOKENS"] == "2000"
     assert env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "16000"
     assert env["ANTHROPIC_API_KEY"] == "key" and env["SOME_PROXY"] == "kept"
+    secrets = {"REGACT_CLAUDE_OAUTH_TOKEN", "GITHUB_TOKEN", "OPENROUTER_API_KEY", "HF_TOKEN"}
+    assert not secrets & set(env) and "OPENAI_API_KEY" not in env  # only its own backend's key
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "a secret of the launcher's shell"  # hidden from tools
     assert env["CLAUDE_CONFIG_DIR"] == claude._config_dir()
     assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
     settings = json.loads((tmp_path / "claude-wd/.claude/settings.json").read_text())
@@ -691,6 +696,7 @@ def test_cli_launch_env_ignores_the_launchers_agent_session(tmp_path, monkeypatc
     codex._configure_workdir()
     env = codex._launch_env()
     assert "CODEX_THREAD_ID" not in env and "OPENAI_BASE_URL" not in env
+    assert not secrets & set(env)
     assert env["OPENAI_API_KEY"] == "key" and env["CODEX_HOME"] == codex._config_dir()
 
 
@@ -707,3 +713,14 @@ def test_codex_tool_ids_stay_unique_across_processes() -> None:
     agent._command("again")
     second = agent._parse_events(item)[0]
     assert first.id != second.id
+
+
+def test_agent_environ_keeps_only_the_backends_own_credential(monkeypatch) -> None:
+    from regact.security.runtime import agent_environ
+
+    for name in ("GITHUB_TOKEN", "OPENROUTER_API_KEY", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY"):
+        monkeypatch.setenv(name, "secret")
+    monkeypatch.setenv("SOME_PROXY", "kept")
+    env = agent_environ(("OPENROUTER_API_KEY",))
+    assert env["OPENROUTER_API_KEY"] == "secret" and env["SOME_PROXY"] == "kept"
+    assert not {"GITHUB_TOKEN", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY"} & set(env)

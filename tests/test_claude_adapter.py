@@ -169,6 +169,7 @@ async def test_a_run_token_replaces_the_copy_of_the_login(tmp_path, monkeypatch,
 
     home = Path(agent._env_overrides["CLAUDE_CONFIG_DIR"])
     assert agent._env_overrides["CLAUDE_CODE_OAUTH_TOKEN"] == "token-for-runs"
+    assert "REGACT_CLAUDE_OAUTH_TOKEN" not in agent._launch_env()  # nor in the agent's commands
     assert not (home / ".credentials.json").exists()  # no copy of the login in the task's home
     _credential(home / ".credentials.json", 9000, "something the CLI wrote")
     agent._command("continue")
