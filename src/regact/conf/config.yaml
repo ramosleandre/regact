@@ -25,6 +25,7 @@ dry_run: false  # prompt-only: write the prompt + first message to the run and e
 resume: null  # an earlier launch's stamped run directory: continue its interrupted tasks
 resume_any_version: false  # allow resuming a task recorded by another regact commit
 resume_fresh_agent: false  # continue a task whose conversation was lost with a new agent (files, data and budgets kept)
+extend: false  # with resume: also continue solved / tool_call_limit tasks under raised limits and max_levels
 limits:  # every max_* accepts null to disable its cap
   max_turns_per_task: 350                # agent turns per task before the loop gives up
   max_tool_calls: null          # total tool calls across the run (the primary budget); null = off
