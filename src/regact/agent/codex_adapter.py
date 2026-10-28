@@ -14,6 +14,7 @@ agents' internal work; this stream cannot provide a full model tool-request coun
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -66,6 +67,7 @@ class CodexAgent(_CliAgent):
         self._started_tools: set[str] = set()
         self._finished_tools: set[str] = set()
         self._plan_updates = 0
+        self.cut_replies_dropped = 0  # replies cut at the output cap, removed before a resume
         subagents = self._args.get("subagents_enabled")
         if subagents is not None and not isinstance(subagents, bool):
             raise ValueError("agent.args.subagents_enabled must be true, false, or null")
@@ -170,9 +172,10 @@ class CodexAgent(_CliAgent):
         return "\n".join(lines) + "\n"
 
     async def close(self) -> None:
-        """Drop the per-task home on teardown (nothing reads codex's native session store post-run;
-        the normalized transcript is already in logs/), so seeded auth + session state do not
-        accumulate. First preserve any token refresh back to the isolated ROOT (never ~/.codex)."""
+        """Drop the per-task home on teardown, unless the task may be resumed (``keep_session``),
+        so seeded auth + session state do not accumulate. First preserve any token refresh back
+        to the isolated ROOT (never ~/.codex) and copy the conversation into
+        logs/codex_rollouts/."""
         await super().close()
         if self._session_home is None:
             return
@@ -183,8 +186,19 @@ class CodexAgent(_CliAgent):
                 shutil.copyfile(refreshed, os.path.join(self._home_root, "auth.json"))
             except OSError:
                 pass  # best-effort; a lost refresh just re-seeds from ~/.codex next run
+        if self._cwd:
+            kept = os.path.join(
+                os.path.dirname(os.path.abspath(self._cwd)), "logs", "codex_rollouts"
+            )
+            for path in self._rollouts():
+                try:
+                    os.makedirs(kept, exist_ok=True)
+                    shutil.copyfile(path, os.path.join(kept, os.path.basename(path)))
+                except OSError:
+                    pass  # best-effort, like the token refresh above
         self._usage = codex_usage(self._session_home)  # before the home and its logs are deleted
-        shutil.rmtree(self._session_home, ignore_errors=True)
+        if not self.keep_session:
+            shutil.rmtree(self._session_home, ignore_errors=True)
         self._session_home = None
 
     def usage_limit_reset(self, message: str) -> float | None:
@@ -198,6 +212,51 @@ class CodexAgent(_CliAgent):
             return datetime.strptime(stamp, "%b %d %Y %I:%M %p").timestamp()
         except ValueError:
             return time.time() + _UNKNOWN_RESET_S
+
+    def resume_token(self) -> dict[str, Any] | None:
+        if self._session_id is None:
+            return None
+        return {"session_id": self._session_id, "home": self._session_home}
+
+    def resume_from(self, token: dict[str, Any]) -> None:
+        home = token.get("home")
+        if home is not None:
+            if not os.path.isdir(home):
+                raise RuntimeError(f"the conversation's codex home is gone: {home}")
+            src = self._freshest_auth()
+            if src is not None:
+                shutil.copyfile(src, os.path.join(home, "auth.json"))
+            self._session_home = home
+        self._session_id = token["session_id"]
+
+    def _rollouts(self) -> list[str]:
+        if self._session_home is None:
+            return []
+        name = f"rollout-*{self._session_id}.jsonl" if self._session_id else "rollout-*.jsonl"
+        return glob.glob(os.path.join(self._session_home, "sessions", "**", name), recursive=True)
+
+    def _drop_cut_reply(self) -> None:
+        """Before resuming, remove from the saved conversation a reply the model left unfinished
+        mid tool call (a capped local serve): codex cannot parse it, exits, and would replay it
+        on every resume. The conversation then continues from just before that reply."""
+        if self._session_id is None:
+            return
+        for path in self._rollouts():
+            with open(path, encoding="utf-8") as handle:
+                lines = handle.readlines()
+            kept = drop_cut_reply(lines)
+            if kept is None:
+                continue
+            with open(path + ".tmp", "w", encoding="utf-8") as handle:
+                handle.writelines(kept)
+            os.replace(path + ".tmp", path)
+            self.cut_replies_dropped += 1
+            if self._cli_log is not None:
+                self._cli_log.write(
+                    f"regact: removed a reply cut mid tool call ({len(lines) - len(kept)} "
+                    "rollout lines) before resuming the conversation\n"
+                )
+                self._cli_log.flush()
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         # Exec item IDs restart for each process, including resumed turns.
@@ -244,6 +303,7 @@ class CodexAgent(_CliAgent):
             "--json",
         ]
         if self._session_id is not None:
+            self._drop_cut_reply()
             argv += ["resume", self._session_id]
         return argv, message  # codex reads the prompt from stdin
 
@@ -323,6 +383,56 @@ class CodexAgent(_CliAgent):
             )
             events.append(ToolResult(tool_id, _tool_output(item), failed))
         return events
+
+
+def drop_cut_reply(lines: list[str]) -> list[str] | None:
+    """The rollout lines without a reply cut mid tool call, or None when there is none.
+
+    A reply is cut when its ``function_call`` arguments are not complete JSON. Codex answers
+    such a call with a parse error but keeps it in the history it sends; a serve that cannot
+    render that history (llama.cpp) then fails every later request, retries and resumes
+    included. Only a cut call the model never answered past is dropped: the reply, its error
+    output and whatever followed, back to the last tool output or user message it answered.
+    """
+    items: list[tuple[int, dict[str, Any]]] = []
+    for index, line in enumerate(lines):
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        payload = obj.get("payload") if isinstance(obj, dict) else None
+        if obj.get("type") == "response_item" and isinstance(payload, dict):
+            items.append((index, payload))
+    cut = [k for k, (_, p) in enumerate(items) if _is_cut_call(p)]
+    if not cut:
+        return None
+    k = cut[-1]
+    if any(_from_model(p) for _, p in items[k + 1 :]):
+        return None  # the conversation went on after it
+    answered = [
+        i
+        for i, p in items[:k]
+        if p.get("type") in ("function_call_output", "custom_tool_call_output")
+        or (p.get("type") == "message" and p.get("role") == "user")
+    ]
+    return lines[: answered[-1] + 1] if answered else None
+
+
+def _is_cut_call(payload: dict[str, Any]) -> bool:
+    if payload.get("type") != "function_call":
+        return False
+    try:
+        json.loads(payload.get("arguments") or "")
+    except ValueError:
+        return True
+    return False
+
+
+def _from_model(payload: dict[str, Any]) -> bool:
+    kind = payload.get("type")
+    if kind == "message":
+        return payload.get("role") == "assistant"
+    return kind in ("reasoning", "function_call", "custom_tool_call")
 
 
 def _tool_name(item: dict[str, Any]) -> str:
