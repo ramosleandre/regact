@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tomllib
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -625,6 +626,35 @@ class _SleepyCli(CodexAgent):
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         return [sys.executable, "-c", "import time; time.sleep(30)"], None
+
+
+class _LimitedCli(CodexAgent):
+    """A 'CLI' that fails the way Codex does when the account's usage limit is reached."""
+
+    def _command(self, message: str) -> tuple[list[str], str | None]:
+        script = (
+            "import sys; print('Reading prompt from stdin...', file=sys.stderr); "
+            "print(\"ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/"
+            "usage to purchase more credits or try again at Nov 2nd, 2026 6:03 PM.\", "
+            "file=sys.stderr); sys.exit(1)"
+        )
+        return [sys.executable, "-c", script], None
+
+
+async def test_a_codex_usage_limit_is_recognised_from_the_clis_stderr(tmp_path) -> None:
+    agent = _LimitedCli({"codex_home": str(tmp_path / "home")})
+    cwd = tmp_path / "wd"
+    cwd.mkdir()
+    await agent.start(cwd=str(cwd), model=None, base_url=None, api_key=None, system_prompt=None)
+    try:
+        events = [event async for event in agent.send("go")]
+    finally:
+        await agent.close()
+    (error,) = [event for event in events if isinstance(event, AgentError)]
+    assert error.message.startswith("_LimitedCli CLI exited with code 1: ERROR: You've hit")
+    reset = agent.usage_limit_reset(error.message)
+    assert reset == datetime(2026, 11, 2, 18, 3).timestamp()  # the machine's local time
+    assert agent.usage_limit_reset("CodexAgent CLI exited with code 1") is None
 
 
 async def test_a_cli_we_killed_is_not_reported_as_an_agent_error(tmp_path) -> None:

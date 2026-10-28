@@ -204,11 +204,15 @@ async def run_session(
             if outcome.error_category is not None:
                 experiment.last_error_category = outcome.error_category.value
                 reset_unix = agent.usage_limit_reset(outcome.error_message)
-                if reset_unix is not None and not limits.wait_for_usage_limit:
+                wait = (
+                    _usage_limit_wait(reset_unix, limits, experiment.usage_limit_waited_s)
+                    if limits.wait_for_usage_limit
+                    else None
+                )
+                if reset_unix is not None and wait is None:  # not waiting, or too long to wait
                     experiment.exit_detail = f"resets {int(reset_unix)}"
                     reason = "usage_limit"
                     break
-                wait = _usage_limit_wait(reset_unix, limits, experiment.usage_limit_waited_s)
                 if wait is not None:
                     if watchdog is not None:
                         watchdog.cancel()

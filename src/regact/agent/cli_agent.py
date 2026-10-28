@@ -32,6 +32,7 @@ from regact.security.runtime import agent_environ
 from regact.tools.base import Tool
 
 _STDOUT_LINE_LIMIT = 64 * 1024 * 1024
+_STDERR_LINE_CHARS = 500  # of the CLI's last stderr line, quoted in its exit error
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -121,6 +122,7 @@ class _CliAgent(CodeAgent):
 
         argv, stdin_data = self._command(message)
         self._aborted = False
+        stderr_start = self._cli_log.tell() if self._cli_log is not None else 0
         if self._runtime_wrap is not None:
             argv = self._runtime_wrap(argv)  # run the whole CLI process inside the OS sandbox
         proc = await asyncio.create_subprocess_exec(
@@ -155,11 +157,27 @@ class _CliAgent(CodeAgent):
 
         await proc.wait()
         if proc.returncode and not self._aborted:
+            last = self._last_stderr_line(stderr_start)
             yield AgentError(
                 ErrorCategory.AGENT_API,
-                f"{type(self).__name__} CLI exited with code {proc.returncode}",
+                f"{type(self).__name__} CLI exited with code {proc.returncode}"
+                + (f": {last}" if last else ""),
             )
         self._proc = None
+
+    def _last_stderr_line(self, start: int) -> str:
+        """The last line the CLI wrote to agent_cli.log since ``start``: why it failed, often a
+        usage limit the adapter can recognise."""
+        if self._cli_log is None:
+            return ""
+        self._cli_log.flush()
+        try:
+            with open(self._cli_log.name, encoding="utf-8", errors="replace") as handle:
+                handle.seek(start)
+                lines = [line.strip() for line in handle.read().splitlines() if line.strip()]
+        except OSError:
+            return ""
+        return lines[-1][:_STDERR_LINE_CHARS] if lines else ""
 
     async def inject(self, message: str) -> None:
         self._pending.append(message)
