@@ -627,6 +627,37 @@ async def test_a_codex_usage_limit_is_recognised_from_the_clis_stderr(tmp_path) 
     assert agent.usage_limit_reset("CodexAgent CLI exited with code 1") is None
 
 
+class _LimitedMidTurnCli(CodexAgent):
+    """Codex reaching the limit mid-run: the refusal comes as a JSON event, stderr says else."""
+
+    def _command(self, message: str) -> tuple[list[str], str | None]:
+        refusal = (
+            "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to "
+            "purchase more credits or try again at Nov 4th, 2026 7:35 AM."
+        )
+        failed = {"type": "turn.failed", "error": {"message": refusal}}
+        script = (
+            f"import sys; print({json.dumps(json.dumps(failed))}); "
+            "print('ERROR codex_core::session::turn: Failed to run pre-sampling compact', "
+            "file=sys.stderr); sys.exit(1)"
+        )
+        return [sys.executable, "-c", script], None
+
+
+async def test_a_codex_usage_limit_reported_mid_turn_is_recognised(tmp_path) -> None:
+    agent = _LimitedMidTurnCli({"codex_home": str(tmp_path / "home")})
+    cwd = tmp_path / "wd"
+    cwd.mkdir()
+    await agent.start(cwd=str(cwd), model=None, base_url=None, api_key=None, system_prompt=None)
+    try:
+        events = [event async for event in agent.send("go")]
+    finally:
+        await agent.close()
+    assert not any(isinstance(event, TextDelta) for event in events)  # not the model's words
+    (error,) = [event for event in events if isinstance(event, AgentError)]
+    assert agent.usage_limit_reset(error.message) == datetime(2026, 11, 4, 7, 35).timestamp()
+
+
 async def test_a_cli_we_killed_is_not_reported_as_an_agent_error(tmp_path) -> None:
     """The walltime watchdog SIGKILLs the CLI; that exit is ours, not an API failure. Before the
     fix every capped run logged 'CLI exited with code -9' next to its walltime_limit verdict."""

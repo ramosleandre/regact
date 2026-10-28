@@ -59,6 +59,7 @@ class _CliAgent(CodeAgent):
         self._proc: asyncio.subprocess.Process | None = None
         self._aborted = False  # we killed the CLI (e.g. walltime): its exit is not an error
         self._cli_log: TextIO | None = None  # the CLI's own stderr, captured per task (not stdout)
+        self._stream_error: str | None = None  # an error the CLI reported in its event stream
 
     async def start(
         self,
@@ -122,6 +123,7 @@ class _CliAgent(CodeAgent):
 
         argv, stdin_data = self._command(message)
         self._aborted = False
+        self._stream_error = None
         stderr_start = self._cli_log.tell() if self._cli_log is not None else 0
         if self._runtime_wrap is not None:
             argv = self._runtime_wrap(argv)  # run the whole CLI process inside the OS sandbox
@@ -157,7 +159,7 @@ class _CliAgent(CodeAgent):
 
         await proc.wait()
         if proc.returncode and not self._aborted:
-            last = self._last_stderr_line(stderr_start)
+            last = self._stream_error or self._last_stderr_line(stderr_start)
             yield AgentError(
                 ErrorCategory.AGENT_API,
                 f"{type(self).__name__} CLI exited with code {proc.returncode}"
