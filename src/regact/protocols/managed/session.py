@@ -59,6 +59,11 @@ MODEL_FILES = [
 ]
 
 
+def _short(commit: str) -> str:
+    """A commit for a message, keeping its ``+dirty`` mark (uncommitted changes)."""
+    return commit[:14] + ("+dirty" if commit.endswith("+dirty") else "")
+
+
 class TaskStopped(Exception):
     """A known task limit reached before an environment action; history stays complete."""
 
@@ -171,8 +176,8 @@ class ManagedCoordinator:
         recorded, running = self.store.recorded_commit(), regact_commit()
         if recorded != running and not self.config.resume_any_version:
             raise RuntimeError(
-                f"this task was recorded by regact {recorded[:14] or 'of an unknown commit'}, not "
-                f"{running[:14]}; check that commit out, or pass resume_any_version=true"
+                f"this task was recorded by regact {_short(recorded) or 'of an unknown commit'}, "
+                f"not {_short(running)}; check that commit out, or pass resume_any_version=true"
             )
         # Replayed under the level cap the task first ran with, raised again at each extension.
         self.max_levels = self._recorded_max_levels()
