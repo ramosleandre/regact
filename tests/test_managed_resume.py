@@ -201,6 +201,10 @@ def test_a_recorded_task_is_not_reopened_without_resume_or_by_another_commit(
     monkeypatch.setattr(session, "regact_commit", lambda: "f" * 40)
     with pytest.raises(RuntimeError, match="recorded by regact"):
         reopened(c, Lifecycle.SINGLE_INSTANCE)
+    dirty = "f" * 40 + "+dirty"  # the message keeps the mark, else both commits print alike
+    monkeypatch.setattr(session, "regact_commit", lambda: dirty)
+    with pytest.raises(RuntimeError, match=r"not f{14}\+dirty"):
+        reopened(c, Lifecycle.SINGLE_INSTANCE)
     reopened(c, Lifecycle.SINGLE_INSTANCE, resume_any_version=True).close("test_finished")
 
 
