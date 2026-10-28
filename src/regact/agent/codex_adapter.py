@@ -354,6 +354,13 @@ class CodexAgent(_CliAgent):
         ):
             return self._tool_events(kind, item)
 
+        if kind in ("error", "turn.failed"):  # e.g. the usage limit; reported by the exit error
+            error = item.get("error")
+            reported = error.get("message") if isinstance(error, dict) else item.get("message")
+            if isinstance(reported, str):
+                self._stream_error = reported
+            return []
+
         if kind.endswith("turn.completed") or kind.endswith("turn_complete"):
             return [IterationComplete(final_text=_text_of(item.get("text")))]
         message = item.get("message")
