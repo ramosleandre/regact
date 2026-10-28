@@ -304,9 +304,12 @@ async def test_a_usage_limit_that_resets_too_late_ends_the_run(tmp_path: Path) -
         experiment_deadline_unix=int(time.time()) + 600, wait_for_usage_limit=True
     )
     limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
-    reason = await stack.run(LimitedAgent([[limit, IterationComplete()]] * 5))
+    agent = LimitedAgent([[limit, IterationComplete()]] * 5)
+    reason = await stack.run(agent)
 
-    assert reason == "agent_api" and stack.experiment.usage_limit_waits == 0
+    # Still a usage limit: the task ends resumable at once, with no retry against it.
+    assert reason == "usage_limit" and stack.experiment.usage_limit_waits == 0
+    assert len(agent.sent) == 1 and stack.experiment.exit_detail.startswith("resets ")
 
 
 async def test_a_resumed_task_gets_what_the_new_deadline_leaves(tmp_path: Path) -> None:
@@ -353,7 +356,7 @@ async def test_waits_for_usage_limits_are_capped_over_the_task(tmp_path: Path, m
     limit = AgentError(ErrorCategory.AGENT_API, "You've hit your session limit")
     reason = await stack.run(LimitedAgent([[limit, IterationComplete()] for _ in range(8)]))
 
-    assert reason == "agent_api" and stack.experiment.usage_limit_waits == 1
+    assert reason == "usage_limit" and stack.experiment.usage_limit_waits == 1
 
 
 async def test_pipeline_stops_on_keep_alive_limit(tmp_path: Path) -> None:

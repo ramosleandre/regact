@@ -17,8 +17,11 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
+import time
 import uuid
+from datetime import datetime
 from typing import Any
 
 from regact.agent.base import executable_paths
@@ -33,6 +36,16 @@ from regact.agent.events import (
     ToolResult,
 )
 from regact.agent.usage import codex_usage
+
+# "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase
+# more credits or try again at Nov 2nd, 2026 6:03 PM." - the time is the machine's local time.
+_USAGE_LIMIT = re.compile(r"hit your usage limit", re.IGNORECASE)
+_TRY_AGAIN = re.compile(
+    r"try again at (?P<month>[A-Za-z]{3})[a-z]*\.? (?P<day>\d{1,2})(?:st|nd|rd|th)?,?"
+    r" (?P<year>\d{4}),? (?P<hour>\d{1,2}):(?P<minute>\d{2}) ?(?P<half>AM|PM)",
+    re.IGNORECASE,
+)
+_UNKNOWN_RESET_S = 7 * 24 * 3600  # a limit without a readable reset: too far to wait for
 
 
 class CodexAgent(_CliAgent):
@@ -189,6 +202,18 @@ class CodexAgent(_CliAgent):
                 shutil.copyfile(path, os.path.join(kept, os.path.basename(path)))
             except OSError:
                 pass  # best-effort, like the token refresh above
+
+    def usage_limit_reset(self, message: str) -> float | None:
+        if not _USAGE_LIMIT.search(message):
+            return None
+        match = _TRY_AGAIN.search(message)
+        if match is None:
+            return time.time() + _UNKNOWN_RESET_S
+        stamp = "{month} {day} {year} {hour}:{minute} {half}".format(**match.groupdict())
+        try:
+            return datetime.strptime(stamp, "%b %d %Y %I:%M %p").timestamp()
+        except ValueError:
+            return time.time() + _UNKNOWN_RESET_S
 
     def _command(self, message: str) -> tuple[list[str], str | None]:
         # Exec item IDs restart for each process, including resumed turns.
