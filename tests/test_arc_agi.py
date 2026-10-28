@@ -306,6 +306,19 @@ _LS20_TWO_LEVELS = [
 ]  # fmt: skip
 
 
+def test_a_game_drawn_from_numpys_generator_is_the_same_every_time_it_is_made() -> None:
+    """lf52's dissolve mask comes from numpy's global generator: a resumed task rebuilds it."""
+    pytest.importorskip("arc_agi")
+    pytest.importorskip("arcengine")
+    import numpy as np
+
+    problem = _problem()
+    masks = [np.array(problem.make_env("lf52")._env._game.foztuzaztfm) for _ in range(2)]
+    np.random.seed(None)  # whatever ran before, the next make draws the same mask
+    masks.append(np.array(problem.make_env("lf52")._env._game.foztuzaztfm))
+    assert all(np.array_equal(masks[0], mask) for mask in masks[1:])
+
+
 def test_max_levels_makes_every_part_see_a_shorter_game() -> None:
     """With max_levels=N the game has N levels: baseline, prompt, reference and scores stop there."""
     capped = ArcAgiProblem(environments_dir=_ENV_DIR, max_levels=2)

@@ -18,6 +18,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import threading
+import zlib
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,7 @@ from regact.problems.palette import ARC_PALETTE
 from regact.workspace.templates import TemplateFile
 
 logger = logging.getLogger(__name__)
+_GLOBAL_RNG_LOCK = threading.Lock()  # numpy's global generator is shared by concurrent tasks
 
 _PROMPT = Path(__file__).parents[1] / "prompts" / "arc_agi.md"
 _DEFAULT_DIR = os.environ.get("ARC_ENVIRONMENTS_DIR", "environnement")
@@ -410,7 +413,13 @@ class ArcAgiProblem(BaseProblem):
 
     def make_env(self, task_name: str) -> Any:
         task = self._task(task_name)
-        arc_env = self._arcade_instance().make(task.game_id)
+        import numpy as np
+
+        # lf52 draws its dissolve animation from numpy's global generator when the game is made:
+        # seeded per game, so every run (and a resumed task's rebuilt game) sees the same animation.
+        with _GLOBAL_RNG_LOCK:
+            np.random.seed(zlib.crc32(task.game_id.encode()))
+            arc_env = self._arcade_instance().make(task.game_id)
         if arc_env is None:
             raise RegactError(
                 ErrorCategory.ENV_RUNTIME,
