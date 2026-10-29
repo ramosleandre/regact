@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="540" viewBox="-20 -20 1080 540" role="img" aria-labelledby="rw-title rw-desc" focusable="false">
+  <title id="rw-title">How a Regact run is organised</title>
+  <desc id="rw-desc">A coding agent (Codex, Claude Code or Alan Code) works in a sandboxed workspace whose filesystem and network are confined. It writes a controller, and under cwm a world model, then calls framework commands over a localhost bridge. Regact runs the selected protocol, plain acting or cwm (a code world model), and executes the controller in an isolated process against the real problem: ARC-AGI-3, PuzzleScript, Baba Is You, MiniGrid or Sokoban. The conversation, tool calls, frames and world model are recorded, and the run can be replayed in the viewer.</desc>
+  <style>
+    .dg-box { fill: none; stroke: #b6bdc6; stroke-width: 1; }
+    .dg-zone { fill: none; stroke: #b6bdc6; stroke-width: 1; stroke-dasharray: 5 4; }
+    .dg-line { fill: none; stroke: #59636e; stroke-width: 1.25; }
+    .dg-line.dash { stroke-dasharray: 4 4; }
+    .dg-head { fill: #59636e; }
+    .dg-cap, .dg-title, .dg-code, .dg-mono { font-family: "Martian Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .dg-text, .dg-small { font-family: "Instrument Sans", "Helvetica Neue", Arial, sans-serif; }
+    .dg-cap { font-size: 11px; letter-spacing: 0.08em; fill: #59636e; }
+    .dg-cap.on, .dg-title, .dg-code { fill: #1f2328; }
+    .dg-title { font-size: 14px; font-weight: 500; }
+    .dg-text { font-size: 14px; fill: #31373d; }
+    .dg-small { font-size: 12.5px; fill: #59636e; }
+    .dg-code { font-size: 11.5px; }
+    .pixel { image-rendering: pixelated; }
+    .c3 { fill: #666666; } .c7 { fill: #FF7BCC; } .c9 { fill: #1E93FF; } .c11 { fill: #FFDC00; }
+    .c12 { fill: #FF851B; } .c14 { fill: #4FCC30; }
+    @media (prefers-color-scheme: dark) {
+      .dg-box, .dg-zone { stroke: #3A3D46; }
+      .dg-line { stroke: #A2A5AE; }
+      .dg-head, .dg-cap, .dg-small { fill: #A2A5AE; }
+      .dg-cap.on, .dg-title, .dg-code { fill: #E6E7EA; }
+      .dg-text { fill: #CFD0D5; }
+      .codex { filter: invert(1); }
+    }
+  </style>
+  <defs>
+    <marker id="rw-h" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="dg-head" d="M0 0 8 4 0 8z"/></marker>
+  </defs>
+
+  <!-- sandbox -->
+  <rect class="dg-zone" x="0.5" y="0.5" width="400" height="490"/>
+  <text class="dg-cap on" x="18" y="28">SANDBOXED WORKSPACE</text>
+  <text class="dg-small" x="18" y="48">OS sandbox: filesystem and network confined</text>
+
+  <text class="dg-cap" x="18" y="88">CODING AGENT</text>
+  <image class="codex" href="data:image/png;base64,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" x="20" y="104" width="30" height="30"/>
+  <text class="dg-text" x="64" y="124">Codex</text>
+  <image href="data:image/png;base64,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" x="18" y="146" width="34" height="34"/>
+  <text class="dg-text" x="64" y="168">Claude Code</text>
+  <image class="pixel" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAACI0lEQVR4nO3dPYpTUQCA0VHcgmAhaiOIjfYye3ADli7AVVi6ADchuAPF3koEG8sBF6FVCjMJk8f7nXznlCEkN8nH5d6XC+/iAgAAAAA4f3fWHsBNLj/+/rv2GMb4+vbJpr/ju2sPgHUJIE4AcQKIE0Dc4ivU276qn9vSuwYzQJwA4gQQJ4A4AcTNtuIcutp/9ez+JO/77eefSV5na+baHZgB4gQQJ4A4AcQJIG70ytJqf11jdwdmgDgBxAkgTgBxAog7eQXpJM/tcuruwAwQJ4A4AcQJIE4AcQKIE0CcAOIEECeAOAHEXbte7Jr/edv/j8AMECeAOAHECSBOAHH3ln7Dz28eH3z80cPDj794/2XO4cxu65/XDBAngDgBxAkgTgBxi+8Cjq1+z9XWP68ZIE4AcQKIE0CcAOKcCIpxIoj/CCBOAHECiBNAnADiBBAngDgBxAkgTgBx104EXf34fvCJD56/nHkoTOnY77jPDBAngDgBxAkgTgBxJ98v4Om7T4NOCtk1TOvUVf3Orw+v3S+AmwkgTgBxAogTQNzi9w4eeq/bqV7fOA8zA8QJIE4AcQKIE0CcAOIEECeAOAHECSBOAHGj/ws45tgJolNPquwcuzY+9hr4ztCTTmuNf6rvc58ZIE4AcQKIE0CcAOIWv1/AUEPPw2/N1sdvBogTQJwA4gQQJ4C42XYBY69RL6U+TjNAnADiBBAngDgBAAAAAACcvX83mmhmuWkFawAAAABJRU5ErkJggg==" x="18" y="190" width="34" height="34"/>
+  <text class="dg-text" x="64" y="212">Alan Code</text>
+
+  <path class="dg-line" d="M168 163.5H206" marker-end="url(#rw-h)"/>
+  <text class="dg-small" x="172" y="155">writes</text>
+
+  <text class="dg-cap" x="214" y="88">CODE</text>
+  <rect class="dg-box" x="214.5" y="102.5" width="168" height="34"/><text class="dg-code" x="228" y="124">controller.py</text>
+  <rect class="dg-box" x="214.5" y="146.5" width="168" height="34"/><text class="dg-code" x="228" y="168">world_model/</text>
+  <text class="dg-small" x="214" y="200">under cwm</text>
+
+  <rect class="dg-box" x="18.5" y="262.5" width="364" height="96"/>
+  <text class="dg-cap" x="34" y="286">FRAMEWORK COMMANDS</text>
+  <text class="dg-code" x="34" y="312">RunController</text>
+  <text class="dg-code" x="34" y="334">UpdateCodeWorldModel</text>
+  <text class="dg-small" x="244" y="312">run my controller</text>
+  <text class="dg-small" x="244" y="334">validate my model</text>
+  <path class="dg-line" d="M200 230V258" marker-end="url(#rw-h)"/>
+
+  <text class="dg-small" x="18" y="452">game source hidden; internet blocked</text>
+  <text class="dg-small" x="18" y="470">except the agent's own model API</text>
+
+  <path class="dg-line" d="M383 310.5H456" marker-end="url(#rw-h)"/>
+  <text class="dg-small" x="430" y="300" text-anchor="middle">localhost</text>
+
+  <!-- framework -->
+  <rect class="dg-box" x="460.5" y="20.5" width="260" height="330"/>
+  <text class="dg-cap on" x="478" y="48">REGACT</text>
+  <text class="dg-text" x="478" y="74">runs the protocol</text>
+  <rect class="dg-box" x="478.5" y="88.5" width="224" height="32"/><rect class="c3" x="488" y="100" width="8" height="8"/>
+  <text class="dg-code" x="506" y="109">vanilla</text><text class="dg-small" x="582" y="109">plain acting</text>
+  <rect class="dg-box" x="478.5" y="128.5" width="224" height="32"/><rect class="c9" x="488" y="140" width="8" height="8"/>
+  <text class="dg-code" x="506" y="149">cwm</text><text class="dg-small" x="582" y="149">model, then act</text>
+
+  <rect class="dg-zone" x="478.5" y="190.5" width="224" height="140"/>
+  <text class="dg-cap" x="494" y="214">ISOLATED PROCESS</text>
+  <text class="dg-text" x="494" y="240">the controller, from a</text>
+  <text class="dg-text" x="494" y="259">frozen copy of the code</text>
+  <text class="dg-small" x="494" y="290">no workspace, no dataset,</text>
+  <text class="dg-small" x="494" y="307">no network</text>
+
+  <path class="dg-line" d="M713 230.5H796" marker-end="url(#rw-h)"/>
+  <text class="dg-small" x="758" y="222" text-anchor="middle">actions</text>
+  <path class="dg-line" d="M800 280.5H717" marker-end="url(#rw-h)"/>
+  <text class="dg-small" x="760" y="298" text-anchor="middle">observations</text>
+
+  <!-- problems -->
+  <rect class="dg-box" x="800.5" y="20.5" width="239" height="330"/>
+  <text class="dg-cap on" x="818" y="48">PROBLEM</text>
+  <text class="dg-text" x="818" y="74">the real game</text>
+  <rect class="c9" x="818" y="102" width="10" height="10"/><text class="dg-title" x="838" y="112">ARC-AGI-3</text>
+  <rect class="c14" x="818" y="142" width="10" height="10"/><text class="dg-title" x="838" y="152">PuzzleScript</text>
+  <rect class="c7" x="818" y="182" width="10" height="10"/><text class="dg-title" x="838" y="192">Baba Is You</text>
+  <rect class="c12" x="818" y="222" width="10" height="10"/><text class="dg-title" x="838" y="232">MiniGrid</text>
+  <rect class="c11" x="818" y="262" width="10" height="10"/><text class="dg-title" x="838" y="272">Sokoban</text>
+  <text class="dg-small" x="818" y="318">its source is hidden</text>
+  <text class="dg-small" x="818" y="335">from the agent</text>
+
+  <!-- record -->
+  <path class="dg-line" d="M590 351V386" marker-end="url(#rw-h)"/>
+  <path class="dg-line dash" d="M401 440.5H456" marker-end="url(#rw-h)"/>
+  <rect class="dg-box" x="460.5" y="390.5" width="579" height="100"/>
+  <text class="dg-cap on" x="478" y="418">RUN RECORD</text>
+  <text class="dg-text" x="478" y="446">conversation · tool calls · frames · world model</text>
+  <text class="dg-small" x="478" y="472">every run is saved and can be replayed in the viewer</text>
+</svg>
