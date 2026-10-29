@@ -401,9 +401,12 @@ def test_game_lookup_is_direct_and_rejects_path_escape(tmp_path, monkeypatch):
     outside = tmp_path / "outside"
     (outside / "logs").mkdir(parents=True)
     (outside / "logs/experiment_state.json").write_text("{}")
-    (Path(root) / "escape").symlink_to(outside, target_is_directory=True)
-    for name in ("../outside", str(outside), "escape", "missing"):
+    (Path(root) / "ls20" / "workdir" / "escape").symlink_to(outside, target_is_directory=True)
+    for name in ("../outside", str(outside), "ls20/workdir/escape", "missing"):
         assert client.get("/api/game", params={"name": name}).status_code == 404
+    # A curated root links its top-level entries to experiments kept elsewhere.
+    (Path(root) / "linked").symlink_to(outside, target_is_directory=True)
+    assert client.get("/api/game", params={"name": "linked"}).status_code == 200
 
 
 def test_main_metrics_come_from_the_problem(tmp_path: Path) -> None:

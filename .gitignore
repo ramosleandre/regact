@@ -39,3 +39,4 @@ docs_dev/
 
 # Heavy video sources: keep only the compressed mp4 + poster that the README embeds.
 assets/videos/*.webm
+experiments_public/

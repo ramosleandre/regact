@@ -193,13 +193,15 @@ def build_app(experiment_dir: str) -> FastAPI:
         return entry
 
     def _require_game(name: str) -> None:
-        # Validate this run directly: frame playback must not scan the experiment tree.
-        candidate = (root / name).resolve()
-        if (
-            Path(name).is_absolute()
-            or not candidate.is_relative_to(root.resolve())
-            or not (candidate / "logs/experiment_state.json").is_file()
-        ):
+        # Validate this run directly: frame playback must not scan the experiment tree. A curated
+        # root (experiments_public) may link its top-level entries to experiments kept elsewhere;
+        # nothing below them, such as a link an agent made in its workdir, may lead outside.
+        parts = Path(name).parts
+        if Path(name).is_absolute() or not parts or ".." in parts:
+            raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
+        candidate, top = (root / name).resolve(), (root / parts[0]).resolve()
+        marker = candidate / "logs/experiment_state.json"
+        if not candidate.is_relative_to(top) or not marker.is_file():
             raise HTTPException(status_code=404, detail=f"unknown game {name!r}")
 
     @app.get("/api/game")
@@ -346,7 +348,7 @@ def build_app(experiment_dir: str) -> FastAPI:
             raise HTTPException(status_code=400, detail="only .mp4")
         _require_game(game)
         path = (root / game / "workdir" / "submissions" / submission / filename).resolve()
-        if not path.is_relative_to(root.resolve()) or not path.is_file():
+        if not path.is_relative_to((root / game).resolve()) or not path.is_file():
             raise HTTPException(status_code=404, detail="video not found")
         return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
 

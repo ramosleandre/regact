@@ -279,3 +279,10 @@ main:has(.replay) { max-width: none; }
 .rclose { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
 .rfull { font-size: 13px; }
 @media (max-width: 800px) { .rmain { grid-template-columns: 1fr; } .rleft { position: static; } .rconv { height: 60vh; } }
+.benchtitle { margin: 8px 0 4px; }
+.benchintro { max-width: 70ch; color: var(--muted); }
+.benchcard { margin: 10px 0; }
+.benchhead { display: flex; align-items: center; gap: 8px; }
+.benchhead h3 { margin: 0 auto 0 0; }
+.benchtable td { vertical-align: middle; }
+.benchtable .vicon, .benchtable .ibadge { vertical-align: middle; }

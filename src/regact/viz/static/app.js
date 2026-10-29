@@ -31,6 +31,40 @@ const aggLine = (agg) =>
 const SNAPSHOT = (typeof window !== "undefined" && window.__REGACT_SNAPSHOT__) || null;
 const _responses = {};   // path -> last response, what an export embeds
 const asset = (src) => (SNAPSHOT && SNAPSHOT.images[src]) || src;
+// A public copy (python -m regact.viz.export): every request is a file under data/, named by the
+// FNV-1a hash of the request the server would have answered; replay frames come in one pack.
+const STATIC = document.querySelector?.('meta[name="regact-static"]')?.content || null;
+function requestKey(url) {
+  let v = 0xcbf29ce484222325n;
+  for (const b of new TextEncoder().encode(url)) v = ((v ^ BigInt(b)) * 0x100000001b3n) & 0xffffffffffffffffn;
+  return v.toString(16).padStart(16, "0");
+}
+const _packs = {};       // request -> data URL, for the frames of the games loaded so far
+function media(url) {
+  if (!STATIC) return url;
+  if (_packs[url]) return _packs[url];
+  const name = new URLSearchParams(url.split("?")[1] || "").get("filename") || "";
+  const ext = url.startsWith("/video") ? ".mp4" : (name.match(/\.\w+$/) || [".png"])[0];
+  return STATIC + requestKey(url) + ext;
+}
+const _packIndex = {};   // request -> [pack chunk file, position], for the games loaded so far
+async function loadPack(name) {
+  if (!STATIC) return;
+  const r = await fetch(STATIC + requestKey("pack:" + name) + ".json");
+  if (!r.ok) return;
+  for (const [url, [chunk, i]] of Object.entries((await r.json()).urls))
+    _packIndex[url] = [STATIC + requestKey(`pack:${name}:${chunk}`) + ".json", i];
+}
+const _chunks = {};      // chunk file -> promise of its images
+async function setMedia(img, url) {   // like img.src = media(url), fetching a pack chunk if needed
+  img.dataset.want = url;
+  const at = STATIC && !_packs[url] && _packIndex[url];
+  if (at) {
+    _chunks[at[0]] ??= fetch(at[0]).then((r) => r.json());
+    _packs[url] = (await _chunks[at[0]])[at[1]];
+  }
+  if (img.dataset.want === url) img.src = media(url);   // a later frame may have been asked for since
+}
 
 let navigation = new AbortController();
 let pageCleanups = [];
@@ -42,6 +76,14 @@ async function api(path, opts = {}) {
   if (SNAPSHOT) {
     if (!(path in SNAPSHOT.responses)) throw new Error("not included in this exported page");
     return JSON.parse(JSON.stringify(SNAPSHOT.responses[path]));
+  }
+  if (STATIC && path.startsWith("/api/")) {
+    if (opts.method === "POST") throw new Error("Interactive playback runs in the local viewer only (make viz).");
+    const r = await fetch(STATIC + requestKey(path) + ".json", {signal: token.signal});
+    if (!r.ok) throw new Error("This page is not part of the public site.");
+    const data = await r.json();
+    checkNavigation(token);
+    return data;
   }
   const r = await fetch(path, {cache: "no-store", signal: token.signal, ...opts});
   if (!r.ok) {
@@ -256,7 +298,7 @@ function currentSettings() {
   };
 }
 function saveSettings() {   // debounced PUT of the whole panel state for the current interface
-  if (SNAPSHOT) return;
+  if (SNAPSHOT || STATIC) return;
   const body = currentSettings();
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
@@ -1148,7 +1190,7 @@ async function renderGraphs(under = "") {
   if (SNAPSHOT) {
     for (const a of nav.querySelectorAll("a")) a.removeAttribute("href");
     nav.append(h("span", "muted snapnote", `exported ${SNAPSHOT.exported}; navigation is off`));
-  } else {
+  } else if (!STATIC) {
     const exp = h("button", "aggbtn exportbtn", "export");
     exp.title = "Save this page, with its data and current settings, as one HTML file";
     exp.onclick = () => exportPage(under, exp);
@@ -1659,7 +1701,7 @@ function toolBlock(tool, gameName) {
     for (const attachment of tool.images || []) {
       if (!attachment.filename) { res.append(h('p', 'err', attachment.error || 'Image unavailable')); continue; }
       const img = h('img'); img.alt = 'Image returned to the agent by this tool';
-      img.src = `/api/game/tool-image?name=${encodeURIComponent(gameName)}&filename=${encodeURIComponent(attachment.filename)}`;
+      img.src = media(`/api/game/tool-image?name=${encodeURIComponent(gameName)}&filename=${encodeURIComponent(attachment.filename)}`);
       img.style.cssText = 'max-width:100%;max-height:600px;object-fit:contain;image-rendering:pixelated';
       res.append(img);
     }
@@ -1748,6 +1790,7 @@ function controllerResultIds(text) {
 
 function controllerReplay(game, id) {
   const box = h('div', 'controller-replay');
+  if (STATIC) return box;   // playback runs the agent's code: local viewer only
   const button = h('button', null, `Load controller #${id} playback`);
   box.append(button);
   button.onclick = async () => {
@@ -1882,7 +1925,7 @@ function replayItem(it, gameName) {
     for (const attachment of tool.images || []) {
       if (!attachment.filename) continue;
       const img = h("img", "rthumb"); img.alt = "Image returned to the agent"; img.loading = "lazy";
-      img.src = `/api/game/tool-image?name=${encodeURIComponent(gameName)}&filename=${encodeURIComponent(attachment.filename)}`;
+      img.src = media(`/api/game/tool-image?name=${encodeURIComponent(gameName)}&filename=${encodeURIComponent(attachment.filename)}`);
       card.append(img);
     }
     card.onclick = () => replayModal(tool.name, toolBlock(tool, gameName));
@@ -1900,6 +1943,7 @@ function replayItem(it, gameName) {
 async function renderReplay(name) {
   const d = await gameDetail(name);
   const tl = await api("/api/game/replay?name=" + encodeURIComponent(name));
+  await loadPack(name);
   const frameUrl = (f, view) => `/api/game/replay/frame?name=${encodeURIComponent(name)}&obs=${f.obs}&view=${view}`;
   const rows = tl.items.filter(([turn, item]) => d.turns[turn]?.items?.[item]);
   const items = rows.map(([turn, item]) => d.turns[turn].items[item]);
@@ -1940,15 +1984,16 @@ async function renderReplay(name) {
     if (k === shownFrame && !force) return;
     shownFrame = k;
     const f = tl.frames[k];
-    img.src = frameUrl(f, view);
-    for (let j = k + 1; j <= k + 3 && j < tl.frames.length; j++) new Image().src = frameUrl(tl.frames[j], view);
+    setMedia(img, frameUrl(f, view));
+    for (let j = k + 1; j <= k + 3 && j < tl.frames.length; j++) setMedia(new Image(), frameUrl(tl.frames[j], view));
     const action = f.action == null ? (f.reset ? "reset" : "start") : "action " + (typeof f.action === "object" ? JSON.stringify(f.action) : f.action);
-    caption.textContent = `frame ${k + 1}/${tl.frames.length} · ${action} · ${fmt(f.env_actions)} env actions`;
+    caption.textContent = `frame ${k + 1}/${tl.frames.length} · ${action} · ${fmt(f.env_actions)} env actions`
+      + (tl.thinned ? ` · a long run: 1 recorded frame in ${tl.thinned} is shown` : "");
     clear(mismatchBox);
     mismatchBox.hidden = f.diagnostic == null;
     if (f.diagnostic != null) {
       const pred = h("img", "rimg"); pred.alt = "What the model predicted";
-      pred.src = `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${f.diagnostic}&side=predicted&view=${view}`;
+      setMedia(pred, `/api/game/cwm/evidence-image?name=${encodeURIComponent(name)}&kind=diagnostic&identifier=${f.diagnostic}&side=predicted&view=${view}`);
       pred.onerror = () => pred.replaceWith(h("div", "muted", "prediction image unavailable"));
       mismatchBox.append(h("div", "rwarn", "Prediction mismatch: the model predicted this frame instead"), pred);
     }
@@ -2103,7 +2148,7 @@ async function renderArtifacts(name) {
     c.append(h("div", "muted", `${aggLine(a)} · n=${a.n_episodes ?? "—"}`));
     for (const v of s.videos || []) {
       const vid = h("video"); vid.controls = true; vid.preload = "metadata";
-      vid.src = `/video?game=${encodeURIComponent(name)}&submission=${encodeURIComponent(s.name)}&filename=${encodeURIComponent(v)}`;
+      vid.src = media(`/video?game=${encodeURIComponent(name)}&submission=${encodeURIComponent(s.name)}&filename=${encodeURIComponent(v)}`);
       c.append(vid);
     }
     subs.append(c);
@@ -2139,6 +2184,48 @@ async function renderLogs(name) {
 }
 
 
+// ---------------------------------------------------------------- public landing (static mode)
+// The curated benchmarks (experiments_public/benchmarks.yaml), by problem, then one row per
+// (agent, model, protocol): its runs, solved runs and mean main metric.
+async function renderBenchmarks() {
+  const token = navigation;
+  const r = await fetch(STATIC + "site.json", {signal: token.signal});
+  const site = await r.json();
+  await loadIcons();
+  checkNavigation(token);
+  crumb.textContent = "";
+  clear(app);
+  app.append(h("h1", "benchtitle", site.title));
+  if (site.intro) app.append(h("p", "benchintro", site.intro));
+  for (const problem of site.problems) {
+    app.append(h("h2", "expsection", problem.name));
+    if (problem.description) app.append(h("p", "muted", problem.description));
+    for (const bench of problem.benchmarks) {
+      const graphs = h("a", "aggbtn", "graphs");
+      graphs.href = "#graphs/" + encodeURIComponent(bench.under);
+      const runs = h("a", "aggbtn", "runs");
+      runs.href = "#run/" + encodeURIComponent(bench.under);
+      const card = h("div", "card benchcard", h("div", "benchhead", h("h3", null, bench.title), graphs, runs));
+      if (bench.note) card.append(h("p", "muted", bench.note));
+      const table = h("table", "benchtable");
+      table.append(rowEl("th", ["agent", "model", "protocol", "runs", "solved", "mean"]));
+      for (const row of bench.rows) {
+        const mean = row.mean == null ? "\u2014" : `${row.metric} ${fmtMetric(row.mean)}`;
+        table.append(h("tr", null,
+          h("td", null, agentIcon(row.agent, 20), " " + row.agent),
+          h("td", null, modelLabel(row.model)),
+          h("td", null, row.protocol), h("td", null, fmt(row.runs)), h("td", null, fmt(row.solved)),
+          h("td", null, mean)));
+      }
+      card.append(table);
+      app.append(card);
+    }
+  }
+  const all = h("a", null, "browse every published run");
+  all.href = "#browse";
+  app.append(h("p", "muted", all));
+}
+
 // ---------------------------------------------------------------- routing
 async function route() {
   navigation.abort();
@@ -2151,7 +2238,8 @@ async function route() {
   try {
     if (SNAPSHOT) return await renderGraphs(SNAPSHOT.under);
     const parts = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean);
-    if (!parts.length) return await renderBrowse();
+    if (!parts.length) return STATIC ? await renderBenchmarks() : await renderBrowse();
+    if (parts[0] === "browse") return await renderBrowse();
     if (parts[0] === "graphs") return await renderGraphs(parts[1] ? decodeURIComponent(parts[1]) : "");
     if (parts[0] === "run") return await renderDashboard(parts[1] ? decodeURIComponent(parts[1]) : "");
     if (parts[0] !== "game" || !parts[1]) return await renderBrowse();
