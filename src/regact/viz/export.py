@@ -35,6 +35,7 @@ from urllib.parse import urlencode
 import yaml
 
 from regact.security.runtime import _SECRET_NAME
+from regact.viz import reader
 from regact.viz.app import build_app
 
 _STATIC = Path(__file__).parent / "static"
@@ -81,11 +82,11 @@ class LeakError(RuntimeError):
 
 
 class Exporter:
-    def __init__(self, root: Path, out: Path) -> None:
+    def __init__(self, root: Path, out: Path, only: set[str] | None = None) -> None:
         from starlette.testclient import TestClient
 
         self.root, self.out = root, out
-        self.client = TestClient(build_app(str(root)))
+        self.client = TestClient(build_app(str(root), only))
         self.files = 0
         self.bytes = 0
         # Credentials present on this machine: none of them may appear in the export.
@@ -317,7 +318,27 @@ def landing(curation: dict[str, Any], games: dict[str, dict[str, Any]]) -> dict[
         "title": curation.get("title") or "regact benchmarks",
         "intro": curation.get("intro") or "",
         "problems": problems,
+        "runs": sorted(games),  # what "Check a random run!" picks from
     }
+
+
+def _exit_reason(run: Path) -> str | None:
+    state = json.loads((run / "logs" / "experiment_state.json").read_text(encoding="utf-8"))
+    return state.get("exit_reason")
+
+
+def select_runs(root: Path, per_task: int) -> set[str]:
+    """The first ``per_task`` finished runs (by launch time) of each task in each arm: a fixed rule,
+    so what is published is not picked by result. A run is ``<benchmark>/<arm>/<stamp>/<task>``."""
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for name in sorted(reader.list_games(str(root))):
+        parts = name.split("/")
+        groups.setdefault((*parts[:2], *parts[3:]), []).append(name)
+    chosen: set[str] = set()
+    for names in groups.values():
+        finished = [n for n in names if _exit_reason(root / n)]
+        chosen.update((finished or names)[:per_task])
+    return chosen
 
 
 def _rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -382,7 +403,8 @@ def main(argv: list[str] | None = None) -> int:
     curation = yaml.safe_load((root / "benchmarks.yaml").read_text(encoding="utf-8")) or {}
     if out.exists():
         shutil.rmtree(out)
-    exporter = Exporter(root, out)
+    per_task = curation.get("runs_per_task")
+    exporter = Exporter(root, out, select_runs(root, int(per_task)) if per_task else None)
     try:
         exporter.export(curation)
     except LeakError as exc:

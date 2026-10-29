@@ -113,3 +113,19 @@ def test_a_very_long_replay_keeps_every_nth_frame_and_every_mispredicted_one(
     monkeypatch.setattr(exporter, "get", lambda url: Response())
     kept = exporter.save_timeline("bench/ls20")
     assert [f["obs"] for f in kept["frames"]] == [0, 3, 5, 6, 9] and kept["thinned"] == 3
+
+
+def test_runs_per_task_publishes_the_first_finished_run_of_each_task(tmp_path: Path) -> None:
+    from regact.viz.export import select_runs
+
+    root = tmp_path / "public"
+    for stamp, exit_reason in (("2026-10-01_00-00-00", None), ("2026-10-02_00-00-00", "solved"),
+                               ("2026-10-03_00-00-00", "solved")):
+        for task in ("ls20", "ft09"):
+            logs = root / "bench" / "cwm" / stamp / task / "logs"
+            logs.mkdir(parents=True)
+            (logs / "experiment_state.json").write_text(json.dumps({"exit_reason": exit_reason}))
+    assert select_runs(root, 1) == {
+        "bench/cwm/2026-10-02_00-00-00/ls20",
+        "bench/cwm/2026-10-02_00-00-00/ft09",
+    }  # the unfinished first launch is skipped, the later one is not published

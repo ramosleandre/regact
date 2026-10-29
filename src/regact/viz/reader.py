@@ -160,7 +160,7 @@ def list_games(experiment_dir: str) -> list[str]:
 _RUN_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?$")
 
 
-def build_tree(experiment_dir: str) -> list[dict[str, Any]]:
+def build_tree(experiment_dir: str, games: list[str] | None = None) -> list[dict[str, Any]]:
     """A lazy nested tree of the folders down to task leaves, built from :func:`list_games`'s cheap
     walk - NO metric parsing - so a top folder holding many benchmarks renders instantly.
 
@@ -172,7 +172,7 @@ def build_tree(experiment_dir: str) -> list[dict[str, Any]]:
     everything else scopes the games list to its subtree (``/api/games?under=``, dashboard+graphs).
     """
     nested: dict[str, Any] = {}
-    for game in sorted(list_games(experiment_dir)):
+    for game in sorted(list_games(experiment_dir) if games is None else games):
         node = nested
         for part in game.split("/"):
             node = node.setdefault(part, {})

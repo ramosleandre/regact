@@ -282,6 +282,18 @@ main:has(.replay) { max-width: none; }
 .benchtitle { margin: 8px 0 4px; }
 .benchintro { max-width: 70ch; color: var(--muted); }
 .benchcard { margin: 10px 0; }
+.benchactions { margin: 4px 0 20px; }
+/* The host site's call-to-action button (the cells are ARC palette colours). */
+.cta { display: inline-flex; align-items: center; gap: 14px; padding: 14px 20px 14px 16px;
+  border: 1px solid var(--a11, #FFDC00); background: var(--panel); color: var(--fg);
+  font-family: var(--mono, ui-monospace, monospace); font-size: 14px; font-weight: 500; }
+.cta:hover { background: var(--panel2); color: var(--fg); }
+.cta-cells { display: grid; grid-template-columns: repeat(2, 7px); gap: 2px; flex: none; }
+.cta-cells span { width: 7px; height: 7px; }
+.cta-cells .c9 { background: var(--a9, #1E93FF); }
+.cta-cells .c11 { background: var(--a11, #FFDC00); }
+.cta-cells .c14 { background: var(--a14, #4FCC30); }
+.cta-cells .c8 { background: var(--a8, #F93C31); }
 .benchhead { display: flex; align-items: center; gap: 8px; }
 .benchhead h3 { margin: 0 auto 0 0; }
 .benchscroll { overflow-x: auto; }

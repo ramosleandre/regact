@@ -2200,6 +2200,19 @@ async function renderBenchmarks() {
   clear(app);
   app.append(h("h1", "benchtitle", site.title));
   if (site.intro) app.append(h("p", "benchintro", site.intro));
+  if (site.runs?.length) {
+    const cells = h("span", "cta-cells");
+    cells.setAttribute("aria-hidden", "true");
+    for (const c of ["c9", "c11", "c14", "c8"]) cells.append(h("span", c));
+    const random = h("a", "cta", cells, h("span", null, "Check a random run!"));
+    random.href = "#";
+    random.onclick = (event) => {
+      event.preventDefault();
+      const name = site.runs[Math.floor(Math.random() * site.runs.length)];
+      location.hash = "game/" + encodeURIComponent(name) + "/replay";
+    };
+    app.append(h("div", "benchactions", random));
+  }
   for (const problem of site.problems) {
     app.append(h("h2", "expsection", problem.name));
     if (problem.description) app.append(h("p", "muted", problem.description));

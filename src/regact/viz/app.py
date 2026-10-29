@@ -97,7 +97,8 @@ def _experiment_of(game_relpath: str) -> str:
     return parts[0] if parts else game_relpath
 
 
-def build_app(experiment_dir: str) -> FastAPI:
+def build_app(experiment_dir: str, only: set[str] | None = None) -> FastAPI:
+    """``only``, when given, is the set of games the listings show (a public export's selection)."""
     app = FastAPI(title="regact viz")
     root = Path(experiment_dir)
     from regact.protocols.cwm import viewer as cwm_viewer
@@ -138,6 +139,10 @@ def build_app(experiment_dir: str) -> FastAPI:
                     )
         return result
 
+    def listed() -> list[str]:
+        names = reader.list_games(experiment_dir)
+        return names if only is None else [name for name in names if name in only]
+
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return (_STATIC / "index.html").read_text(encoding="utf-8")
@@ -145,13 +150,13 @@ def build_app(experiment_dir: str) -> FastAPI:
     @app.get("/api/tree")
     def tree() -> dict[str, Any]:
         # Cheap folder scan (no metric parsing) - the browsable index for a many-experiment root.
-        return {"root": root.name, "tree": reader.build_tree(experiment_dir)}
+        return {"root": root.name, "tree": reader.build_tree(experiment_dir, listed())}
 
     @app.get("/api/games")
     def games(under: str = "") -> dict[str, Any]:
         # ``under`` scopes the (parsed) list to one subtree (a run/experiment), so the browser never
         # parses the whole root at once. Empty = every game (kept for a flat single-run root).
-        names = reader.list_games(experiment_dir)
+        names = listed()
         if under:
             names = [n for n in names if n == under or n.startswith(under + "/")]
         return {"experiment": root.name, "games": [summary(name) for name in names]}
