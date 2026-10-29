@@ -13,7 +13,7 @@
 
 ---
 
-**regact** runs coding agents on games they have never seen. The agent (Claude Code, Codex, Alan Code, ...) gets an unknown game, a sandboxed workspace and a controlled way to play: it writes Python controllers, the framework runs them against the real game, and the agent reads back what happened. The agent, the game and the experiment protocol are separate, interchangeable parts, so the same setup compares agents, models and protocols. Every run is recorded and can be replayed in a viewer: **[watch some benchmark runs online](https://tboulet.pages.dev/viewer/)**.
+**regact** runs coding agents on games they have never seen. The agent (Claude Code, Codex, Alan Code, ...) gets an unknown game, a sandboxed workspace and a controlled way to play: it writes Python controllers, the framework runs them against the real game, and the agent reads back what happened. The agent, the game and the experiment protocol are separate, interchangeable parts, so the same setup compares agents, models and protocols. Every run is recorded and can be replayed in a viewer: **[watch some benchmark runs online](https://timotheboulet.com/viewer/)**.
 
 <p align="center">
   <img src="assets/images/regact_overview.svg" width="100%" alt="One regact run: a coding agent in a sandboxed workspace writes a controller (and, under cwm, a world model) and calls framework commands over localhost; regact runs the protocol and executes the controller in an isolated process against the real game; the conversation, tool calls, frames and world model are recorded.">
