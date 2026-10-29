@@ -284,5 +284,24 @@ main:has(.replay) { max-width: none; }
 .benchcard { margin: 10px 0; }
 .benchhead { display: flex; align-items: center; gap: 8px; }
 .benchhead h3 { margin: 0 auto 0 0; }
+.benchscroll { overflow-x: auto; }
 .benchtable td { vertical-align: middle; }
 .benchtable .vicon, .benchtable .ibadge { vertical-align: middle; }
+/* Phones: whatever is wider than the screen scrolls inside itself, never the page. */
+@media (max-width: 700px) {
+  main { padding: 10px; }
+  .tabs { overflow-x: auto; }
+  .tab { flex: none; white-space: nowrap; }
+  table { display: block; overflow-x: auto; }
+  .chart { max-width: 100%; height: auto; }
+  .turn .body, .ritem { overflow-x: auto; }
+  .args-path, .tag { overflow-wrap: anywhere; }
+  .chartbody, .convlayout { flex-direction: column; }
+  .graphlayout { grid-template-columns: minmax(0, 1fr); }
+  .gsidebar { position: static; }
+  .widthctl { flex-wrap: wrap; }
+  .widthctl.gammactl input[type=range] { width: 160px; }
+  .gammaval { min-width: 0; }
+  .zoomrow, .aggbar, .ctl, .exprow, .avm, .cardhead, .benchhead, .panelnav { flex-wrap: wrap; }
+  .chartlegend { width: auto; max-width: 100%; }
+}

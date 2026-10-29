@@ -2220,7 +2220,7 @@ async function renderBenchmarks() {
           h("td", null, row.protocol), h("td", null, fmt(row.runs)), h("td", null, fmt(row.solved)),
           h("td", null, mean)));
       }
-      card.append(table);
+      card.append(h("div", "benchscroll", table));   // a narrow screen scrolls the table, not the page
       app.append(card);
     }
   }
