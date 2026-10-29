@@ -1,0 +1,20 @@
+/* The viewer in its host site's design (python -m regact.viz.export --tokens <tokens.css>): the
+   site's tokens (--bg, --panel, --cell, --line, --text, --muted, --link, --sans, --mono, the ARC
+   palette --a0..--a15) restyle it. tokens.css loads after this file, so its --bg, --panel, --line
+   and --muted replace the defaults below; the other fallbacks are the arc-grid design's values. */
+:root {
+  --bg: #101114; --panel: #14151A; --line: #2A2C33; --muted: #A2A5AE;
+  --panel2: var(--cell, #1D1E24);
+  --fg: var(--text, #E6E7EA);
+  --accent: var(--link, #88D8F1);
+  --good: var(--a14, #4FCC30);
+  --warn: var(--a11, #FFDC00);
+  --bad: var(--a8, #F93C31);
+  --think: var(--a15, #A356D6);
+}
+body { font-family: var(--sans, "Instrument Sans", "Helvetica Neue", Arial, sans-serif); }
+h1, h2, h3, #brand, .benchtitle, .kpih, .aggbtn, header {
+  font-family: var(--mono, "Martian Mono", ui-monospace, monospace);
+  letter-spacing: 0;
+}
+.card, .turn, .badge, .aggbtn, #goup, .rmodalbox { border-radius: 2px; }

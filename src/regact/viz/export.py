@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import io
 import json
 import math
@@ -351,14 +352,21 @@ def _rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def copy_viewer(out: Path) -> None:
-    """The viewer's own files, and an index.html that switches it to the exported data."""
+def copy_viewer(out: Path, tokens: str | None = None) -> None:
+    """The viewer's own files, and an index.html that switches it to the exported data and, with
+    ``tokens`` (a URL relative to the export), to its host site's design."""
     shutil.copytree(_STATIC, out / "static", dirs_exist_ok=True)
     index = (_STATIC / "index.html").read_text(encoding="utf-8")
     for attribute in ("href", "src"):
         index = index.replace(f'{attribute}="/static/', f'{attribute}="static/')
     marker = '<meta name="regact-static" content="data/" />'
     index = index.replace('<meta charset="utf-8" />', f'<meta charset="utf-8" />\n    {marker}')
+    if tokens:
+        sheets = "".join(
+            f'\n    <link rel="stylesheet" href="{html.escape(href)}" />'
+            for href in ("static/site_tokens.css", tokens)
+        )
+        index = index.replace('href="static/style.css" />', 'href="static/style.css" />' + sheets)
     (out / "index.html").write_text(index, encoding="utf-8")
 
 
@@ -366,6 +374,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="regact.viz.export", description=__doc__.split("\n")[0])
     parser.add_argument("experiments", help="the curated folder, e.g. experiments_public")
     parser.add_argument("out", help="where to write the site (replaced)")
+    parser.add_argument(
+        "--tokens", help="the host site's design tokens, as a URL relative to <out>/index.html"
+    )
     args = parser.parse_args(argv)
     root, out = Path(args.experiments), Path(args.out)
     curation = yaml.safe_load((root / "benchmarks.yaml").read_text(encoding="utf-8")) or {}
@@ -378,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(out, ignore_errors=True)
         print(f"export stopped, nothing written: {exc}", file=sys.stderr)
         return 1
-    copy_viewer(out)
+    copy_viewer(out, args.tokens)
     if exporter.files > _MAX_FILES:
         print(f"warning: {exporter.files} data files, near the host's limit", file=sys.stderr)
     print(f"exported {exporter.files} data files, {exporter.bytes / 1e6:.1f} MB, to {out}")

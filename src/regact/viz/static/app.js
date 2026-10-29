@@ -1947,7 +1947,9 @@ async function renderReplay(name) {
   const frameUrl = (f, view) => `/api/game/replay/frame?name=${encodeURIComponent(name)}&obs=${f.obs}&view=${view}`;
   const rows = tl.items.filter(([turn, item]) => d.turns[turn]?.items?.[item]);
   const items = rows.map(([turn, item]) => d.turns[turn].items[item]);
-  let axis = tl.axes[0], view = tl.views[0], x = 0, playing = null, carry = 0, placed = false;
+  // A public copy opens on the game's own picture rather than the agent's encoding of it.
+  let axis = tl.axes[0], view = STATIC && tl.views.includes("viewer") ? "viewer" : tl.views[0];
+  let x = 0, playing = null, carry = 0, placed = false;
   let values = [], frameValues = [];
 
   const page = h("div", "replay");
@@ -2187,6 +2189,7 @@ async function renderLogs(name) {
 // ---------------------------------------------------------------- public landing (static mode)
 // The curated benchmarks (experiments_public/benchmarks.yaml), by problem, then one row per
 // (agent, model, protocol): its runs, solved runs and mean main metric.
+const _AGENT_NAMES = { claude: "Claude Code", codex: "Codex", alan: "Alan Code", agy: "Antigravity" };
 async function renderBenchmarks() {
   const token = navigation;
   const r = await fetch(STATIC + "site.json", {signal: token.signal});
@@ -2212,7 +2215,7 @@ async function renderBenchmarks() {
       for (const row of bench.rows) {
         const mean = row.mean == null ? "\u2014" : `${row.metric} ${fmtMetric(row.mean)}`;
         table.append(h("tr", null,
-          h("td", null, agentIcon(row.agent, 20), " " + row.agent),
+          h("td", null, agentIcon(row.agent, 20), " " + (_AGENT_NAMES[row.agent] || row.agent)),
           h("td", null, modelLabel(row.model)),
           h("td", null, row.protocol), h("td", null, fmt(row.runs)), h("td", null, fmt(row.solved)),
           h("td", null, mean)));

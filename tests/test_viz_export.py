@@ -58,6 +58,10 @@ def test_the_export_answers_the_viewers_requests_from_files(tmp_path: Path) -> N
     (row,) = site["problems"][0]["benchmarks"][0]["rows"]
     assert row["runs"] == 1 and site["problems"][0]["benchmarks"][0]["under"] == "bench"
     assert (out / "static" / "app.js").is_file()
+    assert "site_tokens.css" not in index  # the host site's design is opt-in
+    assert main([str(public), str(out), "--tokens", "../assets/tokens.css"]) == 0
+    sheets = (out / "index.html").read_text()
+    assert sheets.index("static/style.css") < sheets.index("../assets/tokens.css")
     published = "".join(p.read_text() for p in (out / "data").glob("*.json"))
     assert str(tmp_path) not in published  # no absolute path of this machine
 

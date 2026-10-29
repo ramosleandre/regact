@@ -29,7 +29,9 @@ The landing page lists each benchmark as one row per (agent, model, protocol): r
 PYTHONPATH=src python -m regact.viz.export experiments_public <out_dir>
 ```
 
-`<out_dir>` gets `index.html`, `static/` (the viewer) and `data/`. Each request the viewer makes is a file named by its FNV-1a hash (`request_key` in `export.py`, `requestKey` in `app.js`). A run's replay frames come as one pack. Serve the folder from any static host: it uses relative URLs only, and needs neither inline script nor inline style, so it runs under a strict Content-Security-Policy (`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; ...`).
+`<out_dir>` gets `index.html`, `static/` (the viewer) and `data/`. Each request the viewer makes is a file named by its FNV-1a hash (`request_key` in `export.py`, `requestKey` in `app.js`). A run's replay frames are lossless WebP, stored once each in chunks of at most 2 MB that the replay fetches as it plays; a run over 3,000 frames keeps every n-th frame and every mispredicted one. Serve the folder from any static host: it uses relative URLs only, and needs neither inline script nor inline style, so it runs under a strict Content-Security-Policy (`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; ...`).
+
+To match the host site's design, pass `--tokens <url of its tokens.css, relative to the export>`: `static/site_tokens.css` maps the viewer onto the site's tokens (`--bg`, `--panel`, `--cell`, `--line`, `--text`, `--muted`, `--link`, `--sans`, `--mono`, the ARC palette `--a0`..`--a15`). A public copy opens replays on the game's own picture (the human view).
 
 Not exported: interactive world-model playback, which runs the agent's code; the local viewer keeps it.
 
