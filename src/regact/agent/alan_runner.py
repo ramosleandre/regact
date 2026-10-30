@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import os
 import sys
@@ -32,12 +33,25 @@ from regact.obs.transcript import event_to_json
 READY = "_ready"
 TURN_END = "_turn_end"
 FATAL = "_fatal"
+# Alan caps what the model sees of a tool result, not the event. JSON-escaped, this cap stays well
+# under the parent's stdout line limit.
+_MAX_TOOL_RESULT_CHARS = 1_000_000
 
 
 def _write(frame: dict[str, Any]) -> None:
     """Emit one JSON frame on stdout (line-delimited, flushed so the parent sees it live)."""
     sys.stdout.write(json.dumps(frame) + "\n")
     sys.stdout.flush()
+
+
+def _cap_tool_result(event: ToolResult) -> ToolResult:
+    """Keep the start and the end of an oversized result, for the regact transcript."""
+    extra = len(event.output) - _MAX_TOOL_RESULT_CHARS
+    if extra <= 0:
+        return event
+    half = _MAX_TOOL_RESULT_CHARS // 2
+    output = f"{event.output[:half]}\n[... {extra} characters cut ...]\n{event.output[-half:]}"
+    return dataclasses.replace(event, output=output)
 
 
 async def _read_command() -> dict[str, Any] | None:
@@ -98,6 +112,8 @@ async def _run_turn(agent: Any, message: str, *, synchronize_tools: bool = False
         async with contextlib.aclosing(agent.query_events_async(message)) as stream:
             async for native in stream:
                 for event in map_alan_events(native):
+                    if isinstance(event, ToolResult):
+                        event = _cap_tool_result(event)
                     frame = dict(event_to_json(event))
                     if synchronize_tools and isinstance(event, ToolResult):
                         frame["_await_continue"] = True

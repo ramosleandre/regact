@@ -271,6 +271,23 @@ def test_model_info_reads_resolved_window_tolerantly() -> None:
     assert _model_info(_WindowOnly()) == {"context_window": 32768}
 
 
+async def test_an_oversized_tool_result_fits_the_parents_line_limit(capsys, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A command printing 147 MB once crashed the parent's frame reader."""
+    monkeypatch.setattr("regact.agent.alan_runner._MAX_TOOL_RESULT_CHARS", 10)
+    huge = "a" * 10 + "b" * 100 + "c" * 10
+
+    class _Loud:
+        async def query_events_async(self, message):  # type: ignore[no-untyped-def]
+            yield "native"
+
+    monkeypatch.setattr(
+        "regact.agent.alan_adapter.map_alan_events", lambda native: [ToolResult("t1", huge)]
+    )
+    await _run_turn(_Loud(), "go")
+    frame = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert frame["output"] == "aaaaa\n[... 110 characters cut ...]\nccccc"
+
+
 async def test_run_turn_carries_resolved_window_in_turn_end(capsys) -> None:  # type: ignore[no-untyped-def]
     """The child folds the resolved window into _turn_end so the parent can record it."""
 

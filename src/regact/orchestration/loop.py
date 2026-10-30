@@ -24,6 +24,7 @@ import contextlib
 import dataclasses
 import json
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -505,6 +506,7 @@ async def _run_turn(message: str, ctx: _LoopContext) -> _TurnOutcome:
             "turn_crash",
             error_category=ErrorCategory.LOOP_CRASH,
             error=f"{type(exc).__name__}: {exc}",
+            traceback=traceback.format_exc(),
         )
         outcome.crashed = True
     finally:

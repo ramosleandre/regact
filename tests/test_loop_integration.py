@@ -499,7 +499,8 @@ async def test_pipeline_survives_tool_crash(tmp_path: Path) -> None:
 
     assert reason == "loop_crash"
     assert stack.experiment.last_error_category == "loop_crash"
-    assert "turn_crash" in (stack.logs / "events.jsonl").read_text()
+    events = (stack.logs / "events.jsonl").read_text()
+    assert "turn_crash" in events and "kaboom" in events and "Traceback" in events
 
 
 async def test_pipeline_stops_on_interrupt(tmp_path: Path) -> None:
