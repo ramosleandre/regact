@@ -88,7 +88,8 @@ class _ActionInfoShim:
     lazy import: the server's ``WrappedEnv`` only needs reset/step/render/close.
     With ``fully_obs`` the frame also holds the carried object, which the full grid
     does not draw, so one observation shows the whole state. The reward is rounded to
-    6 decimals, so a world model's ``1 - 0.9 * k / M`` equals it exactly.
+    6 decimals, so a world model that rounds ``1 - 0.9 * k / M`` the same way equals it
+    exactly whatever its float operation order; the unrounded value does not.
     """
 
     def __init__(self, env: Any, *, fully_obs: bool = False) -> None:
