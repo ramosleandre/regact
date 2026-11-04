@@ -6,8 +6,46 @@ EnvCWM(initial_state=state) never queries the dataset.
 make_cwm_env() starts where the next controller starts.
 Local simulation does not validate or accept code. Submit changed CWM code with
 UpdateCodeWorldModel before using RunController.
+serialized_size(value) measures a State or an observation as the compactness check does.
 """
+import dataclasses
+import json
 from copy import deepcopy
+
+
+def serialize(value):
+    """Return the JSON text whose UTF-8 bytes the compactness check counts.
+
+    Tuples become {"@tuple": [...]} and instances of your classes become
+    {"@class": "module:Qualname", "fields": {...}}; keys are sorted, no spaces.
+    """
+    def encode(v):
+        if v is None or type(v) in (bool, int, float, str):
+            return v
+        if type(v) is list:
+            return [encode(x) for x in v]
+        if type(v) is tuple:
+            return {"@tuple": [encode(x) for x in v]}
+        if type(v) is dict:
+            return {k: encode(x) for k, x in v.items()}
+        cls = type(v)
+        if dataclasses.is_dataclass(v):
+            fields = {f.name: getattr(v, f.name) for f in dataclasses.fields(v)}
+        else:
+            fields = vars(v)
+        return {
+            "@class": cls.__module__ + ":" + cls.__qualname__,
+            "fields": {k: encode(x) for k, x in fields.items()},
+        }
+
+    return json.dumps(
+        encode(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
+
+
+def serialized_size(value):
+    """Bytes the compactness check counts for this State or observation."""
+    return len(serialize(value).encode())
 
 
 class EnvCWM:

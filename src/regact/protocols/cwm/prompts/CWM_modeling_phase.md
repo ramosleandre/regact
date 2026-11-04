@@ -25,7 +25,7 @@ Example of hidden state: a budget bar with 64 cells for a budget of 75 clicks, w
 
 Your controller receives the State carried this way. A hidden field that is wrong but has not yet shown up on screen misleads the controller until a contradiction reveals it.
 
-States may use JSON-compatible values, tuples and instances of classes defined in submitted Python modules. Dictionary keys cannot begin with `@` (reserved encoding). Use compact fields and reusable rules/constants rather than keeping a full grid in every State. Serialized state size includes class/field names; it is not Python source size or process memory.
+States may use JSON-compatible values, tuples and instances of classes defined in submitted Python modules. Dictionary keys cannot begin with `@` (reserved encoding). Use compact fields and reusable rules/constants rather than keeping a full grid in every State. The size counted is the number of UTF-8 bytes of the State as compact JSON with sorted keys (no spaces), where a tuple becomes `{"@tuple":[...]}` and an instance of your classes becomes `{"@class":"module:Qualname","fields":{...}}`, so class and field names count; observations are measured the same way. It is not Python source size or process memory.
 
 ## 2. Submit for validation
 

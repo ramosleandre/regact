@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -16,6 +18,7 @@ from regact.protocols.cwm.ids import expand_id_ranges, format_id_ranges
 from regact.protocols.cwm.images import clear_images, save_preview, select_preview_ids
 from regact.protocols.cwm.session import CwmTool
 from regact.protocols.cwm.templates import templates
+from regact.protocols.cwm.workspace_helpers import CWM_ENV
 from regact.tools.base import ToolContext
 from regact.viz.reader import ToolCallView, TurnItem, TurnView, _tag_tool_calls
 from test_cwm_protocol import accept, exploration
@@ -64,6 +67,34 @@ def test_new_settings_and_optional_workspace_helpers():
     }
     assert "world_model/model_env.py" not in disabled and "framework/cwm_env.py" not in disabled
     assert "Local simulation helpers" not in disabled["docs/CWM_modeling_phase.md"]
+    assert "serialized_size(value)" in files["docs/CWM_modeling_phase.md"]
+    assert "serialized_size" not in disabled["docs/CWM_modeling_phase.md"]
+    assert '{"@tuple":[...]}' in disabled["docs/CWM_modeling_phase.md"]
+
+
+@dataclass(frozen=True)
+class _Cell:
+    pos: tuple
+    tags: list
+
+
+class _Board:
+    def __init__(self):
+        self.cells = [_Cell((1, 2), ["é", None]), _Cell((0, 0), [])]
+        self.meta = {"b": 1.5, "a": True}
+
+
+def test_serialized_size_matches_the_compactness_measure(monkeypatch):
+    from regact.protocols.cwm import worker_entry
+    from regact.protocols.cwm.store import canonical
+
+    monkeypatch.setattr(worker_entry, "BUNDLE", Path(__file__).parent, raising=False)
+    helpers: dict = {}
+    exec(CWM_ENV, helpers)
+    for value in (_Board(), (_Cell((3,), ["x"]), {"k": [1, (2, 3)]}), {"frame": [[0, 5]]}):
+        measured = canonical(worker_entry.encode(value))
+        assert helpers["serialize"](value) == measured
+        assert helpers["serialized_size"](value) == len(measured.encode())
 
 
 def test_preview_cleanup_cannot_follow_agent_symlinks(tmp_path):

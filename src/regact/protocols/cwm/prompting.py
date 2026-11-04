@@ -40,6 +40,8 @@ _LOCAL_HELPERS = """
 
 `EnvCWM(initial_state=state)` requires an explicit State and never queries the dataset. `make_cwm_env()` instead starts where the next controller starts: in single-instance mode it rebuilds the current State from the live episode with your workspace CWM (`get_initial_state` on its first observation, then `step` through every recorded action); in multi-instance mode it uses `get_initial_state` on the original initial observation. Passing initial_state skips that lookup. Both return States from reset()/step(action), or full observation dictionaries with obs_mode=True. Reset restores the starting State without taking a real action.
 
+`serialized_size(value)` returns the bytes the compactness check counts for a State or an observation, and `serialize(value)` the JSON text it measures.
+
 Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
 
