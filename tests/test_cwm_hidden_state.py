@@ -316,3 +316,18 @@ def test_make_cwm_env_starts_from_the_carried_state(hidden_rig, monkeypatch):
     monkeypatch.setattr(data_api, "_query", lambda op, **args: c.data({"op": op, **args}))
     cwm_env = importlib.import_module("framework.cwm_env")
     assert cwm_env.make_cwm_env().state.n == 5  # rebuilt from the episode; screen 2 reads as 4
+
+
+@pytest.mark.parametrize("lifecycle", list(Lifecycle))
+def test_episode_metrics_count_every_call_of_the_episode(hidden_rig, lifecycle):
+    c = hidden_rig(lifecycle=lifecycle, target=3)
+    hidden_model(c.workdir)
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    if lifecycle is Lifecycle.SINGLE_INSTANCE:
+        c.tool("ResetEnvironment", {})
+    exploration(c, (1, 1))
+    assert c.tool("RunController", {})["metrics"]["steps"] == 2
+    exploration(c, (1,))
+    result = c.tool("RunController", {})
+    assert result["real_actions"] == 1
+    assert result["metrics"]["steps"] == (3 if lifecycle is Lifecycle.SINGLE_INSTANCE else 1)

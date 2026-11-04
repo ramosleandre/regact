@@ -966,12 +966,12 @@ class ManagedCoordinator:
                 },
             }
             result["stop_reason"] = reason
-        metrics = self.problem.compute_episode_metrics(
-            Obs.from_json(obs), steps=result["real_actions"]
-        )
+        # A single-instance episode spans several calls; its metrics count all of them.
+        steps = self.env.live.episode_action_count
+        metrics = self.problem.compute_episode_metrics(Obs.from_json(obs), steps=steps)
         if result["stop_reason"] == "controller_error":
             result["observed_metrics_before_error"] = metrics
-            metrics = self.problem.failure_metrics(steps=result["real_actions"])
+            metrics = self.problem.failure_metrics(steps=steps)
         result["metrics"] = metrics
         result["aggregate"] = self.problem.aggregate_episode_metrics([metrics])
         if self.problem.is_perfect(result["aggregate"]) and self.terminal not in (
