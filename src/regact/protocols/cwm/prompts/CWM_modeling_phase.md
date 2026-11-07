@@ -15,6 +15,8 @@ If framework tools are available directly, invoke them by name. Otherwise use th
 
 Use normal workspace imports, e.g. `from world_model.model_state import State` or `from world_model.model_transition import step`; Regact makes the workspace root importable in scripts and submitted code. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
 
+A world model computes observations from the game's rules. Do not copy recorded observations or transitions into your code and look them up (by action history, by observation id, by frame): such a table predicts nothing new and is not allowed. The game's static content you read from the data (level layouts, sprites, colours) may be written into code.
+
 The complete observation contains `frame`, `reward`, `is_done`, `available_actions` and `info`. Preserve all of them, including nested metadata, frame shape and list order. JSON dictionary key order is irrelevant. Read data dictionaries rather than inferring all fields from PNGs. `obs["info"]["milestones"]` lists events produced by the action leading to this observation; an empty list means no event. The list is not cumulative.
 
 ## How the State is carried
