@@ -331,3 +331,13 @@ def test_episode_metrics_count_every_call_of_the_episode(hidden_rig, lifecycle):
     result = c.tool("RunController", {})
     assert result["real_actions"] == 1
     assert result["metrics"]["steps"] == (3 if lifecycle is Lifecycle.SINGLE_INSTANCE else 1)
+
+
+def test_exploration_checks_compactness_like_the_validation_it_continues(hidden_rig):
+    c = hidden_rig(lifecycle=Lifecycle.SINGLE_INSTANCE, target=6)
+    c.options.threshold_max_state_obs_size_ratio = 0.2  # every toy State is above, all are small
+    hidden_model(c.workdir)
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    exploration(c, (1, 1, 1))
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] != "compression_ratio" and result["real_actions"] == 3, result
