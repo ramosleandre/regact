@@ -27,6 +27,7 @@ htmlcov/
 
 # Experiment outputs
 experiments/
+experiments_archive/
 _local/
 
 # OS
