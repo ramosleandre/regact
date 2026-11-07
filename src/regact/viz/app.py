@@ -102,6 +102,7 @@ def build_app(experiment_dir: str, only: set[str] | None = None) -> FastAPI:
     app = FastAPI(title="regact viz")
     root = Path(experiment_dir)
     from regact.protocols.cwm import viewer as cwm_viewer
+    from regact.protocols.cwm.store import novel_prediction
     from regact.protocols.cwm.worker import WorkerError
 
     playback = cwm_viewer.Playback()
@@ -137,6 +138,9 @@ def build_app(experiment_dir: str, only: set[str] | None = None) -> FastAPI:
                     result["progress"] = cwm_viewer.progress(
                         root / name, problem, task, state.get("progress")
                     )
+                if protocol_name == "cwm":
+                    with contextlib.suppress(Exception), cwm_viewer.database(root / name) as db:
+                        result["novel_prediction"] = novel_prediction(db)
         return result
 
     def listed() -> list[str]:

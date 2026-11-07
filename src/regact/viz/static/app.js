@@ -423,6 +423,10 @@ function metricSpecs(games) {
         specs.push({ key: "derived:" + k, label: k.replace(/_/g, "-").toUpperCase(), fmt: pct1, score: k,
           get: (m) => m.derived_metrics && m.derived_metrics[k] });
       }
+  // CWM: the share of never-seen observations the accepted model predicted exactly.
+  if (games.some((g) => g.metrics.novel_prediction))
+    specs.push({ key: "novel_prediction", label: "New observations predicted", fmt: pct, def: true,
+      get: (m) => m.novel_prediction && m.novel_prediction.rate });
   // The problem's progress (ARC: levels completed) as a curve over what each run spent.
   const prog = games.map((g) => g.metrics.progress).find((p) => p && p.label);
   if (prog) specs.push({ key: "progress", label: prog.label + " over the run", curve: true, def: true });

@@ -11,6 +11,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+# Stop reasons of a RunController call that the accepted CWM failed to explain.
+CONTRADICTIONS = ("prediction_mismatch", "reconstruction_mismatch", "compression_ratio")
+
 
 def canonical(value: Any) -> str:
     return json.dumps(
@@ -45,6 +48,33 @@ def info_trace(
         actions += counts(json.loads(action))
         out.append((actions + resets, json.loads(info or "{}")))
     return out
+
+
+def novel_prediction(db: sqlite3.Connection) -> dict[str, Any]:
+    """The new observations an accepted CWM met in real RunController calls, and how many it had
+    predicted exactly. Calls recorded before that count existed give a lower bound (``exact``
+    false): a call that ended on a contradiction counts one new observation as missed."""
+    rows = db.execute(
+        """SELECT json_extract(payload,'$.actual_novel_observations'),
+            json_extract(payload,'$.predicted_novel_observations'),
+            json_extract(payload,'$.stop_reason')
+        FROM records WHERE kind='exploration'
+            AND json_extract(payload,'$.model_bundle') IS NOT NULL"""
+    ).fetchall()
+    met = predicted = 0
+    exact = True
+    for novel, hit, stop in rows:
+        met += novel or 0
+        if hit is None:
+            exact = False
+            hit = max(0, (novel or 0) - (stop in CONTRADICTIONS))
+        predicted += hit
+    return {
+        "met": met,
+        "predicted": predicted,
+        "rate": round(predicted / met, 3) if met else None,
+        "exact": exact,
+    }
 
 
 def regact_commit() -> str:

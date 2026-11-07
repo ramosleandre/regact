@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 _ATTEMPT_RE = re.compile(r"attempt_\d+")
+_CONTRADICTIONS = ("prediction_mismatch", "reconstruction_mismatch", "compression_ratio")
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -495,6 +496,7 @@ def _managed_metrics(task_dir: Path, call_budget: float | None = None) -> dict[s
         "cwm_accepted": None,
         "cwm_rejected": None,
         "slowest_infra_seconds": None,
+        "novel_prediction_rate": None,
     }
     store = task_dir / "cwm" / "experience.sqlite3"
     if not store.exists():
@@ -512,6 +514,17 @@ def _managed_metrics(task_dir: Path, call_budget: float | None = None) -> dict[s
         if (score := _primary_score(call.get("aggregate") or {})) is not None
     ]
     best = max(scored, key=lambda item: item[0]) if scored else (None, None)
+    # As regact.protocols.cwm.store.novel_prediction, the lower bound included.
+    met = predicted = 0
+    for call in calls:
+        if not call.get("model_bundle"):
+            continue
+        novel = call.get("actual_novel_observations") or 0
+        hit = call.get("predicted_novel_observations")
+        met += novel
+        predicted += (
+            max(0, novel - (call.get("stop_reason") in _CONTRADICTIONS)) if hit is None else hit
+        )
     spans = [
         seconds
         for call in calls
@@ -530,6 +543,7 @@ def _managed_metrics(task_dir: Path, call_budget: float | None = None) -> dict[s
         mismatches=sum(call.get("stop_reason") == "prediction_mismatch" for call in calls),
         cwm_accepted=validations.get("accepted", 0),
         cwm_rejected=validations.get("rejected", 0),
+        novel_prediction_rate=round(predicted / met, 3) if met else None,
     )
     return metrics
 
@@ -869,15 +883,16 @@ def managed_markdown(rows: list[dict[str, Any]]) -> str:
     one reached, and (CWM) how often the world model was accepted, rejected, or contradicted."""
     lines = [
         "| task | model | protocol | outcome | best progress | controller calls "
-        "| CWM accepted | CWM rejected | mismatches | exit_reason |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| CWM accepted | CWM rejected | mismatches | new obs predicted | exit_reason |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in sorted(rows, key=lambda r: (r["protocol"], r["model"], r["task"])):
         lines.append(
             f"| {row['task']} | {row['model']} | {row['protocol']} | {row['outcome']} "
             f"| {_fmt(row['success_rate'])} | {_fmt(row['controller_calls'])} "
             f"| {_fmt(row['cwm_accepted'])} | {_fmt(row['cwm_rejected'])} "
-            f"| {_fmt(row['mismatches'])} | {_fmt(row['exit_reason'])} |"
+            f"| {_fmt(row['mismatches'])} | {_fmt(row['novel_prediction_rate'])} "
+            f"| {_fmt(row['exit_reason'])} |"
         )
     return "\n".join(lines)
 

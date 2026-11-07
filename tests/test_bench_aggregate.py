@@ -682,3 +682,20 @@ def test_managed_run_that_waited_on_the_infrastructure_is_not_scored(tmp_path: P
     (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
     assert row["slowest_infra_seconds"] == 600.0
     assert row["outcome"] == "infra-stall"
+
+
+def test_managed_run_reports_the_share_of_new_observations_its_cwm_predicted(
+    tmp_path: Path,
+) -> None:
+    calls = [
+        {"model_bundle": "b", "actual_novel_observations": 4, "predicted_novel_observations": 3},
+        # Recorded before the exact count: the contradiction counts as one miss.
+        {"model_bundle": "b", "actual_novel_observations": 2, "stop_reason": "prediction_mismatch"},
+        {"model_bundle": None, "actual_novel_observations": 5},
+    ]
+    _mk_managed_run(
+        tmp_path / "cwm-arm" / "2026-10-01_00-00-00" / "ls20", protocol="cwm", calls=calls
+    )
+    (row,) = bench_aggregate.collect_runs(tmp_path, all_stamps=False)
+    assert row["novel_prediction_rate"] == round(4 / 6, 3)
+    assert "new obs predicted" in bench_aggregate.managed_markdown([row])

@@ -1,6 +1,7 @@
 """CWM v6: get_initial_state at an episode start, then step carries the State, hidden part included."""
 
 import json
+import sqlite3
 
 import pytest
 
@@ -17,6 +18,7 @@ from regact.env.lifecycle import MultiInstancePolicy, SingleInstancePolicy
 from regact.env.session import EnvSession
 from regact.features.base import FeatureContext
 from regact.problems import base as problems
+from regact.protocols.cwm.store import novel_prediction
 from regact.protocols.cwm.viewer import Playback
 from regact.protocols.cwm.worker import Worker
 from regact.protocols.registry import build_protocol
@@ -331,3 +333,40 @@ def test_episode_metrics_count_every_call_of_the_episode(hidden_rig, lifecycle):
     result = c.tool("RunController", {})
     assert result["real_actions"] == 1
     assert result["metrics"]["steps"] == (3 if lifecycle is Lifecycle.SINGLE_INSTANCE else 1)
+
+
+@pytest.mark.parametrize(
+    ("step", "predicted"), [("State(s.n+1)", 1), ("State(s.n+1 if s.n < 5 else s.n)", 0)]
+)
+def test_exploration_counts_the_new_observations_the_model_predicted(hidden_rig, step, predicted):
+    c = hidden_rig(target=3)  # collection: n = 0..4, screens 0 0 1 1 2
+    hidden_model(c.workdir, step=step)
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    exploration(c, (1,) * 7)  # screen 3, at n = 6, is the only new observation
+    result = c.tool("RunController", {})
+    assert (result["actual_novel_observations"], result["predicted_novel_observations"]) == (
+        1,
+        predicted,
+    )
+    status = json.loads((c.root / "status.json").read_text())
+    assert status["novel_prediction"] == {
+        "met": 1,
+        "predicted": predicted,
+        "rate": float(predicted),
+        "exact": True,
+    }
+
+
+def test_calls_recorded_before_the_exact_count_give_a_lower_bound():
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE records(kind TEXT, status TEXT, payload TEXT)")
+    calls = [
+        {"model_bundle": "b", "actual_novel_observations": 4, "stop_reason": "prediction_mismatch"},
+        {"model_bundle": "b", "actual_novel_observations": 2, "stop_reason": "environment_done"},
+        {"model_bundle": None, "actual_novel_observations": 9},  # no model ran
+    ]
+    db.executemany(
+        "INSERT INTO records VALUES ('exploration', 'completed', ?)",
+        [(json.dumps(call),) for call in calls],
+    )
+    assert novel_prediction(db) == {"met": 6, "predicted": 5, "rate": 0.833, "exact": False}

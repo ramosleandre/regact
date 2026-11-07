@@ -40,6 +40,7 @@ from regact.protocols.cwm.store import (
     canonical,
     digest,
     info_trace,
+    novel_prediction,
     regact_commit,
 )
 from regact.protocols.cwm.validation import diagnostic_pointer
@@ -241,6 +242,9 @@ class ManagedCoordinator:
                 "milestones": self.milestones,
                 **({} if self.progress is None else {"progress": self.progress}),
                 **self.store.summary(),
+                **(
+                    {"novel_prediction": novel_prediction(self.store.db)} if self.uses_model else {}
+                ),
                 "accepted_cwm": self.accepted,
                 "main_metrics": metrics,
                 "latest_exploration": self.latest,
@@ -774,6 +778,7 @@ class ManagedCoordinator:
             "new_milestones": [],
             "real_actions": 0,
             "actual_novel_observations": 0,
+            **({"predicted_novel_observations": 0} if self.uses_model else {}),
             "objective_reached": None,
         }
         # Predict immediately before each real action; no preliminary simulation.
@@ -863,6 +868,8 @@ class ManagedCoordinator:
                         if fingerprint not in known:
                             known.add(fingerprint)
                             result["actual_novel_observations"] += 1
+                            if predicted is not None and digest(predicted) == fingerprint:
+                                result["predicted_novel_observations"] += 1
                         if self.terminal == "observation_determinism_violation":
                             reason = self.terminal or "interrupted"
                             result["counterexample"] = public_evidence(evidence)
