@@ -39,11 +39,28 @@ def diagnostic_pointer(diagnostic_id: int) -> dict[str, Any]:
     }
 
 
+# What a running exploration carries over from its validation to keep checking compactness.
+SIZE_KEYS = (
+    "state_bytes",
+    "observation_bytes",
+    "n_states",
+    "largest_ratio_state",
+    "largest_oversized_state",
+)
+
+
 def add_state_size(
-    summary: dict[str, Any], oid: int, state: Any, obs: Any, allowance: int | None = None
+    summary: dict[str, Any],
+    oid: int,
+    state: Any,
+    obs: Any,
+    threshold: float,
+    allowance: int | None = None,
 ) -> None:
     """Accumulate bytes and representative extremes without retaining extra states. A State of at
-    most ``allowance`` bytes never becomes the largest-ratio State: it always passes."""
+    most ``allowance`` bytes never becomes the largest-ratio State: it always passes. Of the States
+    at or above ``threshold`` times their own observation, only the largest is kept: it alone
+    decides the per-State check (see compactness_failure)."""
     state_bytes = len(canonical(state).encode())
     observation_bytes = len(canonical(obs).encode())
     summary["state_bytes"] = summary.get("state_bytes", 0) + state_bytes
@@ -63,24 +80,34 @@ def add_state_size(
     largest = summary.get("largest_ratio_state")
     if largest is None or item["ratio"] > largest["ratio"]:
         summary["largest_ratio_state"] = item
+    oversized = summary.get("largest_oversized_state")
+    if item["ratio"] >= threshold and (oversized is None or state_bytes > oversized["state_bytes"]):
+        summary["largest_oversized_state"] = item
 
 
 def compactness_failure(
     sizes: dict[str, Any], threshold: float, allowance: int | None = None
 ) -> dict[str, Any] | None:
-    """Both the aggregate ratio and the largest single state must stay under the threshold, so a
-    State that grows along an episode (visited sets, logs) fails even when the average is low.
+    """Both the aggregate ratio and every single State must stay under the threshold, so a State
+    that grows along an episode (visited sets, logs) fails even when the average is low. A single
+    State is measured against the larger of its own observation and the mean observation: a
+    near-empty observation (an ARC game over) must not demand a State smaller than the game needs.
     States of at most ``allowance`` bytes pass whatever the ratio: on games with small
     observations the ratio alone would refuse even a minimal State."""
     ratio = sizes.get("state_bytes", 0) / max(1, sizes.get("observation_bytes", 0))
-    largest = sizes.get("largest_ratio_state")
     small = allowance is not None and sizes.get("state_bytes", 0) <= allowance * max(
         1, sizes.get("n_states", 0)
     )
     if ratio >= threshold and not small:
         return {"ratio": ratio, "required_below": threshold}
-    if largest is not None and largest["ratio"] >= threshold:
-        return {"largest_state": largest, "required_below": threshold}
+    oversized = sizes.get("largest_oversized_state")
+    mean = sizes.get("observation_bytes", 0) / max(1, sizes.get("n_states", 0))
+    if oversized is not None and oversized["state_bytes"] >= threshold * mean:
+        return {
+            "largest_state": oversized,
+            "mean_observation_bytes": round(mean),
+            "required_below": threshold,
+        }
     return None
 
 
@@ -175,7 +202,12 @@ def validate(
             failure(kind, where, rendered, obs, states={"state_before": before, "state": state})
             return False
         add_state_size(
-            sizes, where["observation_id"], state, obs, config.max_state_bytes_always_allowed
+            sizes,
+            where["observation_id"],
+            state,
+            obs,
+            config.threshold_max_state_obs_size_ratio,
+            config.max_state_bytes_always_allowed,
         )
         return True
 
@@ -242,8 +274,7 @@ def validate(
             if episode_id == live_episode and alive:
                 live = {"state": state, "hash": store.last_hash(episode_id)}
             summary["episodes_checked"] += 1
-        summary.update({k: sizes[k] for k in ("state_bytes", "observation_bytes") if k in sizes})
-        for key in ("smallest_state", "largest_state", "largest_ratio_state"):
+        for key in (*SIZE_KEYS, "smallest_state", "largest_state"):
             if key in sizes:
                 summary[key] = sizes[key]
         summary["state_obs_size_ratio"] = sizes.get("state_bytes", 0) / max(

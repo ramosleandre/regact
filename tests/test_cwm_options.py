@@ -100,7 +100,9 @@ def test_small_states_pass_the_size_check_whatever_the_ratio():
     def check(states, allowance):
         sizes = {}
         for i, (state_bytes, obs_bytes) in enumerate(states):
-            add_state_size(sizes, i + 1, "s" * (state_bytes - 2), "o" * (obs_bytes - 2), allowance)
+            add_state_size(
+                sizes, i + 1, "s" * (state_bytes - 2), "o" * (obs_bytes - 2), 0.5, allowance
+            )
         return compactness_failure(sizes, 0.5, allowance)
 
     small = [(200, 400), (210, 400)]  # ratio above 0.5, but each State is small
@@ -110,3 +112,8 @@ def test_small_states_pass_the_size_check_whatever_the_ratio():
     assert check(growing, 256)["largest_state"]["state_bytes"] == 300
     big = [(300, 500), (300, 500)]  # above the allowance on average: the ratio applies
     assert check(big, 256)["ratio"] == 0.6
+    # After an ARC game over the frame is empty: one tiny observation among full-size ones.
+    game_over = [(400, 9000)] * 9 + [(400, 200)]
+    assert check(game_over, None) is None
+    grown = [(400, 9000)] * 9 + [(4600, 200)]  # but a State half the size of a frame still fails
+    assert check(grown, None)["largest_state"]["state_bytes"] == 4600

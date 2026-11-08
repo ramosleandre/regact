@@ -370,3 +370,13 @@ def test_calls_recorded_before_the_exact_count_give_a_lower_bound():
         [(json.dumps(call),) for call in calls],
     )
     assert novel_prediction(db) == {"met": 6, "predicted": 5, "rate": 0.833, "exact": False}
+
+
+def test_exploration_checks_compactness_like_the_validation_it_continues(hidden_rig):
+    c = hidden_rig(lifecycle=Lifecycle.SINGLE_INSTANCE, target=6)
+    c.options.threshold_max_state_obs_size_ratio = 0.2  # every toy State is above, all are small
+    hidden_model(c.workdir)
+    assert c.tool("UpdateCodeWorldModel", {})["accepted"]
+    exploration(c, (1, 1, 1))
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] != "compression_ratio" and result["real_actions"] == 3, result

@@ -13,6 +13,7 @@ from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.planner import plan
 from regact.protocols.cwm.store import canonical
 from regact.protocols.cwm.validation import (
+    SIZE_KEYS,
     add_state_size,
     check_observation,
     compactness_failure,
@@ -75,11 +76,7 @@ class Coordinator(ManagedCoordinator):
             "dataset_version": summary["dataset_version"],
             "validation": summary,
         }
-        self.state_sizes = {
-            k: summary[k]
-            for k in ("state_bytes", "observation_bytes", "largest_ratio_state")
-            if k in summary
-        }
+        self.state_sizes = {k: summary[k] for k in SIZE_KEYS if k in summary}
 
     def begin_exploration(self):
         self.current_state = self.next_state = None
@@ -159,10 +156,9 @@ class Coordinator(ManagedCoordinator):
 
     def _check_size(self, state: Any, obs: dict[str, Any], oid: int) -> None:
         allowance = self.options.max_state_bytes_always_allowed
-        add_state_size(self.state_sizes, oid, state, obs, allowance)
-        failure = compactness_failure(
-            self.state_sizes, self.options.threshold_max_state_obs_size_ratio, allowance
-        )
+        threshold = self.options.threshold_max_state_obs_size_ratio
+        add_state_size(self.state_sizes, oid, state, obs, threshold, allowance)
+        failure = compactness_failure(self.state_sizes, threshold, allowance)
         if failure is not None:
             self.running = None
             raise ModelMismatch("compression_ratio", None, obs, {"observation_id": oid, **failure})
@@ -213,11 +209,7 @@ class Coordinator(ManagedCoordinator):
                 "explained_until": self.store.last_step_event_id(),
             }
             self.running = live
-            self.state_sizes = {
-                k: summary[k]
-                for k in ("state_bytes", "observation_bytes", "largest_ratio_state")
-                if k in summary
-            }
+            self.state_sizes = {k: summary[k] for k in SIZE_KEYS if k in summary}
             self.change_phase(EXPLORATION, "model_accepted")
             self.event("cwm_accepted", cwm_version=version)
         return {**summary, "cwm_version": self.accepted["cwm_version"] if self.accepted else None}
