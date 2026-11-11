@@ -56,13 +56,30 @@ class SandboxRuntime(StrEnum):
     BWRAP = "bwrap"  # Linux bubblewrap (mount namespace)
 
 
+# Variables that describe the launch (its command line, the batch job): they can name the task.
+_LAUNCH_NAME = re.compile(r"^(ARGS|MAKEFLAGS|MAKEOVERRIDES|MFLAGS|_)$|^(SLURM|SBATCH|SALLOC|HYDRA)_")
+_hidden_words: set[str] = set()
+
+
+def hide_from_agents(*words: str | None) -> None:
+    """Drop from every agent environment the variables whose value contains one of ``words`` (the
+    task, the problem, the experiment): the agent must discover the game, not read its name."""
+    _hidden_words.update(word.lower() for word in words if word and len(word) >= 3)
+
+
 def agent_environ(keep: Sequence[str] = ()) -> dict[str, str]:
     """The launcher's environment for a process that runs the agent or its code: without credential
-    variables, except ``keep`` (what the agent's own backend authenticates with)."""
+    variables, except ``keep`` (what the agent's own backend authenticates with), and without the
+    variables that could name the task (see hide_from_agents)."""
     return {
         name: value
         for name, value in os.environ.items()
-        if name in keep or not _SECRET_NAME.search(name)
+        if name in keep
+        or not (
+            _SECRET_NAME.search(name)
+            or _LAUNCH_NAME.search(name)
+            or any(word in value.lower() for word in _hidden_words)
+        )
     }
 
 

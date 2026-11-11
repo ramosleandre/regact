@@ -787,3 +787,17 @@ def test_agent_environ_keeps_only_the_backends_own_credential(monkeypatch) -> No
     env = agent_environ(("OPENROUTER_API_KEY",))
     assert env["OPENROUTER_API_KEY"] == "secret" and env["SOME_PROXY"] == "kept"
     assert not {"GITHUB_TOKEN", "PYPI_TOKEN", "MY_SECRET", "AWS_KEY", *helpers} & set(env)
+
+
+def test_agent_environ_drops_variables_that_name_the_task(monkeypatch) -> None:
+    from regact.security import runtime
+
+    monkeypatch.setattr(runtime, "_hidden_words", set())
+    monkeypatch.setenv("ARGS", "problem=somegame problem.tasks=[lv07]")
+    monkeypatch.setenv("SLURM_JOB_NAME", "bench")
+    monkeypatch.setenv("LAUNCH_NOTE", "running lv07 tonight")
+    monkeypatch.setenv("UNRELATED", "kept")
+    runtime.hide_from_agents("lv07", "somegame", None, "ab")
+    env = runtime.agent_environ()
+    assert env["UNRELATED"] == "kept" and "PATH" in env
+    assert not {"ARGS", "SLURM_JOB_NAME", "LAUNCH_NOTE"} & set(env)

@@ -54,6 +54,7 @@ from regact.security.runtime import (
     SandboxRuntime,
     Wrapper,
     cpu_cap_prefix,
+    hide_from_agents,
     make_wrapper,
     resolve,
 )
@@ -542,6 +543,9 @@ async def run_task(
             # which directory the agent runs a script from - Python only puts the script's
             # own dir on sys.path, so ``python code_library/probe.py`` otherwise can't see
             # the root-level framework/ package.
+            hide_from_agents(
+                task_name, problem.name, config.experiment_name, *problem.secret_modules()
+            )
             agent_env = {
                 "PATH": os.pathsep.join([agent_bin, os.environ.get("PATH", "")]),
                 "PYTHONPATH": os.pathsep.join([agent_workdir, src_dir]),

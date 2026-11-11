@@ -266,7 +266,7 @@ def server_with_arc_validation():
 def test_invalid_action_survives_http_boundary():
     client = EnvClient(TestClient(server_with_arc_validation().app), "g")
     client.reset()
-    with pytest.raises(InvalidActionError, match="ACTION6"):
+    with pytest.raises(InvalidActionError, match=r"action 6 \(the click\)"):
         client.step(6)
     with pytest.raises(InvalidActionError, match="JSON"):
         client.step(object())
