@@ -24,6 +24,7 @@ from regact.security.runtime import (
     detect,
     interpreter_chain_prefixes,
     make_wrapper,
+    neutral_workdir,
     symlink_chain_dirs,
     wrap_argv,
 )
@@ -468,3 +469,58 @@ def test_bwrap_pid_1_does_not_show_the_workdir_host_path(tmp_path):
     ).stdout
     assert out.startswith("bwrap --args 3 -- ") and "/workspace" in out
     assert "secret-task-name" not in out
+
+
+def test_neutral_workdir_keeps_the_files_elsewhere_during_the_task_and_back_after(tmp_path):
+    workdir = tmp_path / "secret-task-name" / "workdir"
+    workdir.mkdir(parents=True)
+    (workdir / "notes.txt").write_text("hello")
+    root = tmp_path / "workdirs"
+    with neutral_workdir(str(workdir), str(root)):
+        assert workdir.is_symlink() and workdir.resolve().parent == root
+        assert (workdir / "notes.txt").read_text() == "hello"
+        (workdir / "controller.py").write_text("x = 1")
+    assert not workdir.is_symlink() and sorted(os.listdir(workdir)) == ["controller.py", "notes.txt"]
+    assert os.listdir(root) == []
+
+
+def test_neutral_workdir_creates_a_missing_workdir_and_moves_back_on_error(tmp_path):
+    workdir = tmp_path / "task" / "workdir"
+    with pytest.raises(RuntimeError), neutral_workdir(str(workdir), str(tmp_path / "workdirs")):
+        (workdir / "a.txt").write_text("a")
+        raise RuntimeError("agent crashed")
+    assert not workdir.is_symlink() and (workdir / "a.txt").read_text() == "a"
+
+
+def test_neutral_workdir_takes_over_the_link_a_dead_launch_left(tmp_path):
+    real = tmp_path / "workdirs" / "0123"
+    real.mkdir(parents=True)
+    (real / "a.txt").write_text("a")
+    workdir = tmp_path / "task" / "workdir"
+    workdir.parent.mkdir()
+    workdir.symlink_to(real)
+    with neutral_workdir(str(workdir), str(tmp_path / "workdirs")):
+        assert workdir.resolve() == real
+    assert not workdir.is_symlink() and (workdir / "a.txt").read_text() == "a" and not real.exists()
+
+
+def test_neutral_workdir_without_a_root_leaves_the_workdir_in_place(tmp_path):
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    with neutral_workdir(str(workdir), None):
+        assert not workdir.is_symlink()
+
+
+@pytest.mark.skipif(detect() is not SandboxRuntime.BWRAP, reason="needs a real bwrap host")
+def test_bwrap_mountinfo_does_not_show_the_workdir_host_path(tmp_path):
+    workdir = tmp_path / "secret-task-name" / "workdir"
+    workdir.mkdir(parents=True)
+    with neutral_workdir(str(workdir), str(tmp_path / "workdirs")):
+        wrap = make_wrapper(SandboxRuntime.BWRAP, workdir=str(workdir), workdir_alias="/workspace")
+        out = subprocess.run(
+            wrap(["/bin/sh", "-c", "cat /proc/self/mountinfo"]),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    assert " /workspace " in out and "secret-task-name" not in out

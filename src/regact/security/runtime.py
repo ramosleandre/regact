@@ -22,6 +22,7 @@ macOS.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import glob
 import logging
@@ -31,8 +32,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 import zlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from enum import StrEnum
 
 logger = logging.getLogger(__name__)
@@ -183,6 +185,36 @@ def _hidden_bwrap_args(cmd: Argv) -> Argv:
         handle.write("".join(arg + "\0" for arg in cmd[1:split]))
     script = 'f=$1; shift; exec 3<"$f" && rm -f -- "$f" && exec bwrap --args 3 "$@"'
     return ["/bin/sh", "-c", script, "sh", path, *cmd[split:]]
+
+
+@contextlib.contextmanager
+def neutral_workdir(workdir: str, root: str | None) -> Iterator[None]:
+    """Keep the workdir's files under ``root`` at a random name while the task runs, ``workdir``
+    being a symlink to them, and move them back after. bwrap mounts the resolved path, and the
+    agent can read a mount's source in ``/proc/self/mountinfo``: the task's own path names the
+    experiment, the model and the task. ``root`` must be on the workdir's filesystem (a rename);
+    ``None`` leaves the workdir in place."""
+    if root is None:
+        yield
+        return
+    if os.path.islink(workdir):  # a launch that ended before moving the files back
+        real = os.path.realpath(workdir)
+        if not os.path.isdir(real):
+            raise FileNotFoundError(f"{workdir} links to {real}, which is gone")
+    else:
+        os.makedirs(root, exist_ok=True)
+        real = os.path.join(root, uuid.uuid4().hex)
+        if os.path.isdir(workdir):
+            os.rename(workdir, real)
+        else:
+            os.makedirs(os.path.dirname(workdir), exist_ok=True)
+            os.mkdir(real)
+        os.symlink(real, workdir)
+    try:
+        yield
+    finally:
+        os.unlink(workdir)
+        os.rename(real, workdir)
 
 
 def wrap_argv(

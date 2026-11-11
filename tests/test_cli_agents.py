@@ -39,15 +39,18 @@ def test_capabilities_mark_client_cli() -> None:
     assert CodexAgent().capabilities().tool_protocol == "client_cli"
 
 
-def test_host_paths_are_per_agent_and_ambient_config_stays_out() -> None:
+def test_host_paths_are_per_agent_and_ambient_config_stays_out(monkeypatch) -> None:
     """Each backend declares only its OWN dirs, and never the user-level config roots
     (~/.claude read-only, ~/.codex) — those hold other sessions' transcripts and history."""
     home = os.path.expanduser("~")
     claude_ro = ClaudeAgent().host_read_paths()
     codex_rw = CodexAgent().host_rw_paths()
     assert os.path.join(home, ".claude") not in claude_ro  # never in the read-only set
-    # .claude.json IS exposed read-only: the CLI will not start a session without it.
-    assert os.path.join(home, ".claude.json") in claude_ro
+    # The real ~/.claude.json only when claude runs on the real home, which cannot start without it.
+    monkeypatch.setattr(ClaudeAgent, "_can_isolate", lambda self: True)
+    assert os.path.join(home, ".claude.json") not in ClaudeAgent().host_read_paths()
+    monkeypatch.setattr(ClaudeAgent, "_can_isolate", lambda self: False)
+    assert os.path.join(home, ".claude.json") in ClaudeAgent().host_read_paths()
     assert any("codex-home" in p for p in codex_rw)  # under codex's isolated CODEX_HOME root
     assert not any("claude" in p for p in codex_rw)  # no cross-contamination
 

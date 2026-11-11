@@ -12,6 +12,7 @@ Scheduler.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -19,7 +20,7 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
@@ -57,6 +58,7 @@ from regact.security.runtime import (
     cpu_cap_prefix,
     hide_from_agents,
     make_wrapper,
+    neutral_workdir,
     resolve,
 )
 from regact.session.state import ExperimentState
@@ -188,6 +190,32 @@ def _requested_runtime(config: RunConfig) -> SandboxRuntime:
         return SandboxRuntime.NONE
     backend = config.sandbox_opts.get("backend")
     return SandboxRuntime(backend) if backend else SandboxRuntime.AUTO
+
+
+def _neutral_workdir_root(config: RunConfig, output_dir: str) -> str | None:
+    """Where the workdir's files live while the task runs under bwrap (see neutral_workdir): the
+    first of ``~/.regact/workdirs`` and ``<output_root>/.workdirs`` on the task's filesystem."""
+    device = os.stat(output_dir).st_dev
+    for root in (
+        os.path.expanduser("~/.regact/workdirs"),
+        os.path.join(os.path.abspath(config.output_root), ".workdirs"),
+    ):
+        existing = root
+        while not os.path.exists(existing):
+            existing = os.path.dirname(existing)
+        if os.stat(existing).st_dev == device:
+            return root
+    logging.getLogger(__name__).warning(
+        "no workdir root on the filesystem of %s: the agent can read its path in mountinfo",
+        output_dir,
+    )
+    return None
+
+
+@contextlib.asynccontextmanager
+async def _in_neutral_workdir(workdir: str, root: str | None) -> AsyncIterator[None]:
+    with neutral_workdir(workdir, root):
+        yield
 
 
 def _network_isolation(config: RunConfig) -> bool:
@@ -396,7 +424,9 @@ async def run_task(
     in_process = config.agent.name is AgentName.SCRIPTED
 
     previous_port = previous.env_port if previous is not None else None
+    bwrap = resolve(requested_runtime) is SandboxRuntime.BWRAP
     async with (
+        _in_neutral_workdir(workdir, _neutral_workdir_root(config, output_dir) if bwrap else None),
         protocol,
         serve_env(server, task_name, in_process=in_process, port=previous_port) as conn,
     ):

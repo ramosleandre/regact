@@ -407,8 +407,11 @@ class ClaudeAgent(_CliAgent):
         paths = [
             *executable_paths("claude"),  # the CLI's bin dir + its real install tree
             os.path.join(home, ".npm"),  # package cache (npm installs); no session data
-            os.path.join(home, ".claude.json"),
         ]
+        if not self._can_isolate():
+            # The real home's state file (the account, every project path): claude on the real home
+            # will not start a session without it. An isolated home holds its own.
+            paths.append(os.path.join(home, ".claude.json"))
         if sys.platform == "darwin":
             claude_tmp = f"/tmp/claude-{os.getuid()}"
             os.makedirs(claude_tmp, exist_ok=True)  # must exist => a (subpath) rule, not (literal)
