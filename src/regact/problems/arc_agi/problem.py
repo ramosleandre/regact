@@ -499,7 +499,8 @@ class ArcAgiProblem(BaseProblem):
         content = _HELPER.replace("{interaction_example}", example)
         return [TemplateFile("framework/arc_agi_helper.py", content)]
 
-    def secret_modules(self) -> tuple[str, ...]:
+    @classmethod
+    def secret_modules(cls) -> tuple[str, ...]:
         return ("arcengine", "arc_agi")
 
     def render_frame(self, obs: Obs) -> Any | None:

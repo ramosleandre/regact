@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zlib
 from collections.abc import Callable, Sequence
 from enum import StrEnum
@@ -155,7 +156,7 @@ def make_wrapper(
     _log_resolved(runtime, resolved)
 
     def wrap(argv: Argv) -> Argv:
-        return wrap_argv(
+        wrapped = wrap_argv(
             resolved,
             argv,
             workdir=workdir,
@@ -166,8 +167,22 @@ def make_wrapper(
             allow_rw=allow_rw,
             workdir_alias=workdir_alias,
         )
+        return _hidden_bwrap_args(wrapped) if resolved is SandboxRuntime.BWRAP else wrapped
 
     return wrap
+
+
+def _hidden_bwrap_args(cmd: Argv) -> Argv:
+    """Run bwrap with its arguments read from a file descriptor. bwrap is PID 1 of the sandbox, so
+    any agent running ``ps`` reads its command line, which holds the workdir's host path (the
+    experiment and the task); through ``--args`` it shows only ``bwrap --args 3 -- <command>``.
+    The file is deleted once open, before bwrap starts."""
+    split = cmd.index("--")
+    fd, path = tempfile.mkstemp(prefix="regact-bwrap-")
+    with os.fdopen(fd, "w") as handle:
+        handle.write("".join(arg + "\0" for arg in cmd[1:split]))
+    script = 'f=$1; shift; exec 3<"$f" && rm -f -- "$f" && exec bwrap --args 3 "$@"'
+    return ["/bin/sh", "-c", script, "sh", path, *cmd[split:]]
 
 
 def wrap_argv(

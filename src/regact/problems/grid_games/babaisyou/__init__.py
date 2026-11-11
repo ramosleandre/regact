@@ -170,7 +170,8 @@ class BabaIsYouProblem(GridGameProblem):
     def make_game(self, task: GridTask) -> GridGame:
         return BabaIsYouGame(task.levels)
 
-    def secret_modules(self) -> tuple[str, ...]:
+    @classmethod
+    def secret_modules(cls) -> tuple[str, ...]:
         return ("regact.problems.grid_games.babaisyou",)
 
     def derived_submission_metrics(

@@ -453,3 +453,18 @@ def test_seatbelt_bridged_socket_stays_connectable_under_deny_egress(tmp_path: P
             text=True,
         )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(detect() is not SandboxRuntime.BWRAP, reason="needs a real bwrap host")
+def test_bwrap_pid_1_does_not_show_the_workdir_host_path(tmp_path):
+    workdir = tmp_path / "secret-task-name" / "workdir"
+    workdir.mkdir(parents=True)
+    wrap = make_wrapper(SandboxRuntime.BWRAP, workdir=str(workdir), workdir_alias="/workspace")
+    out = subprocess.run(
+        wrap(["/bin/sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline; pwd"]),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out.startswith("bwrap --args 3 -- ") and "/workspace" in out
+    assert "secret-task-name" not in out

@@ -12,6 +12,7 @@ Scheduler.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -43,7 +44,7 @@ from regact.obs.transcript import TranscriptWriter
 from regact.orchestration.env_transport import EnvConnection, serve_env
 from regact.orchestration.loop import run_session
 from regact.orchestration.signals import StopSignal
-from regact.problems.base import BaseProblem
+from regact.problems.base import BaseProblem, all_secret_modules
 from regact.prompt.builder import PromptBuilder
 from regact.protocols.base import ExperimentProtocol, ProtocolContext
 from regact.protocols.registry import build_protocol
@@ -97,13 +98,18 @@ def _agent_regact_read_paths(src_dir: str) -> list[str]:
     ]
 
 
-def _secret_module_paths(modules: tuple[str, ...]) -> list[str]:
-    """On-disk dirs of the game packages (engine/data lib), to hide from the sandbox.
+@functools.cache  # resolving the installed distributions takes ~0.3 s, and every worker needs it
+def _secret_module_paths(modules: tuple[str, ...]) -> tuple[str, ...]:
+    """On-disk dirs of the game packages (engine/data lib) and of their installed metadata
+    (``*.dist-info``, which ``pip list`` would show), to hide from the sandbox.
 
     Resolved via ``find_spec`` (no import) so a package the host lacks is just skipped.
     """
+    import glob
+    import importlib.metadata
     import importlib.util
 
+    distributions = importlib.metadata.packages_distributions()
     paths: list[str] = []
     for module in modules:
         try:
@@ -116,7 +122,12 @@ def _secret_module_paths(modules: tuple[str, ...]) -> list[str]:
             paths.extend(spec.submodule_search_locations)
         elif spec.origin and spec.origin not in ("built-in", "frozen"):
             paths.append(os.path.dirname(spec.origin))
-    return [os.path.realpath(p) for p in paths]
+        if "." not in module and paths:
+            site = os.path.dirname(os.path.realpath(paths[-1]))
+            for dist in distributions.get(module, []):
+                name = dist.replace("-", "_").replace(".", "_")
+                paths.extend(glob.glob(os.path.join(site, f"{name}-*.dist-info")))
+    return tuple(os.path.realpath(p) for p in paths)
 
 
 def _loopback_port(url: str | None) -> int | None:
@@ -423,7 +434,7 @@ async def run_task(
                 experiment.exit_requested = False
                 experiment.resumed_at.append(time.time())
             src_dir = _regact_src_dir()
-            deny_read = _secret_module_paths(problem.secret_modules())
+            deny_read = _secret_module_paths(all_secret_modules())
             # Hide regact's OWN problem wrappers from the sandbox. The agent needs
             # ``regact.envclient``/``regact.controllers`` to run, but never ``regact.problems``
             # (the game-side logic + obs format); reading it leaks the game. src_dir is on

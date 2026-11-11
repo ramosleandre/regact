@@ -276,7 +276,8 @@ class MiniGridProblem(BaseProblem):
 
         _ensure_wfc_patterns()  # cheap + idempotent; no-op when WFC deps/patterns are absent
 
-    def secret_modules(self) -> tuple[str, ...]:
+    @classmethod
+    def secret_modules(cls) -> tuple[str, ...]:
         """Hide the ``minigrid`` engine from the agent + eval sandboxes.
 
         MiniGrid is pip-installed in the framework venv, so without this the sandbox (which

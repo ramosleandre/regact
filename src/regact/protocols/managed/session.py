@@ -511,13 +511,14 @@ class ManagedCoordinator:
         """``seconds`` bounds the worker's wall time, or with a ``clock`` its submitted-code time."""
         # Game modules can live inside the interpreter prefix; carve them out.
         from regact.orchestration.task import _secret_module_paths
+        from regact.problems.base import all_secret_modules
 
         return Worker(
             bundle,
             self.options.execution,
             deadline=min(self.deadline, budgets.deadline(None if clock else seconds)),
             runtime=SandboxRuntime(self.config.sandbox_opts.get("backend", "auto")),
-            deny_read=_secret_module_paths(self.problem.secret_modules()),
+            deny_read=_secret_module_paths(all_secret_modules()),
             task_deadline=lambda: self.deadline,
             budget_key=budget_key,
             budget_seconds=seconds,

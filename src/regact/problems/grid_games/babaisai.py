@@ -100,7 +100,8 @@ class BabaIsAIProblem(GridGameProblem):
     def make_game(self, task: GridTask) -> GridGame:
         return BabaGame(task.levels, _load()[1])
 
-    def secret_modules(self) -> tuple[str, ...]:
+    @classmethod
+    def secret_modules(cls) -> tuple[str, ...]:
         return ("baba",)
 
     def render_frame(self, obs: Any) -> Any | None:

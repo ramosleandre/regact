@@ -10,6 +10,7 @@ backend is imported lazily so this module needs no game library installed.
 
 from __future__ import annotations
 
+import functools
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
@@ -103,7 +104,8 @@ class BaseProblem(ABC):
         """
         return []
 
-    def secret_modules(self) -> tuple[str, ...]:
+    @classmethod
+    def secret_modules(cls) -> tuple[str, ...]:
         """Importable packages that ARE the game (its engine / data library).
 
         These are pip-installed in the same venv as the framework, so the OS sandbox —
@@ -248,6 +250,20 @@ def build_problem(name: str, kwargs: dict[str, Any]) -> BaseProblem:
         return _REGISTRY[name](kwargs)
     except KeyError:
         raise ValueError(f"unknown problem {name!r}; registered: {sorted(_REGISTRY)}") from None
+
+
+@functools.cache
+def all_secret_modules() -> tuple[str, ...]:
+    """Every built-in problem's secret modules. Sandboxes hide all of them whatever the task, so
+    the set of masked packages does not tell the agent which game it plays."""
+    _load_builtins()
+    found: list[str] = []
+    classes = list(BaseProblem.__subclasses__())
+    while classes:
+        cls = classes.pop()
+        classes.extend(cls.__subclasses__())
+        found.extend(cls.secret_modules())
+    return tuple(sorted(set(found)))
 
 
 def _load_builtins() -> None:
