@@ -38,6 +38,7 @@ class FeedbackConfig:
     max_diff_changes: int | None = 4  # colour changes listed per region
     max_crop_cells: int | None = 64  # largest region shown as a crop
     max_error_chars: int | None = 1000
+    max_controller_error_chars: int | None = 200  # a controller's error and its invalid action
 
 
 @dataclass
@@ -48,6 +49,8 @@ class DataApiConfig:
 
 @dataclass
 class CwmConfig:
+    exp_buffer: bool = True  # recorded experience readable through data_api
+    policy_programs: bool = True  # act through controller programs (false: the Act command)
     n_unique_observations_in_initial_collection: int = 1  # 1 = no random actions
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
@@ -82,7 +85,13 @@ class CwmConfig:
                     validate(value, prefix + key + ".")
                 elif key.startswith("max_") and value is None:
                     continue
-                elif key in ("workspace_helpers_enabled", "one_command_per_tool_call", "enabled"):
+                elif key in (
+                    "exp_buffer",
+                    "policy_programs",
+                    "workspace_helpers_enabled",
+                    "one_command_per_tool_call",
+                    "enabled",
+                ):
                     if type(value) is not bool:
                         raise ValueError(f"{prefix}{key} must be a boolean")
                 elif key == "n_tmp_images_saved_per_exploration":
@@ -100,6 +109,11 @@ class CwmConfig:
                         raise ValueError(f"{prefix}{key} must be an integer")
 
         validate(dataclasses.asdict(config), "protocol.")
+        if not config.exp_buffer:
+            raise ValueError(
+                "protocol=cwm needs protocol.exp_buffer=true: the CWM is built from, and "
+                "validated against, the recorded experience"
+            )
         if config.threshold_max_state_obs_size_ratio >= 1:
             raise ValueError("protocol.threshold_max_state_obs_size_ratio must be < 1")
         if (

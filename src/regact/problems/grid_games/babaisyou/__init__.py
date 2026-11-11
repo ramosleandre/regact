@@ -136,6 +136,7 @@ class BabaIsYouGame(GridGame):
 
 class BabaIsYouProblem(GridGameProblem):
     name = "babaisyou"
+    frame_cells = "list"
     actions = (1, 2, 3, 4, 5)
     # The reference is a solution checked on the real game, not a proven optimum: the scores
     # keep ARC's names (relative to a human-made solution), not ROAE/LROAE.

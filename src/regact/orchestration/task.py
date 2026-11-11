@@ -598,7 +598,7 @@ async def run_task(
                 # Prompt-only: write the exact system prompt + first message to the transcript and
                 # exit - no model turns, no eval, no cost. Alan is initialized for prompt assembly.
                 logger.log(LogComponent.ORCHESTRATOR, "INFO", "session_start", phase="bootstrap")
-                rendered = (
+                rendered = session.first_observation_text() or (
                     problem.render_obs_text(server.first_obs(task_name))
                     if config.first_obs_in_prompt
                     else None
@@ -663,8 +663,8 @@ async def run_task(
                     env=agent_env,
                     runtime_wrap=runtime_wrap,
                 )
-                rendered_first_obs = None
-                if config.first_obs_in_prompt:
+                rendered_first_obs = session.first_observation_text()
+                if rendered_first_obs is None and config.first_obs_in_prompt:
                     rendered_first_obs = problem.render_obs_text(server.first_obs(task_name))
                 first_message = (
                     f"{_RESUME_MESSAGE} {session.resume_notice()}".strip()

@@ -102,6 +102,7 @@ def _load_tasks() -> dict[str, GridTask]:
 
 class SokobanProblem(GridGameProblem):
     name = "sokoban"
+    frame_cells = "hex"
 
     def tasks(self) -> dict[str, GridTask]:
         return _load_tasks()

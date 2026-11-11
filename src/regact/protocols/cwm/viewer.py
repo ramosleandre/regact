@@ -246,7 +246,7 @@ def inspect(task: Path, *, before: int = 0, limit: int = 100) -> dict[str, Any]:
         return value
 
     status = names(status)
-    status["phase"] = {0: "Dataset preparation", 1: "CWM Modeling", 2: "Active Exploration"}.get(
+    status["phase"] = {0: "Dataset preparation", 1: "Modeling Phase", 2: "Acting Phase"}.get(
         status.get("phase"), status.get("phase")
     )
     with database(task) as db:

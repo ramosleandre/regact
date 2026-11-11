@@ -46,13 +46,14 @@ from regact.protocols.cwm.store import (
 from regact.protocols.cwm.validation import diagnostic_pointer
 from regact.protocols.cwm.worker import Worker, WorkerError
 from regact.protocols.managed.grants import GRANT_WAIT_LOGGED_SECONDS, CommandGrants
+from regact.protocols.managed.observation_text import observation_text
 from regact.protocols.managed.prompting import reset_commands
 from regact.protocols.managed.resume import rebuild_environment
 from regact.security.runtime import SandboxRuntime
 from regact.tools.base import Tool, ToolContext, ToolOutput
 
-MODELING = "CWM Modeling"
-EXPLORATION = "Active Exploration"
+MODELING = "Modeling Phase"
+EXPLORATION = "Acting Phase"
 MISMATCHES = ("prediction_mismatch", "reconstruction_mismatch")  # comparisons of two observations
 
 MODEL_FILES = [
@@ -526,6 +527,8 @@ class ManagedCoordinator:
         )
 
     def data(self, body: dict[str, Any]) -> Any:
+        if not self.options.exp_buffer:
+            raise ValueError("this task has no experience buffer to read")
         with self.lock:
             value: Any
             op = body.get("op")
@@ -931,8 +934,11 @@ class ManagedCoordinator:
                 )
                 if getattr(exc, "kind", None) == "operation_timeout":
                     reason = self._limit() or "controller_call_time_limit"
+                # Controller text leaves the sandbox only through these two fields.
+                cap = self.options.feedback.max_controller_error_chars
                 result["error"] = budgets.truncate_error(
-                    str(exc), self.options.feedback.max_error_chars
+                    str(exc),
+                    cap if reason == "controller_error" else self.options.feedback.max_error_chars,
                 )
                 result["error_type"] = getattr(exc, "kind", type(exc).__name__)
                 result["error_context"] = dict(getattr(exc, "context", {}))
@@ -950,7 +956,10 @@ class ManagedCoordinator:
                     isinstance(exc, InvalidActionError)
                     or result["error_context"].get("callback") == "step"
                 ):
-                    result["error_context"]["action"] = action
+                    text = canonical(action)
+                    result["error_context"]["action"] = (
+                        action if cap is None or len(text) <= cap else budgets.truncate_error(text, cap)
+                    )
                 if self.uses_model and reason == "model_error":
                     self.change_phase(MODELING, reason)
             except Exception as exc:
@@ -1056,7 +1065,7 @@ class ManagedCoordinator:
                 except ValueError as exc:
                     return {"error": str(exc), "error_type": "request_conflict"}
                 if previous is not None:
-                    return {**previous, "replayed": True}
+                    return self._with_observation({**previous, "replayed": True})
             previews = False
             preview_error = None
             self.phase_changes = []
@@ -1089,7 +1098,7 @@ class ManagedCoordinator:
                     response = self.explore()
                 else:
                     raise ValueError(
-                        f"{name} is unavailable during {self.phase}: the CWM in world_model/ "
+                        f"{name} is unavailable in the {self.phase}: the CWM in world_model/ "
                         "must first be accepted by UpdateCodeWorldModel. If you submitted it in "
                         "the same command, its result says why it was not accepted."
                     )
@@ -1150,7 +1159,22 @@ class ManagedCoordinator:
             if rid:
                 self.store.remember_request(str(rid), request, response)
             self.persist()
+            return self._with_observation(response)
+
+    def _with_observation(self, response: dict[str, Any]) -> dict[str, Any]:
+        """Without the experience buffer, a result shows the current observation (and, with
+        vision, saves its image); it is never stored with the result."""
+        if self.options.exp_buffer:
             return response
+        obs = self.store.observation(self.current_id)
+        if self.config.agent.vision:
+            from regact.protocols.cwm.viewer import png
+
+            try:
+                save_image_file(self.workdir, "final.png", png(self.problem, obs))
+            except (OSError, ValueError) as exc:
+                self.event("image_preview_error", error=str(exc)[:300])
+        return {**response, "observation": obs}
 
     def note_grant(self, name: str, outcome: str, waited: float) -> None:
         with self.lock:
@@ -1250,7 +1274,7 @@ class ManagedTool(Tool):
         }
 
     async def call(self, args: dict[str, Any], context: ToolContext) -> ToolOutput:
-        from regact.protocols.cwm.feedback import format_feedback, render_feedback
+        from regact.protocols.cwm.feedback import format_feedback, render_feedback, summary_line
 
         if args:
             return ToolOutput(
@@ -1314,12 +1338,14 @@ class ManagedTool(Tool):
                 except asyncio.CancelledError:
                     continue
             raise
-        return ToolOutput(
-            data=render_feedback(
-                self.name, result, self.coordinator.options, self.coordinator.config.limits
-            ),
-            is_error=bool(result.get("error")),
-        )
+        options, limits = self.coordinator.options, self.coordinator.config.limits
+        if "observation" in result:
+            text = summary_line(self.name, result, options, limits) + "\n" + observation_text(
+                result["observation"], self.coordinator.problem.frame_cells
+            )
+        else:
+            text = render_feedback(self.name, result, options, limits)
+        return ToolOutput(data=text, is_error=bool(result.get("error")))
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -1331,10 +1357,18 @@ class ManagedSession(ProtocolSession):
 
     def resume_notice(self) -> str:
         phase = self.coordinator.phase
-        return (
-            f"Current phase is {phase}: {self.coordinator.phase_description(phase)} "
-            "`data_api.summary()` gives the current position."
+        notice = f"Current phase: {phase}. {self.coordinator.phase_description(phase)}"
+        if self.coordinator.options.exp_buffer:
+            return notice + " `data_api.summary()` gives the current position."
+        current = self.coordinator.store.observation(self.coordinator.current_id)
+        return notice + "\n\nThe current observation:\n\n" + observation_text(
+            current, self.coordinator.problem.frame_cells
         )
+
+    def first_observation_text(self) -> str | None:
+        if self.coordinator.options.exp_buffer:
+            return None
+        return observation_text(self.coordinator.initial, self.coordinator.problem.frame_cells)
 
     def task_metrics(self) -> dict[str, Any] | None:
         return self.coordinator.task_metrics()
@@ -1349,7 +1383,7 @@ class ManagedSession(ProtocolSession):
         phase = self.coordinator.phase
         return (
             "Continue your work until the game is fully solved.\n"
-            f"Current phase is {phase}: {self.coordinator.phase_description(phase)}"
+            f"Current phase: {phase}. {self.coordinator.phase_description(phase)}"
         )
 
     def interaction_guidance(self) -> str:

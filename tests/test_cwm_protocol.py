@@ -165,7 +165,7 @@ def test_prefill_and_direct_environment_denial(rig):
         assert not (c.workdir / "framework" / filename).exists()
     with TestClient(server.app) as http:
         for _ in range(2):
-            assert c.phase == "CWM Modeling"
+            assert c.phase == "Modeling Phase"
             for op, body in (("step", {"action": 1}), ("reset", {})):
                 reply = http.post(f"/env/counter/{op}", json=body)
                 assert reply.status_code == 409
@@ -188,7 +188,7 @@ def test_prefill_action_cap_allows_modelling_with_less_data(rig):
     c, _ = rig
     c.options.max_actions_per_initial_collection = 1
     collect(c)
-    assert c.phase == "CWM Modeling" and c.terminal is None
+    assert c.phase == "Modeling Phase" and c.terminal is None
     assert c.initial_collection["stop_reason"] == "action_cap"
     assert not c.initial_collection["target_reached"]
     assert c.store.summary()["n_unique_observations"] == 2
@@ -238,7 +238,7 @@ def test_plan_real_exploration_and_replay(rig):
     assert result["stop_reason"] == "plan_exhausted"
     assert playback.load(c.output, "episode", result["episode_id"])["frames"] == 5
     assert playback.frame(c.output, "episode", result["episode_id"], 4)["obs"]["frame"][0] == 4
-    assert c.phase == "Active Exploration"
+    assert c.phase == "Acting Phase"
 
 
 def test_cwm_versions_count_accepted_models_without_gaps(rig):
@@ -257,7 +257,7 @@ def test_first_mismatch_recorded_then_requires_repair(rig):
     result = c.tool("RunController", {})
     assert result["stop_reason"] == "prediction_mismatch", result
     assert result["real_actions"] == 3
-    assert c.phase == "CWM Modeling"
+    assert c.phase == "Modeling Phase"
     diagnostic = c.store.get_diagnostic(result["diagnostic_id"])
     assert diagnostic["predicted"]["frame"][0] == 4 and diagnostic["observed"]["frame"][0] == 3
     # Named like validation counterexamples; internal store fields stay hidden.
@@ -295,7 +295,7 @@ def test_invalid_controller_action_gets_worst_metrics(rig):
     assert result["real_actions"] == 1
     assert result["metrics"]["success"] is False
     assert result["error_type"] == "InvalidActionError"
-    assert c.phase == "Active Exploration"
+    assert c.phase == "Acting Phase"
 
 
 def test_a_controller_error_shows_the_agent_the_game_progress_not_the_zero_score(rig, monkeypatch):
@@ -335,7 +335,7 @@ def test_changed_cwm_refused_before_reset_and_revalidation_unblocks(rig):
     assert result["error_type"] == "cwm_source_changed", result
     assert "UpdateCodeWorldModel" in result["error"]
     assert c.store.summary() == before and c.terminal is None
-    assert c.phase == "Active Exploration"
+    assert c.phase == "Acting Phase"
     assert c.tool("UpdateCodeWorldModel", {})["accepted"]
     assert c.tool("RunController", {})["real_actions"] == 4
 
@@ -353,7 +353,7 @@ def test_callback_timeout_is_recorded_and_not_accepted(rig):
     assert time.monotonic() - started < 4
     assert result["error_type"] == "code_timeout", result
     assert result["steps_checked"] == 1 and not result["complete"]
-    assert c.phase == "CWM Modeling" and c.accepted is None
+    assert c.phase == "Modeling Phase" and c.accepted is None
     assert c.store.db.execute("SELECT status FROM records").fetchone()[0] == "rejected"
 
 
@@ -600,7 +600,7 @@ def test_prefill_time_cap(rig, monkeypatch):
     collect(c)
     assert c.initial_collection["stop_reason"] == "time_cap"
     assert c.store.summary()["n_total_transitions"] == 0
-    assert c.phase == "CWM Modeling"
+    assert c.phase == "Modeling Phase"
 
 
 def test_prefill_empty_action_space(rig, monkeypatch):
@@ -608,7 +608,7 @@ def test_prefill_empty_action_space(rig, monkeypatch):
     monkeypatch.setattr(c.problem, "enumerate_actions", lambda obs: iter(()))
     collect(c)
     assert c.initial_collection["stop_reason"] == "no_available_actions"
-    assert c.phase == "CWM Modeling"
+    assert c.phase == "Modeling Phase"
 
 
 def test_prefill_stops_at_episode_limit(rig):

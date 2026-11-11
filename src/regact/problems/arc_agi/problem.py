@@ -54,6 +54,7 @@ _RENDER_SCALE = 8
 _CLICK_ACTION_ID = (
     6  # ACTION6: the click action, the only one that requires data (x, y coordinates)
 )
+_RESET_ACTION_ID = 0
 
 
 def _validated_click_data(data: Any) -> dict[str, Any]:
@@ -185,8 +186,11 @@ class _ArcGymShim:
             total = min(total, self._max_levels) if total else self._max_levels
             if self._capped_win(obs):
                 state, levels = self._GameState.WIN.name, total
+        # RESET is always accepted, and after GAME_OVER it is the only action that does anything.
+        actions = [a for a in getattr(obs, "available_actions", []) if a != _RESET_ACTION_ID]
         return {
-            "available_actions": list(getattr(obs, "available_actions", [])),
+            "available_actions": [_RESET_ACTION_ID]
+            + ([] if state == self._GameState.GAME_OVER.name else actions),
             "state": state,
             "levels_completed": levels,
             "win_levels": total,
@@ -339,6 +343,7 @@ class ArcAgiProblem(BaseProblem):
     """ARC-AGI-3 as a regact problem (offline, local game data)."""
 
     name = "arc_agi"
+    frame_cells = "hex"
     main_metrics = ("rhae", "lrhae_uncapped", "mean_relative_actions")
     progress_label = "Levels completed"
 

@@ -1,4 +1,4 @@
-# Active Exploration
+# Acting Phase
 
 **Goal:** explore new and relevant states, test uncertain game mechanisms and make progress toward solving the game. Choose a concrete experiment. Testing a predicted familiar outcome can expose an incorrect hypothesis.
 
@@ -73,4 +73,4 @@ Observations from `data_api` are nested lists. To use a `where` in code, convert
 
 __IMAGE_PREVIEWS__## 4. Follow the next phase
 
-A CWM contradiction (incorrect prediction or reconstruction, or a compactness failure on new evidence) stops the controller call and returns you to **CWM Modeling**. Use the new data to repair and resubmit the CWM. Ordinary exploration completion leaves you in **Active Exploration**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the result's `phase_change` field and the reported error. Controller errors receive worst performance metrics; already recorded experience is retained. A successful subgoal does not end the task unless the full game is solved.
+A CWM contradiction (incorrect prediction or reconstruction, or a compactness failure on new evidence) stops the controller call and returns you to the **Modeling Phase**. Use the new data to repair and resubmit the CWM. Ordinary exploration completion leaves you in the **Acting Phase**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the result's `phase_change` field and the reported error. Controller errors receive worst performance metrics; already recorded experience is retained. A successful subgoal does not end the task unless the full game is solved.

@@ -130,6 +130,7 @@ class MiniGridProblem(BaseProblem):
     """The complete MiniGrid task family; experiment config selects a subset."""
 
     name = "minigrid"
+    frame_cells = "list"
     main_metrics = ("success_rate", "mean_reward", "mean_steps")
 
     def __init__(self, *, fully_obs: bool = False) -> None:

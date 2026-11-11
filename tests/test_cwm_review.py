@@ -33,7 +33,7 @@ async def test_acceptance_notice_and_retry_are_separate_and_not_duplicated(rig):
     model(c.workdir)
     result, change = await call(c, "UpdateCodeWorldModel", "stable-request")
     assert result["status"] == "Accepted"
-    assert change == "CWM Modeling -> Active Exploration"
+    assert change == "Modeling Phase -> Acting Phase"
     assert (
         not {
             "phase",
@@ -57,7 +57,7 @@ async def test_acceptance_notice_and_retry_are_separate_and_not_duplicated(rig):
     assert refused["status"] == "Refused"
     assert refused["previously_accepted_cwm_version"] == result["cwm_version"]
     assert change is None
-    assert c.phase == "Active Exploration"
+    assert c.phase == "Acting Phase"
 
 
 async def test_http_notice_and_retry_id_are_transport_metadata(rig):
@@ -76,12 +76,12 @@ async def test_http_notice_and_retry_id_are_transport_metadata(rig):
     output = json.loads(first["output"])  # one JSON document, nothing printed after it
     assert output["status"] == "Accepted" and "messages" not in first
     assert first["output"].startswith('{\n  "status": "Accepted",')
-    assert output["phase_change"] == "CWM Modeling -> Active Exploration"
+    assert output["phase_change"] == "Modeling Phase -> Acting Phase"
     session = CwmSession(coordinator=c, tools=[])
     for reminder_count in (0, 1, 10):
         assert session.reminder(reminder_count) == (
             "Continue your work until the game is fully solved.\n"
-            f"Current phase is {c.phase}: {c.phase_description()}"
+            f"Current phase: {c.phase}. {c.phase_description()}"
         )
     assert "messages" not in second and json.loads(second["output"]) == json.loads(first["output"])
     assert CwmTool("PlanInCWM", c).input_schema["properties"] == {}
@@ -96,7 +96,7 @@ def test_generic_summary_and_image_sources(rig, monkeypatch):
     c, _ = rig
     collect(c)
     summary = c.data({"op": "summary"})
-    assert summary["phase"] == "CWM Modeling"
+    assert summary["phase"] == "Modeling Phase"
     assert summary["n_started_episodes"] == 1
     assert summary["n_total_observations"] == 3
     assert not {"initial_collection", "dataset_version", "n_episodes"} & summary.keys()
@@ -152,7 +152,7 @@ async def test_milestone_survives_contradiction_and_is_not_announced_again(rig):
     assert result["new_milestones"][0]["name"] == "checkpoint"
     assert result["new_milestones"][0]["kind"] == "progress"
     assert "New real milestones" in result["message"]
-    assert change == "Active Exploration -> CWM Modeling"
+    assert change == "Acting Phase -> Modeling Phase"
     assert CwmSession(coordinator=c, tools=[]).reminder(2).endswith(c.phase_description())
     render = c.workdir / "world_model/model_render.py"
     render.write_text(

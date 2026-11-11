@@ -20,6 +20,8 @@ class ExecutionConfig:
 
 @dataclass
 class VanillaConfig:
+    exp_buffer: bool = True  # recorded experience readable through data_api
+    policy_programs: bool = True  # act through controller programs (false: the Act command)
     n_unique_observations_in_initial_collection: int = 1  # 1 = no random actions
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
@@ -47,7 +49,7 @@ class VanillaConfig:
                     check(value)
                 elif key.startswith("max_") and value is None:
                     continue
-                elif key == "one_command_per_tool_call":
+                elif key in ("exp_buffer", "policy_programs", "one_command_per_tool_call"):
                     if type(value) is not bool:
                         raise ValueError(f"{key} must be a boolean")
                 elif (

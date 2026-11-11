@@ -400,3 +400,38 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
 def render_feedback(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) -> str:
     """Render every framework result as indented JSON, without execution banners."""
     return format_feedback(present(name, r, c, limits))
+
+
+STOPPED = {
+    "controller_done": "the controller stopped",
+    "goal_achieved": "the controller's goal was reached",
+    "plan_exhausted": "the action list finished",
+    "environment_done": "the environment ended the episode",
+    "controller_call_time_limit": "controller time limit",
+    "controller_error": "controller error",
+}
+
+
+def summary_line(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) -> str:
+    """The one-line result printed above the observation when the experience buffer is off."""
+    out = present(name, r, c, limits)
+    reason = r.get("stop_reason", "")
+    if name == "RunController" and r.get("exploration_id") is not None:
+        limit = budget(reason, c, limits)
+        stopped = STOPPED.get(reason) or (
+            f"stopped at the limit of {limit['value']} {limit['unit']}"
+            if limit
+            else reason.replace("_", " ")
+        )
+        n = r.get("real_actions", 0)
+        line = f"RunController {r['exploration_id']}: {stopped} after {n} action{'s' * (n != 1)}"
+    else:
+        text = REASONS.get(reason, "") if reason.startswith("reset_") else out["message"]
+        line = f"{name}: {text[:1].lower()}{text[1:].rstrip('.')}"
+    if r.get("new_milestones"):
+        line += "; milestones: " + ", ".join(m["name"] for m in r["new_milestones"])
+    if "error" in out:
+        line += "; error: " + out["error"]["message"]
+    if "task_stop" in out:
+        line += "; " + out["task_stop"]["message"]
+    return line

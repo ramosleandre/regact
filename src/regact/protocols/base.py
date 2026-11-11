@@ -102,6 +102,10 @@ class ProtocolSession(ABC):
         """Where the task stands, added to the message a resumed agent receives."""
         return ""
 
+    def first_observation_text(self) -> str | None:
+        """The protocol's own printing of the first observation for the first message, or None."""
+        return None
+
     def task_metrics(self) -> dict[str, Any] | None:
         """The problem's main metrics for the task so far, or None when nothing is scored yet."""
         return None

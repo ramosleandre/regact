@@ -134,14 +134,12 @@ def handle(request: dict[str, Any]) -> Any:
         return {"achieved": achieved, "utility": utility}
     if op == "controller_init":
         controller = agent(lambda: importlib.import_module("controller").get_controller())
-        if not callable(getattr(controller, "act", None)) or not callable(
-            getattr(controller, "is_done", None)
-        ):
-            raise TypeError(
-                "get_controller must return an object with act(state) and is_done(state)"
-            )
+        if not callable(getattr(controller, "act", None)):
+            raise TypeError("get_controller must return an object with act(state)")
         return None
     if op == "is_done":
+        if getattr(controller, "is_done", None) is None:
+            return False  # optional: without it, only the environment and the limits stop a call
         result = agent(controller.is_done, decode(request["state"]))
         if type(result) is not bool:
             raise TypeError("is_done must return bool")

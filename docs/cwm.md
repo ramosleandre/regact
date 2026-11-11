@@ -8,17 +8,17 @@ Select `protocol=cwm features=none`. **v6** describes this protocol design; it i
 
 ```mermaid
 flowchart TD
-    A[Framework collects initial random experience] --> B[CWM Modeling]
+    A[Framework collects initial random experience] --> B[Modeling Phase]
     B --> C[UpdateCodeWorldModel]
     C -->|Refused or incomplete| B
-    C -->|Accepted| D[Active Exploration]
+    C -->|Accepted| D[Acting Phase]
     D --> E[RunController]
     E -->|New contradiction or CWM error| B
     E -->|Ordinary call completion| D
     E -->|Full game solved or task limit| F[Task ends]
 ```
 
-There is no agent-facing phase 0. The initial dataset is read through the same API as all later experience. The two phases are **CWM Modeling** and **Active Exploration**.
+There is no agent-facing phase 0. The initial dataset is read through the same API as all later experience. The two phases are the **Modeling Phase** and the **Acting Phase**.
 
 In single-instance mode, the environment remains where initial collection or the last controller left it, including while the agent repairs its CWM. Every `RunController` still creates a fresh controller object. Multi-instance mode starts each call from a fresh reset instead.
 
@@ -28,8 +28,8 @@ The common files include `controller.py`, `framework/commands.py`, `framework/da
 
 ```text
 docs/
-  CWM_modeling_phase.md
-  active_exploration_phase.md
+  modeling_phase.md
+  acting_phase.md
 world_model/
   __init__.py
   model_state.py
@@ -42,7 +42,7 @@ With `protocol.workspace_helpers_enabled=true` (default), the agent also gets `f
 
 The system prompt gives the workflow and actual file inventory. The generated phase documents explain implementation and feedback, while `framework/data_api.py` documents data access through docstrings. `world_model/` is agent-owned. There is no generated `CWM_INTERFACE.md` or direct environment client.
 
-## CWM Modeling
+## Modeling Phase
 
 ### Implement four definitions
 
@@ -99,7 +99,7 @@ The default threshold is **0.5**, strictly. The ratio of the single largest Stat
 
 | `status` | Meaning |
 |---|---|
-| `Accepted` | Validation finished and all checks passed; enter Active Exploration |
+| `Accepted` | Validation finished and all checks passed; enter the Acting Phase |
 | `Refused` | Validation finished with failed checks; inspect counterexamples and repair |
 | `Incomplete` | Validation could not finish, for example due to code/resource errors |
 
@@ -107,9 +107,9 @@ The default threshold is **0.5**, strictly. The ratio of the single largest Stat
 
 Failure types include reconstruction mismatches (an episode's first observation), prediction mismatches (the carried State stopped matching; named by episode and step), compression failure, and non-repeatable CWM callbacks. Feedback points to episode/step/observation/transition/diagnostic IDs. `data_api.load_history(episode_id)` gives the recorded order. Structural differences are bounded by `protocol.feedback.max_diff_items`; `differences_omitted` appears only when additional differences exist. Full diagnostic evidence remains readable through the data API.
 
-A `phase_change` field in the command result announces transitions. The agent can run real controllers only during Active Exploration. Editing accepted CWM files or their imported dependencies requires another successful validation before real execution. Editing only a controller or local test script does not, unless the CWM itself imports that file.
+A `phase_change` field in the command result announces transitions. The agent can run real controllers only during the Acting Phase. Editing accepted CWM files or their imported dependencies requires another successful validation before real execution. Editing only a controller or local test script does not, unless the CWM itself imports that file.
 
-## Active Exploration
+## Acting Phase
 
 The agent writes `controller.py`, with a module docstring describing the experiment and `get_controller()` returning an object implementing `act(state)` and `is_done(state)`. `is_done` may always return `False`. An optional `objective_reached(state)` reports a subgoal independently of stopping.
 
@@ -127,11 +127,11 @@ There is **no preliminary simulated episode and no novelty requirement** for rea
 
 A prediction computation error prevents that action from being taken. A wrong prediction is detected **after** the real action, so its consequence remains in the live environment and the evidence is retained.
 
-The first CWM contradiction stops the call and returns the agent to CWM Modeling. Ordinary completion leaves it in Active Exploration. Code/resource errors are reported separately from evidence that a game rule is wrong; follow the result's `phase_change` field for whether revalidation is needed. Controller failures receive worst performance metrics while preserving already recorded experience.
+The first CWM contradiction stops the call and returns the agent to the Modeling Phase. Ordinary completion leaves it in the Acting Phase. Code/resource errors are reported separately from evidence that a game rule is wrong; follow the result's `phase_change` field for whether revalidation is needed. Controller failures receive worst performance metrics while preserving already recorded experience.
 
 New observations can reveal a contradiction, but a familiar predicted observation can also be useful evidence. Neither `actual_novel_observations` nor the controller's `goal_achieved` is an external measure of game success. The problem supplies performance metrics and the full-game completion predicate.
 
-Explicit reset commands work in either phase. The next RunController checks `render(get_initial_state(reset observation))` against the reset observation; a mismatch returns the agent to CWM Modeling. See [reset semantics](managed_protocols.md#explicit-resets).
+Explicit reset commands work in either phase. The next RunController checks `render(get_initial_state(reset observation))` against the reset observation; a mismatch returns the agent to the Modeling Phase. See [reset semantics](managed_protocols.md#explicit-resets).
 
 ## Local simulation
 

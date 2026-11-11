@@ -21,7 +21,7 @@ Regact records the reset observation before starting the agent. By default (`pro
 
 The action sampler uses `problem.seed` (0 when unspecified). Environment seeding still follows the problem's own `problem.seed` behavior; a seeded action sampler alone does not guarantee identical environments. Collection never silently resets a terminated game. Its actions count against task and episode action budgets. If collection solves the game, the task can finish before the agent acts.
 
-Initial experience and later experience use the same dataset interface. There is no agent-facing phase 0. CWM starts in **CWM Modeling**; vanilla can immediately submit a controller.
+Initial experience and later experience use the same dataset interface. There is no agent-facing phase 0. CWM starts in the **Modeling Phase**; vanilla can immediately submit a controller.
 
 ### 2. Inspect the dataset and develop code
 
@@ -103,7 +103,7 @@ When enabled (it needs `agent.vision=true`), previews are written to `tmp/images
 | Per-call action/time cap | Finish this call; the agent can adapt its next controller |
 | Episode action cap | No further steps in that episode; a reset renews that action allowance |
 | Controller error, including an invalid action | Finish the call, report the error and worst performance metrics; keep collected evidence |
-| CWM contradiction | Finish the call and return to CWM Modeling |
+| CWM contradiction | Finish the call and return to the Modeling Phase |
 | Full game solved according to problem metrics | End the task |
 | Task tool/action/turn/wall-time limit or interruption | End the task |
 | Unrecoverable framework/storage failure | End the task with an explicit failure; history may be incomplete |

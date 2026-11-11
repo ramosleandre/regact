@@ -265,7 +265,7 @@ def test_cwm_mismatch_preserves_position_and_repairs(make_rig):
     result = c.tool("RunController", {})
     assert result["stop_reason"] == "prediction_mismatch"
     assert result["real_actions"] == 1 and c.env.live.last_obs.frame[0] == 3
-    assert c.phase == "CWM Modeling"
+    assert c.phase == "Modeling Phase"
     model(c.workdir)
     assert c.tool("UpdateCodeWorldModel", {}).get("accepted")
     exploration(c, (1,))

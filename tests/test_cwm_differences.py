@@ -1,4 +1,4 @@
-"""The difference summary agents read (docs/active_exploration_phase.md)."""
+"""The difference summary agents read (docs/acting_phase.md)."""
 
 import json
 
@@ -178,11 +178,11 @@ def test_the_exploration_page_explains_differences_with_the_run_budgets():
 
     options = CwmConfig.from_mapping({"feedback": {"max_diff_regions": 3, "max_diff_items": None}})
     docs = {f.relpath: f.content for f in workspace_docs(options, vision=False)}
-    assert set(docs) == {"docs/CWM_modeling_phase.md", "docs/active_exploration_phase.md"}
-    page = docs["docs/active_exploration_phase.md"]
+    assert set(docs) == {"docs/modeling_phase.md", "docs/acting_phase.md"}
+    page = docs["docs/acting_phase.md"]
     assert "### Reading a contradiction" in page and "At most 3 regions" in page
     assert "__" not in page
-    assert "Reading a contradiction" in docs["docs/CWM_modeling_phase.md"]
+    assert "Reading a contradiction" in docs["docs/modeling_phase.md"]
 
 
 def test_feedback_layout_is_valid_json_with_small_parts_on_one_line():

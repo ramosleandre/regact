@@ -35,8 +35,8 @@ All protocols use `PromptBuilder` for terminal syntax, command presentation and
 optional verbalization hints. Each supplies its own workflow content. CWM wording
 lives in `src/regact/protocols/cwm/prompts/`; the generated workspace contains:
 
-- `docs/CWM_modeling_phase.md`: CWM implementation, validation, code isolation and shared limits.
-- `docs/active_exploration_phase.md`: real controller submission, feedback and stopping conditions.
+- `docs/modeling_phase.md`: CWM implementation, validation, code isolation and shared limits.
+- `docs/acting_phase.md`: real controller submission, feedback and stopping conditions.
 - `docs/plan_in_CWM.md`: optional goal-based planning.
 
 The docstrings in `framework/data_api.py` document data access, returned fields and examples.
@@ -168,7 +168,7 @@ messages but retains flag recording.
 | Earlier interface | Current interface |
 |---|---|
 | Agent-operated initial collection / phase 0 | Framework prepares bounded random data before the agent starts |
-| Numbered phases | **CWM Modeling** and **Active Exploration** |
+| Numbered phases | **Modeling Phase** and **Acting Phase** |
 | `SubmitExplorationController` | `RunController` |
 | `exploration.py` | `controller.py` |
 | Managed `framework/control.py` | `framework/commands.py` |

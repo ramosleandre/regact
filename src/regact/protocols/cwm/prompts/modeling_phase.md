@@ -1,4 +1,4 @@
-# CWM Modeling
+# Modeling Phase
 
 **Goal:** represent what you have observed and predict its transitions exactly. Inspect recorded observations and transitions, form hypotheses, implement them, and validate. Acceptance checks known evidence; it does not prove that you have understood every situation in the game.
 
@@ -44,11 +44,11 @@ Submitting is the cheapest way to check your CWM against everything recorded: it
 
 | `status` | Meaning | Next action |
 |---|---|---|
-| `Accepted` | All checks finished and passed. | Its `phase_change` field moves you to Active Exploration. |
+| `Accepted` | All checks finished and passed. | Its `phase_change` field moves you to the Acting Phase. |
 | `Refused` | Checks finished but some failed. | Inspect evidence, revise the CWM, submit again. |
 | `Incomplete` | Validation could not finish, e.g. a code error or timeout. | Fix the reported error or expensive computation, then retry. |
 
-`checked` counts the episodes and steps processed, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores: cwm_version counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Active Exploration. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
+`checked` counts the episodes and steps processed, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores: cwm_version counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Acting Phase. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
 
 Counterexamples include evidence IDs and one of these failure types:
 
@@ -57,7 +57,7 @@ Counterexamples include evidence IDs and one of these failure types:
 - `compression_ratio`: States are too large on average or for one State; size feedback includes the smallest/largest State and their observation IDs.
 - `non_deterministic_model`: identical callback inputs produced different outputs.
 
-`failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during exploration, described in "Reading a contradiction" in `docs/active_exploration_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
+`failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during exploration, described in "Reading a contradiction" in `docs/acting_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
 To understand a counterexample, start with its `details` call, `data_api.describe_diagnostic(diagnostic_id)`: the differences, your model's State before the step and the State it predicted, all bounded. `data_api.load_diagnostic(diagnostic_id)` returns the whole record and can be very large. Use `load_observations` or `load_transitions` from `data_api` with the returned IDs, and `data_api.list_episodes()` and `data_api.load_history(episode_id)` to see what happened in order. Only when a hidden field may have gone wrong before the failing step, replay the episode locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then `state = step(state, action)` for each action, checking the field you suspect.__DIAGNOSTIC_IMAGES__
 

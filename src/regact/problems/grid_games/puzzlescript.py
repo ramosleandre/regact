@@ -170,6 +170,7 @@ def object_stripe(stripe: Any, obj: int) -> None:
 
 class PuzzleScriptProblem(GridGameProblem):
     name = "puzzlescript"
+    frame_cells = "list"
     frame_note = (
         "each cell is the list of the integer ids of the objects in it (one object per layer, so "
         "a cell can hold several; the same object always has the same id)"

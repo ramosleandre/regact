@@ -38,7 +38,7 @@ def test_stale_model_and_dependency_changes_do_not_start_an_episode(rig, mutatio
     result = c.tool("RunController", {})
     assert result["error_type"] == "cwm_source_changed", result
     assert c.store.summary() == before
-    assert c.terminal is None and c.phase == "Active Exploration"
+    assert c.terminal is None and c.phase == "Acting Phase"
 
 
 def test_controller_and_debug_script_edits_do_not_require_revalidation(rig):
@@ -71,7 +71,7 @@ def test_prediction_exception_stops_only_its_action_after_prior_real_steps(rig):
     assert result["stop_reason"] == "model_error"
     assert result["error_context"]["callback"] == "step"
     assert result["observation_ids"] == [1, 2, 3, 4]
-    assert c.phase == "CWM Modeling"
+    assert c.phase == "Modeling Phase"
 
 
 def test_predicted_familiar_outcome_can_reveal_a_contradiction(rig, monkeypatch):
@@ -94,4 +94,4 @@ def test_predicted_familiar_outcome_can_reveal_a_contradiction(rig, monkeypatch)
     diagnostic = c.store.get_diagnostic(result["diagnostic_id"])
     assert diagnostic["predicted"]["frame"][0] == 0
     assert diagnostic["observed"]["frame"][0] == 1
-    assert c.phase == "CWM Modeling"
+    assert c.phase == "Modeling Phase"

@@ -1,5 +1,7 @@
 # Observation-driven managed-controller baseline. All max_* accept null.
 name: vanilla
+exp_buffer: true  # false: no data_api; each command prints the current observation
+policy_programs: true  # false (the Act command) is not implemented yet
 n_unique_observations_in_initial_collection: 1  # 1 = start from the first observation, no random actions
 max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
@@ -15,6 +17,7 @@ feedback:
   max_counterexamples: 5
   max_diff_items: 6
   max_error_chars: 1000
+  max_controller_error_chars: 200  # a controller's error and its invalid action
 data_api:
   max_items: 100
   max_response_bytes: 2097152

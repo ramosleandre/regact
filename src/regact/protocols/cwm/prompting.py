@@ -16,13 +16,13 @@ from regact.workspace.templates import TemplateFile
 
 _PROMPTS = Path(__file__).with_name("prompts")
 _DOCS = {
-    "CWM_modeling_phase.md": "docs/CWM_modeling_phase.md",
-    "active_exploration_phase.md": "docs/active_exploration_phase.md",
+    "modeling_phase.md": "docs/modeling_phase.md",
+    "acting_phase.md": "docs/acting_phase.md",
     "plan_in_CWM.md": "docs/plan_in_CWM.md",
 }
 _DESCRIPTIONS = {
-    "docs/CWM_modeling_phase.md": "how to implement, validate and repair the CWM",
-    "docs/active_exploration_phase.md": "how to actively interact with the environment",
+    "docs/modeling_phase.md": "how to implement, validate and repair the CWM",
+    "docs/acting_phase.md": "how to actively interact with the environment",
     "docs/plan_in_CWM.md": "(optional) how to use the CWM-dependent planner tool",
     "framework/cwm_env.py": "EnvCWM and its recorded-start initialization (helper file)",
     "goal.py": "the file to write goals before using the PlanInCWM command",
@@ -66,7 +66,7 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "DIAGNOSTIC_IMAGES": _DIAGNOSTIC_IMAGES if vision else "",
         "DIAGNOSTIC_IMAGE": _DIAGNOSTIC_IMAGE if vision else "",
         "PLANNING_WORKFLOW": (
-            "- **Optional planning.** In Active Exploration, define a goal in `goal.py` and "
+            "- **Optional planning.** In the Acting Phase, define a goal in `goal.py` and "
             "use `PlanInCWM` to find an action list in the accepted CWM. You can then use "
             "that list in your exploration controller. See `docs/plan_in_CWM.md`.\n"
             if planner
@@ -156,7 +156,7 @@ def build_prompt(
         workspace_extensions=workspace_notes,
         workflow_steps=_render("workflow.md", options),
         workflow_intro=_render("intro.md", options),
-        initial_guidance="You begin in **CWM Modeling**.",
+        initial_guidance="You begin in the **Modeling Phase**.",
         tool_protocol=tool_protocol,
         tool_names=tool_names,
         verbalize_variant=verbalize_variant,

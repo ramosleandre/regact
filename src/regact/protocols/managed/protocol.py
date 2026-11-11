@@ -27,6 +27,13 @@ class ManagedProtocol(ExperimentProtocol):
         self.coordinator = None
 
     def validate(self) -> None:
+        if not self.options.policy_programs:
+            raise ValueError("protocol.policy_programs=false (the Act command) is not implemented")
+        if self.options.n_tmp_images_saved_per_exploration and not self.options.exp_buffer:
+            raise ValueError(
+                "protocol.n_tmp_images_saved_per_exploration selects previews from the experience "
+                "buffer; with protocol.exp_buffer=false the final observation is saved instead"
+            )
         if self.options.n_tmp_images_saved_per_exploration and not self.config.agent.vision:
             raise ValueError(
                 "protocol.n_tmp_images_saved_per_exploration > 0 needs agent.vision=true: "

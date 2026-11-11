@@ -1,6 +1,6 @@
 # Optional planning in the CWM
 
-Use this during **Active Exploration** when you can express an experiment as a goal on States. Planning uses the accepted CWM and takes no real actions. You can always write a controller directly instead.
+Use this during the **Acting Phase** when you can express an experiment as a goal on States. Planning uses the accepted CWM and takes no real actions. You can always write a controller directly instead.
 
 ## 1. Define the fixed file `goal.py`
 
@@ -37,7 +37,7 @@ Configured search limits:
 | Stored search states (including the starting state) | __PLANNER_NODES__ |
 | Maximum action-list length | __PLANNER_DEPTH__ |
 
-Goal evaluations use time but do not count against the CWM-call cap. Per-callback and memory limits also apply (see the code execution rules in `docs/CWM_modeling_phase.md`). An unlimited individual cap does not disable the other limits.
+Goal evaluations use time but do not count against the CWM-call cap. Per-callback and memory limits also apply (see the code execution rules in `docs/modeling_phase.md`). An unlimited individual cap does not disable the other limits.
 
 ## 3. Inspect the result, then use the plan
 

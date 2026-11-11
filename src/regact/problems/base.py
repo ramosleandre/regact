@@ -33,6 +33,9 @@ class BaseProblem(ABC):
         """The entries of ``values`` (aggregate and derived metrics) named in ``main_metrics``."""
         return {key: values[key] for key in self.main_metrics if key in values}
 
+    # A frame cell, for printing observations: "hex" (an integer 0-15), "scalar" or "list".
+    frame_cells: str = "scalar"
+
     # What progress_value counts ("Levels completed"); None = the problem reports no progress.
     progress_label: str | None = None
 

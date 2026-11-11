@@ -127,7 +127,7 @@ def test_a_task_resumes_where_its_store_ends(hidden_rig, lifecycle):
             c.reset_actions,
         )
         assert r.milestones == c.milestones and r.initial_collection == c.initial_collection
-        assert r.phase == "Active Exploration"
+        assert r.phase == "Acting Phase"
         assert (r.accepted["cwm_version"], r.accepted["bundle"]) == (
             c.accepted["cwm_version"],
             c.accepted["bundle"],
@@ -157,8 +157,8 @@ def test_a_stale_status_file_does_not_lose_the_position_or_the_accepted_cwm(hidd
     r = reopened(c, Lifecycle.SINGLE_INSTANCE)
     try:
         assert r.reset_actions == 1 and r.current_id == c.current_id
-        # The phase and the accepted CWM come from the store: a reset keeps Active Exploration.
-        assert r.phase == "Active Exploration"
+        # The phase and the accepted CWM come from the store: a reset keeps Acting Phase.
+        assert r.phase == "Acting Phase"
         assert r.accepted["cwm_version"] == c.accepted["cwm_version"]
         exploration(r, (1, 1))
         result = r.tool("RunController", {})
@@ -176,7 +176,7 @@ def test_steps_the_accepted_cwm_never_saw_are_checked_on_resume(hidden_rig):
     killed(c)
     r = reopened(c, Lifecycle.SINGLE_INSTANCE)
     try:
-        assert r.phase == "Active Exploration"
+        assert r.phase == "Acting Phase"
         # The carried State is rebuilt through those two steps before the controller acts.
         exploration(r, (1,))
         result = r.tool("RunController", {})

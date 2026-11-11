@@ -190,7 +190,7 @@ def load_history(episode_id: int, step: int | None = None) -> tuple[list[dict[st
 def describe_diagnostic(diagnostic_id: int, **options: int | None) -> dict[str, Any]:
     """One diagnostic returned by a framework command, readable and bounded: where it happened,
     the differences between predicted and observed (see "Reading a contradiction" in
-    docs/active_exploration_phase.md), and the model's States before and after the step. options
+    docs/acting_phase.md), and the model's States before and after the step. options
     raise or lower the display limits: max_diff_items, max_diff_regions, max_diff_changes,
     max_crop_cells, max_state_chars (None = no limit). Print it with json.dumps(..., indent=2)."""
     return _query("describe_diagnostic", id=diagnostic_id, options=options)
@@ -276,7 +276,10 @@ Open observation.png with your image-reading tool. Saving a PNG prints its path 
 def templates(ctx, options, commands, *, vision):
     data = DATA.replace("__IMAGE_EXAMPLE__", IMAGE_EXAMPLE if vision else "")
     data += SAVE_IMAGE if vision else ""
-    for filename, body in (("framework/commands.py", CONTROL), ("framework/data_api.py", data)):
+    files = [("framework/commands.py", CONTROL)]
+    if options.exp_buffer:
+        files.append(("framework/data_api.py", data))
+    for filename, body in files:
         yield TemplateFile(
             filename,
             body.replace("__BASE_URL__", repr(ctx.env_base_url))

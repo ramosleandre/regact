@@ -66,10 +66,10 @@ def test_new_settings_and_optional_workspace_helpers():
         for x in templates(context, CwmConfig.from_mapping({"workspace_helpers_enabled": False}))
     }
     assert "world_model/model_env.py" not in disabled and "framework/cwm_env.py" not in disabled
-    assert "Local simulation helpers" not in disabled["docs/CWM_modeling_phase.md"]
-    assert "serialized_size(value)" in files["docs/CWM_modeling_phase.md"]
-    assert "serialized_size" not in disabled["docs/CWM_modeling_phase.md"]
-    assert '{"@tuple":[...]}' in disabled["docs/CWM_modeling_phase.md"]
+    assert "Local simulation helpers" not in disabled["docs/modeling_phase.md"]
+    assert "serialized_size(value)" in files["docs/modeling_phase.md"]
+    assert "serialized_size" not in disabled["docs/modeling_phase.md"]
+    assert '{"@tuple":[...]}' in disabled["docs/modeling_phase.md"]
 
 
 @dataclass(frozen=True)

@@ -387,3 +387,29 @@ def test_the_human_reference_stops_at_the_level_cap() -> None:
     full = _problem().progress_reference("ls20")
     capped = ArcAgiProblem(environments_dir=_ENV_DIR, max_levels=2).progress_reference("ls20")
     assert len(full) > 2 and capped == full[:2]
+
+
+def test_reset_is_listed_and_is_the_only_action_after_game_over() -> None:
+    pytest.importorskip("arc_agi")
+    import random
+
+    from regact.env.wrapped_env import WrappedEnv
+
+    problem = _problem()
+    env = WrappedEnv(
+        problem.make_env("ls20"),
+        task_name="ls20",
+        renderer=problem.obs_renderer("ls20", mode=ObsMode.RAW),
+    )
+    obs = env.last_obs or env.reset()
+    assert obs.available_actions[0] == 0 and len(obs.available_actions) > 1
+    rng = random.Random(0)
+    for _ in range(300):  # a random walk spends ls20's move budget well before this
+        if obs.info["state"] == "GAME_OVER":
+            break
+        obs = env.step(rng.choice(obs.available_actions[1:]))
+    assert obs.info["state"] == "GAME_OVER"
+    assert obs.available_actions == [0]
+    obs = env.step(0)
+    assert obs.info["state"] == "NOT_FINISHED" and len(obs.available_actions) > 1
+    env.close()

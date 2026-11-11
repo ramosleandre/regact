@@ -1,6 +1,8 @@
 # Every max_* option accepts null to disable that particular cap.
 # CWM v6. Settings apply only with protocol=cwm.
 name: cwm
+exp_buffer: true  # cwm requires it
+policy_programs: true  # false (the Act command) is not implemented yet
 n_unique_observations_in_initial_collection: 1  # 1 = start from the first observation, no random actions
 max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
@@ -32,6 +34,7 @@ feedback:
   max_diff_changes: 4  # colour changes listed per region
   max_crop_cells: 64  # largest region shown as a crop
   max_error_chars: 1000
+  max_controller_error_chars: 200  # a controller's error and its invalid action
 data_api:
   max_items: 100
   max_response_bytes: 2097152
