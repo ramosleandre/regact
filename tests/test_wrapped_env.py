@@ -122,6 +122,7 @@ def test_initial_reset_and_noop_share_one_observation_contract(native_reward):
         after.to_json(), sort_keys=True
     )
     assert after.info["milestones"] == []
+    assert after.available_actions == [0] and "available_actions" not in after.info
     assert env.last_reward == after.reward == 0.0
     assert native.info["milestones"] == ["stale native event"]  # do not mutate native metadata
 

@@ -55,7 +55,7 @@ class LeakyNative(HiddenNative):
 
 RENDER = (
     'def render(s): return {"frame":[s.n//2]*30, "reward":float(s.n>=20),"is_done":s.n>=20,'
-    '"available_actions":[1],"info":{"available_actions":[1],"milestones":[]}}\n'
+    '"available_actions":[1],"info":{"milestones":[]}}\n'
 )
 
 

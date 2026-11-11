@@ -79,7 +79,7 @@ def model(root, bad=False):
     (d / "model_render.py").write_text(
         'def render(s): return {"frame":[s.n]*30, "reward":float(s.n>=6),'
         '"is_done":s.n>=6,"available_actions":[1],"i'
-        'nfo":{"available_actions":[1],"milestones":[]}}\n'
+        'nfo":{"milestones":[]}}\n'
     )
     (d / "model_transition.py").write_text(
         "from world_model.model_state import State\ndef step(s,a): return State(s.n+"

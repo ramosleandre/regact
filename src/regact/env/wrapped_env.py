@@ -152,9 +152,11 @@ class WrappedEnv:
         obs = self._renderer.render(native_obs, info)
         # Use one numeric reward representation and the same metadata shape on
         # initial observations, resets and steps. Milestones are per-step events;
-        # step() fills this fresh list after the detector runs.
+        # step() fills this fresh list after the detector runs. The renderer already
+        # moved available_actions to its own field.
         obs.reward = 0.0 if reward is None else float(reward)
-        obs.info = {**obs.info, "milestones": []}
+        info = {k: v for k, v in obs.info.items() if k != "available_actions"}
+        obs.info = {**info, "milestones": []}
         obs.is_done = done
         self.last_reward = obs.reward
         return obs
