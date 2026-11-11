@@ -1,8 +1,8 @@
 """Common agent brief; protocols extend only the workspace and workflow.
 
-Role, terminal dialect, game instructions, dataset access, image previews and
-execution rules have one source. Protocols supply their generated files and
-workflow steps, rather than copying and progressively diverging system prompts.
+Role, terminal dialect, environment, dataset access, image previews and execution rules have
+one source. The environment section is the same for every game: a problem contributes only
+its action format line. Protocols and switches add their own files and workflow steps.
 """
 
 from collections.abc import Iterable, Mapping
@@ -42,9 +42,7 @@ def _render(name: str, **values: Any) -> str:
 
 
 def workspace_tree(
-    files: Iterable[TemplateFile],
-    helper_paths: set[str],
-    descriptions: Mapping[str, str] | None = None,
+    files: Iterable[TemplateFile], descriptions: Mapping[str, str] | None = None
 ) -> str:
     """List actual generated files, with protocol-supplied descriptions as additions."""
     known = {**_DESCRIPTIONS, **(descriptions or {})}
@@ -52,11 +50,7 @@ def workspace_tree(
     for file in files:
         entries[file.relpath] = known.get(
             file.relpath,
-            "game action/observation helpers"
-            if file.relpath in helper_paths
-            else "empty"
-            if file.relpath.endswith("/__init__.py")
-            else "provided workspace file",
+            "empty" if file.relpath.endswith("/__init__.py") else "provided workspace file",
         )
     rows = []
     parent = None
@@ -70,7 +64,16 @@ def workspace_tree(
     return "\n".join(rows)
 
 
-def image_preview_instructions(count: int, *, can_view_images: bool = True) -> str:
+def image_preview_instructions(options: Any, *, can_view_images: bool = True) -> str:
+    if not options.exp_buffer:
+        return (
+            "After every command, the current observation is also saved as "
+            "`tmp/images/final.png`; open it with your image-reading tool. The file is "
+            "overwritten at every command."
+            if can_view_images
+            else ""
+        )
+    count = options.n_tmp_images_saved_per_exploration
     if not can_view_images:
         return (
             "Your tools cannot display images: read observations as arrays through "
@@ -91,6 +94,17 @@ def image_preview_instructions(count: int, *, can_view_images: bool = True) -> s
     )
 
 
+def printing_instructions(problem: BaseProblem) -> str:
+    """How a result prints the observation without the experience buffer (observation_text)."""
+    if problem.frame_cells == "hex":
+        return (
+            "The observation's grid is printed first, one row per line and one hex digit per "
+            "cell (`a` = 10 ... `f` = 15), then the observation as JSON, where a placeholder "
+            "marks the grid's place in `frame`; your controller receives it as integers."
+        )
+    return "The observation is printed as JSON, one line per grid row."
+
+
 def build_prompt(
     problem: BaseProblem,
     task_name: str,
@@ -105,55 +119,76 @@ def build_prompt(
     descriptions: Mapping[str, str] | None = None,
     commands: Mapping[str, str] | None = None,
     workspace_extensions: str = "",
-    workflow_steps: str | None = None,
     workflow_intro: str = "",
+    phase_steps: str = "",
     initial_guidance: str = "",
+    uses_model: bool = False,
 ) -> str:
-    """Assemble the managed baseline, with optional protocol-specific additions.
+    """Assemble the managed brief: one Role and Environment section for every game and
+    protocol, with each switch adding only its own lines.
 
     Files must be the same templates used to initialize this task's workdir.
-    Problem helpers and the game section use identical calls for every protocol.
     """
-    helpers = problem.helper_templates(
-        task_name,
-        info_mode=config.problem.info_mode,
-        direct_interaction=False,
-    )
-    tree = workspace_tree([*files, *helpers], {f.relpath for f in helpers}, descriptions)
+    buffer = options.exp_buffer
     workspace = _render(
         "workspace.md",
-        WORKSPACE_TREE=tree,
+        WORKSPACE_TREE=workspace_tree(files, descriptions),
         WORKSPACE_EXTENSIONS=workspace_extensions.strip() + " " if workspace_extensions else "",
-        IMAGE_PREVIEWS=image_preview_instructions(
-            options.n_tmp_images_saved_per_exploration,
-            can_view_images=config.agent.vision,
-        ),
+        IMAGE_PREVIEWS=image_preview_instructions(options, can_view_images=config.agent.vision),
+    )
+    steps = []
+    if buffer:
+        steps.append(
+            _render(
+                "recorded_experience.md",
+                INITIAL_DATASET=(
+                    "At the start the dataset holds only the first observation."
+                    if options.n_unique_observations_in_initial_collection <= 1
+                    else "A random policy already filled the dataset, targeting "
+                    f"{options.n_unique_observations_in_initial_collection} unique observations "
+                    "(possibly fewer if a collection limit was reached)."
+                ),
+                INITIAL_GUIDANCE=" " + initial_guidance if initial_guidance else "",
+            )
+        )
+    if phase_steps:
+        steps.append(phase_steps.strip())
+    steps.append(
+        _render(
+            "write_controller.md",
+            INPUT="state" if uses_model else "obs",
+            INPUT_DESCRIPTION=(
+                "Both receive the State of your accepted CWM: built by `get_initial_state`, then "
+                "advanced by `step` after each action."
+                if uses_model
+                else "Both receive the current observation dictionary."
+            ),
+        )
+    )
+    if not uses_model:
+        steps.append(_render("run_controller.md"))
+    steps.append(
+        _render(
+            "returns_buffer.md",
+            COUNTEREXAMPLE="the counterexample when the CWM was contradicted, " if uses_model else "",
+        )
+        if buffer
+        else _render("returns_no_buffer.md", PRINTING=printing_instructions(problem))
     )
     workflow = _render(
         "workflow.md",
         PROTOCOL_INTRO=workflow_intro.strip() + "\n\n" if workflow_intro else "",
-        INITIAL_DATASET=(
-            "The dataset holds only the game's first observation: no action has been played yet."
-            if options.n_unique_observations_in_initial_collection <= 1
-            else "A random policy already prepared the dataset, targeting "
-            f"{options.n_unique_observations_in_initial_collection} unique observations "
-            "(possibly fewer if a collection limit was reached)."
-        ),
-        INITIAL_GUIDANCE=initial_guidance,
-        PROTOCOL_STEPS=(workflow_steps if workflow_steps is not None else _render("vanilla_steps.md")).strip(),
-        LIFECYCLE=lifecycle_instructions(config, problem),
+        PROTOCOL_STEPS="\n".join(steps),
+        LIFECYCLE=lifecycle_instructions(config),
         OBJECTIVE_NOTE=" " + config.objective_note if config.objective_note else "",
+        CALLBACKS="Controllers and the CWM" if uses_model else "Controllers",
+        INACCESSIBLE="the dataset, " if buffer else "",
     )
     return PromptBuilder().assemble_system_prompt(
         [
             _render("role.md"),
             workspace,
-            problem.build_prompt(
-                task_name,
-                direct_interaction=False,
-                info_mode=config.problem.info_mode,
-                obs_mode=config.problem.obs_mode,
-            ),
+            _render("environment.md", ACTION_FORMAT=problem.action_format()),
             workflow,
         ],
         tool_protocol=tool_protocol,
@@ -173,16 +208,12 @@ def reset_commands(config, problem):
     return {}
 
 
-def lifecycle_instructions(config, problem):
+def lifecycle_instructions(config):
     if config.problem.lifecycle is Lifecycle.SINGLE_INSTANCE:
-        start = "RunController continues from the current live observation."
+        start = (
+            "RunController continues from the current observation: there is one environment for "
+            "the whole task, and the action count carries across calls."
+        )
     else:
-        start = "Each RunController starts a fresh environment from the initial state."
-    resets = "".join(
-        f" You can {description[0].lower()}{description[1:].rstrip('.')} with the {name} command."
-        for name, description in reset_commands(config, problem).items()
-    )
-    return (
-        start + " Every call creates a fresh controller; its private memory is not carried over. "
-        "An environment reporting is_done=True stops this controller call." + resets
-    )
+        start = "Each RunController starts a fresh environment from the initial observation."
+    return start + " Every call creates a fresh controller; its private memory is not carried over."

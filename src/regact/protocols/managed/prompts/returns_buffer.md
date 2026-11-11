@@ -1,0 +1,1 @@
+- **What a call returns.** JSON feedback: why the call stopped, how many actions it played, the ids of the observations and transitions it recorded, metrics, the milestones reached, saved image paths, __COUNTEREXAMPLE__and the error if there was one. Load the observations and transitions it names with `data_api`. What your controller prints is discarded.

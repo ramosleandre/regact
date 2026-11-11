@@ -1,0 +1,1 @@
+- **Write a controller.** Edit `controller.py`. Describe the experiment's goal in its module docstring and define `get_controller()` returning an object with `act(__INPUT__) -> action` and, optionally, `is_done(__INPUT__) -> bool`, which returns True to stop before the next action. __INPUT_DESCRIPTION__

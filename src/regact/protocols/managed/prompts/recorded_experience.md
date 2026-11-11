@@ -1,0 +1,1 @@
+- **Recorded experience.** Every real observation and transition is recorded in a dataset accessible through `framework.data_api`; `framework/data_api.py` documents it, with examples. `data_api.summary()` gives the current position. __INITIAL_DATASET____INITIAL_GUIDANCE__

@@ -236,6 +236,12 @@ class GridGameProblem(BaseProblem):
     def reset_commands(self) -> dict[str, str]:
         return {}  # RESET is a game action
 
+    def action_format(self) -> str:
+        return (
+            "An action is an integer from `available_actions`. "
+            "Action 0 restarts the current level and is not counted."
+        )
+
     def counts_as_action(self, action: Any) -> bool:
         return action != RESET  # as ARC's scorecard: RESET is never scored
 

@@ -120,6 +120,7 @@ class ExperimentProtocol(ABC):
 
     name: str
     exposes_environment: bool = True
+    problem_helpers: bool = True  # write the problem's helper files (game constants) to the workdir
     resumable: bool = False  # can continue an interrupted task (config.resume)
     command_script: str = "framework/control.py"
 

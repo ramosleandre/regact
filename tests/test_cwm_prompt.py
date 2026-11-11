@@ -38,7 +38,6 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         environments_dir=str(Path(__file__).resolve().parents[1] / "environnement")
     )
     protocol = CwmProtocol(cfg)
-    helper_files = problem.helper_templates("ls20", direct_interaction=False)
     Workspace(str(tmp_path)).bootstrap(
         [],
         templates=protocol.templates,
@@ -49,7 +48,7 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         env_base_url="http://unused",
         game_id="ls20",
         lifecycle=cfg.problem.lifecycle,
-        helper_templates=helper_files,
+        helper_templates=[],
     )
     prompt = protocol.build_system_prompt(
         problem,
@@ -73,8 +72,8 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         "framework/control.py",
     ):
         assert absent not in text
-    assert 'obs["frame"]' in prompt
-    assert (tmp_path / "framework/arc_agi_helper.py").is_file()
+    assert "`frame`" in prompt and "ARC" not in prompt
+    assert not (tmp_path / "framework/arc_agi_helper.py").exists()
     assert (tmp_path / "framework/commands.py").is_file()
     assert (tmp_path / "controller.py").is_file()
     assert not (tmp_path / "framework/control.py").exists()

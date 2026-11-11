@@ -78,7 +78,7 @@ def test_managed_workspace_and_prompt_use_renamed_files(tmp_path, protocol_name,
         assert not (tmp_path / name).exists()
         assert name not in prompt
     assert "python framework/commands.py RunController" in prompt
-    assert "holds only the game's first observation" in prompt
+    assert "holds only the first observation" in prompt
 
 
 def test_prompt_describes_a_random_initial_collection():
@@ -90,7 +90,7 @@ def test_prompt_describes_a_random_initial_collection():
     prompt = build_protocol(config).build_system_prompt(
         Problem(), "counter", tool_protocol="client_cli", tool_names=[], verbalize_variant="off"
     )
-    assert "random policy already prepared the dataset, targeting 20 unique observations" in prompt
+    assert "random policy already filled the dataset, targeting 20 unique observations" in prompt
 
 
 @pytest.fixture

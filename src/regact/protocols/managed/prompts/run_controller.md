@@ -1,0 +1,1 @@
+- **Run it.** Call `python framework/commands.py RunController` to execute your controller in the real environment.

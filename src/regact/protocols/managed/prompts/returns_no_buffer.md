@@ -1,0 +1,1 @@
+- **What a call returns.** A summary line (why the call stopped, how many actions it played, the milestones reached, and the error if there was one), then the final observation. Only the final observation is shown, and what your controller prints is discarded. __PRINTING__

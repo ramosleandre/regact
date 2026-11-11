@@ -63,15 +63,15 @@ def _validated_click_data(data: Any) -> dict[str, Any]:
     arcengine's game code; here the agent gets an actionable message and can self-correct."""
     if not isinstance(data, dict) or "x" not in data or "y" not in data:
         raise ValueError(
-            "ACTION6 (click) requires data={'x': int, 'y': int} with 0<=x,y<=63; "
-            f"got data={data!r}. Use complex_action(x, y) from framework/arc_agi_helper.py."
+            'action 6 (the click) requires "data": {"x": <column 0-63>, "y": <row 0-63>}; '
+            f"got data={data!r}"
         )
     try:
         x, y = int(data["x"]), int(data["y"])
     except (TypeError, ValueError):
-        raise ValueError(f"ACTION6 (click) x,y must be integers 0-63; got data={data!r}.") from None
+        raise ValueError(f"action 6 (the click): x and y must be integers 0-63; got data={data!r}") from None
     if not (0 <= x <= 63 and 0 <= y <= 63):
-        raise ValueError(f"ACTION6 (click) x,y must be within 0-63; got x={x}, y={y}.")
+        raise ValueError(f"action 6 (the click): x and y must be within 0-63; got x={x}, y={y}")
     return {**data, "x": x, "y": y}
 
 
@@ -437,6 +437,14 @@ class ArcAgiProblem(BaseProblem):
 
     def reset_commands(self) -> dict[str, str]:
         return {}  # RESET is a game action
+
+    def action_format(self) -> str:
+        return (
+            "An action is an integer from `available_actions`, except the click (action 6), which "
+            'also takes a cell: `{"action": 6, "data": {"x": <column 0-63>, "y": <row 0-63>}}`. '
+            "Action 0 restarts the current level and is not counted; played before any other "
+            "action in a level, it restarts the whole game."
+        )
 
     def counts_as_action(self, action: Any) -> bool:
         # The competition's scorecard counts actions 1-7, not RESET.

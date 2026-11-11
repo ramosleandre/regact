@@ -1,1 +1,1 @@
-To solve the game, build a Code World Model (CWM): Python code that represents the game's state, reconstructs observations and predicts the effects of actions. Improve it as you explore and make progress.
+This harness makes you build a Code World Model (CWM): Python code that represents the environment's state, reconstructs observations and predicts the effects of actions. You work in two phases, and the framework enforces which commands each phase allows.

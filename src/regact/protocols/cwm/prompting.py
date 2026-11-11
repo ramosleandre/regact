@@ -22,16 +22,16 @@ _DOCS = {
 }
 _DESCRIPTIONS = {
     "docs/modeling_phase.md": "how to implement, validate and repair the CWM",
-    "docs/acting_phase.md": "how to actively interact with the environment",
+    "docs/acting_phase.md": "how to act in the environment with an accepted CWM",
     "docs/plan_in_CWM.md": "(optional) how to use the CWM-dependent planner tool",
-    "framework/cwm_env.py": "EnvCWM and its recorded-start initialization (helper file)",
+    "framework/cwm_env.py": "EnvCWM, to run your CWM like an environment",
     "goal.py": "the file to write goals before using the PlanInCWM command",
     "world_model/model_initial_state.py": (
         'define your "get_initial_state: observation (dictionary) -> State"'
     ),
-    "world_model/model_render.py": 'define your "render: state -> observation (dictionary)"',
+    "world_model/model_render.py": 'define your "render: State -> observation (dictionary)"',
     "world_model/model_state.py": 'define your class "State"',
-    "world_model/model_transition.py": 'define your "step: state, action -> state"',
+    "world_model/model_transition.py": 'define your "step: State, action -> State"',
 }
 _LOCAL_HELPERS = """
 ## Local simulation helpers
@@ -154,9 +154,10 @@ def build_prompt(
         descriptions=_DESCRIPTIONS,
         commands={**enabled_commands(options), **reset_commands(config, problem)},
         workspace_extensions=workspace_notes,
-        workflow_steps=_render("workflow.md", options),
+        phase_steps=_render("workflow.md", options),
         workflow_intro=_render("intro.md", options),
         initial_guidance="You begin in the **Modeling Phase**.",
+        uses_model=True,
         tool_protocol=tool_protocol,
         tool_names=tool_names,
         verbalize_variant=verbalize_variant,

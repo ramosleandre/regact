@@ -79,33 +79,32 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
         else:
             assert "Automatic image previews are disabled" in prompt
             assert "tmp/images/" not in prompt
-        assert ("continues from the current live observation" in prompt) == (
+        assert ("continues from the current observation" in prompt) == (
             lifecycle is Lifecycle.SINGLE_INSTANCE
         )
         assert "Every call creates a fresh controller; its private memory is not carried over." in prompt
-        assert "An environment reporting is_done=True stops this controller call." in prompt
-        if lifecycle is Lifecycle.MULTI_INSTANCE:
-            assert "ResetLevel" not in prompt and "ResetEnvironment" not in prompt
-        elif game == "arc":
-            assert "ResetLevel" not in prompt and "ResetEnvironment" not in prompt
-            assert "RESET (action 0) is always allowed" in prompt
-        else:
-            assert "ResetLevel" not in prompt
-            assert "You can reset the whole environment from its initial state with the ResetEnvironment command." in prompt
+        assert ("Action 0 restarts the current level" in prompt) == (game == "arc")
+        assert '"data": {"x": <column 0-63>, "y": <row 0-63>}' in prompt or game != "arc"
+        assert "ResetLevel" not in prompt
+        assert ("ResetEnvironment" in prompt) == (
+            game == "minigrid" and lifecycle is Lifecycle.SINGLE_INSTANCE
+        )
+        for name_of_game in ("ARC", "MiniGrid", "ls20", "Empty-5x5"):
+            assert name_of_game not in prompt
     vanilla, cwm = (sections(prompts[name]) for name in ("vanilla", "cwm"))
     assert vanilla.keys() == cwm.keys()
     assert list(vanilla)[0] == "Role"
     headings = list(vanilla)
-    game_heading = next(name for name in headings if name.startswith("Game:"))
-    assert headings.index("Working directory") < headings.index(game_heading)
-    assert headings.index(game_heading) < headings.index("Workflow")
+    assert headings.index("Working directory") < headings.index("Environment")
+    assert headings.index("Environment") < headings.index("Workflow")
     differences = {name for name in vanilla if vanilla[name] != cwm[name]}
     assert differences == {
         "Working directory",
         "Workflow",
         "Framework tools" if dialect == "native" else "Framework commands",
     }
-    assert "act(obs)" in vanilla["Workflow"]
+    assert "act(obs) -> action" in vanilla["Workflow"]
+    assert "act(state) -> action" in cwm["Workflow"]
     for absent in ("CWM", "world_model/", "simulate.py", "UpdateCodeWorldModel", "PlanInCWM"):
         assert absent not in prompts["vanilla"]
     files = list(

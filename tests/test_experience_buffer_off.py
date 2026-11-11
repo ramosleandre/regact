@@ -155,3 +155,36 @@ def test_is_done_is_optional(make_rig):
     result = c.tool("RunController", {})
     assert result["stop_reason"] == "environment_done"
     assert result["real_actions"] == 6
+
+
+@pytest.mark.parametrize("vision", [False, True])
+def test_the_prompt_without_the_buffer_describes_the_printed_result(tmp_path, vision):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from regact.orchestration.task import _bootstrap_workdir
+    from regact.problems.arc_agi.problem import ArcAgiProblem
+
+    problem = ArcAgiProblem(
+        environments_dir=str(Path(__file__).resolve().parents[1] / "environnement")
+    )
+    config = _config("vanilla", exp_buffer=False)
+    config.agent.vision = vision
+    protocol = build_protocol(config)
+    _bootstrap_workdir(
+        config,
+        problem,
+        "ls20",
+        workdir=str(tmp_path),
+        conn=SimpleNamespace(base_url="http://unused"),
+        protocol=protocol,
+    )
+    assert not (tmp_path / "framework" / "data_api.py").exists()
+    assert not (tmp_path / "framework" / "arc_agi_helper.py").exists()
+    prompt = protocol.build_system_prompt(
+        problem, "ls20", tool_protocol="client_cli", tool_names=["RunController"], verbalize_variant="off"
+    )
+    assert "data_api" not in prompt and "the dataset" not in prompt
+    assert "one hex digit per cell" in prompt and "a placeholder marks the grid's place" in prompt
+    assert ("tmp/images/final.png" in prompt) == vision
+    assert "image" not in prompt.lower() or vision

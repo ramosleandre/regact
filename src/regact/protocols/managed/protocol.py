@@ -17,6 +17,7 @@ class ManagedProtocol(ExperimentProtocol):
     """Common environment binding, worker requirements and tool lifetime."""
 
     exposes_environment = False
+    problem_helpers = False  # the prompt's action format line replaces them
     resumable = True
     command_script = "framework/commands.py"
     coordinator_type = ManagedCoordinator

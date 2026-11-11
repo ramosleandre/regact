@@ -103,7 +103,7 @@ class _ActionInfoShim:
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
         if isinstance(action, bool) or not self._env.action_space.contains(action):
             raise InvalidActionError(
-                f"expected a MiniGrid action in 0..{self._env.action_space.n - 1}; got {action!r}"
+                f"expected an action in 0..{self._env.action_space.n - 1}; got {action!r}"
             )
         obs, reward, terminated, truncated, info = self._env.step(action)
         return self._frame(obs), round(float(reward), 6), terminated, truncated, self._augment(info)

@@ -52,6 +52,10 @@ class BaseProblem(ABC):
         """Explicit reset capabilities for externally managed controller protocols."""
         return {"ResetEnvironment": "Reset the whole environment from its initial state."}
 
+    def action_format(self) -> str:
+        """The game-agnostic prompt line saying how to write an action."""
+        return "An action is an integer from `available_actions`."
+
     def validate_controller_action(self, action: Any) -> None:
         """Reject protocol-control actions that require an explicit command instead."""
 

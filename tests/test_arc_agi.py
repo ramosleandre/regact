@@ -117,7 +117,7 @@ def test_validated_click_data_guards_action6() -> None:
         {"x": -1, "y": 1},
         {"x": "a", "y": 1},
     ):
-        with pytest.raises(ValueError, match="ACTION6"):
+        with pytest.raises(ValueError, match="action 6 \\(the click\\)"):
             _validated_click_data(bad)
 
 
