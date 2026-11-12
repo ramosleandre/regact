@@ -804,3 +804,14 @@ def test_agent_environ_drops_variables_that_name_the_task(monkeypatch) -> None:
     env = runtime.agent_environ()
     assert env["UNRELATED"] == "kept" and "PATH" in env
     assert not {"ARGS", "SLURM_JOB_NAME", "LAUNCH_NOTE"} & set(env)
+
+
+def test_agent_environ_keeps_essential_variables_holding_a_hidden_word(monkeypatch):
+    from regact.security import runtime
+
+    monkeypatch.setattr(runtime, "_hidden_words", set())
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("NOTE", "/usr/local/share")
+    runtime.hide_from_agents("local")
+    env = runtime.agent_environ()
+    assert env["PATH"] == "/usr/local/bin:/usr/bin" and "NOTE" not in env

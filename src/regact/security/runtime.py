@@ -60,7 +60,14 @@ class SandboxRuntime(StrEnum):
 
 
 # Variables that describe the launch (its command line, the batch job): they can name the task.
-_LAUNCH_NAME = re.compile(r"^(ARGS|MAKEFLAGS|MAKEOVERRIDES|MFLAGS|_)$|^(SLURM|SBATCH|SALLOC|HYDRA)_")
+_LAUNCH_NAME = re.compile(
+    r"^(ARGS|MAKEFLAGS|MAKEOVERRIDES|MFLAGS|_)$|^(SLURM|SBATCH|SALLOC|HYDRA)_"
+)
+# Variables a process cannot run without: never dropped for containing a hidden word (an experiment
+# named "local" is in "/usr/local/bin").
+_ESSENTIAL_NAME = re.compile(
+    r"^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TZ|TMPDIR|LD_LIBRARY_PATH)$|^LC_"
+)
 _hidden_words: set[str] = set()
 
 
@@ -81,7 +88,10 @@ def agent_environ(keep: Sequence[str] = ()) -> dict[str, str]:
         or not (
             _SECRET_NAME.search(name)
             or _LAUNCH_NAME.search(name)
-            or any(word in value.lower() for word in _hidden_words)
+            or (
+                not _ESSENTIAL_NAME.search(name)
+                and any(word in value.lower() for word in _hidden_words)
+            )
         )
     }
 
