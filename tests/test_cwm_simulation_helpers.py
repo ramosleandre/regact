@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from regact.features.base import FeatureContext
+from regact.protocols.cwm.bundle import write_plan
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.ids import expand_id_ranges, format_id_ranges
 from regact.protocols.cwm.images import clear_images, save_preview, select_preview_ids
@@ -119,6 +120,17 @@ def test_preview_cleanup_cannot_follow_agent_symlinks(tmp_path):
     with pytest.raises(OSError):
         save_preview(work, 1, b"wrong")
     assert protected.read_text() == "keep"
+
+
+def test_a_workdir_that_is_itself_a_symlink_takes_images_and_plans(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    work = tmp_path / "work"
+    work.symlink_to(real, target_is_directory=True)  # how neutral_workdir leaves it during a task
+    save_preview(work, 1, b"png")
+    write_plan(work, "plans/plan_001.py", "ACTIONS = []\n")
+    assert (real / "tmp/images/obs_id_1.png").read_bytes() == b"png"
+    assert (real / "plans/plan_001.py").exists()
 
 
 async def submit(c):

@@ -26,7 +26,7 @@ def workspace_file(root: Path, rel: str, *, create: bool = False) -> int:
     parts = Path(rel).parts
     if not parts or Path(rel).is_absolute() or any(p in ("..", ".") for p in parts):
         raise ValueError("invalid workspace-relative path")
-    parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent = os.open(os.path.realpath(root), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for part in parts[:-1]:
             if create:

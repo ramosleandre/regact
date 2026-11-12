@@ -19,7 +19,8 @@ def _directory(parent: int, name: str) -> int:
 
 @contextmanager
 def image_directory(workdir: Path) -> Iterator[int]:
-    root = os.open(workdir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    # The workdir itself may be a symlink (see neutral_workdir); nothing the agent controls.
+    root = os.open(os.path.realpath(workdir), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         tmp = _directory(root, "tmp")
         try:
