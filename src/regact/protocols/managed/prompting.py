@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from regact.agent.capabilities import ToolProtocol
+from regact.agent.capabilities import ToolProtocol, uses_control_cli
 from regact.config.schema import Lifecycle, RunConfig
 from regact.problems.base import BaseProblem
 from regact.prompt.builder import PromptBuilder
@@ -166,7 +166,14 @@ def build_prompt(
         )
     )
     if not uses_model:
-        steps.append(_render("run_controller.md"))
+        steps.append(
+            _render(
+                "run_controller.md",
+                RUN_CONTROLLER="`python framework/commands.py RunController`"
+                if uses_control_cli(tool_protocol)
+                else "the `RunController` tool",
+            )
+        )
     steps.append(
         _render(
             "returns_buffer.md",

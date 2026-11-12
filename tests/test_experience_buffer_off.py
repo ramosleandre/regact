@@ -3,6 +3,7 @@ observation; the controller's error and invalid action are bounded in every conf
 
 import json
 
+import numpy
 import pytest
 
 from regact.config.schema import AgentConfig, AgentName, ProblemConfig, ProtocolConfig, RunConfig
@@ -10,7 +11,7 @@ from regact.protocols.managed.observation_text import observation_text
 from regact.protocols.managed.session import ManagedSession, ManagedTool
 from regact.protocols.registry import build_protocol
 from regact.tools.base import ToolContext
-from test_cwm_protocol import exploration
+from test_cwm_protocol import Problem, exploration
 from test_managed_protocol import make_rig  # noqa: F401  (fixture)
 
 OBS = {"reward": 0.0, "is_done": False, "available_actions": [1, 2], "info": {"milestones": []}}
@@ -114,6 +115,44 @@ async def test_without_the_buffer_a_call_prints_a_summary_and_the_observation(ma
     assert first == "ResetEnvironment: the environment restarted from its initial state"
     assert json.loads(rest)["frame"] == [0] * 30
     assert "The current observation" in session.resume_notice()
+
+
+class PictureProblem(Problem):
+    def render_frame(self, obs):
+        return numpy.zeros((2, 2, 3), dtype=numpy.uint8)
+
+
+@pytest.mark.integration
+def test_the_current_image_exists_before_the_first_command(make_rig):
+    c = make_rig(exp_buffer=False, target=1, vision=True, problem=PictureProblem())
+    assert (c.workdir / "tmp" / "images" / "final.png").stat().st_size > 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("exp_buffer", [True, False])
+def test_a_harness_without_phases_is_never_told_a_phase(make_rig, exp_buffer):
+    session = ManagedSession(coordinator=make_rig(exp_buffer=exp_buffer, target=1))
+    for text in (session.reminder(1), session.resume_notice()):
+        assert "phase" not in text.lower()
+        assert "`python framework/commands.py RunController`" in text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "tool_protocol, command",
+    [("client_cli", "`python framework/commands.py RunController`"), ("native", "the `RunController` tool")],
+)
+def test_the_prompt_and_reminders_name_the_command_as_the_agent_calls_it(
+    make_rig, tool_protocol, command
+):
+    c = make_rig(target=1)
+    protocol = build_protocol(c.config)
+    protocol.coordinator = c
+    prompt = protocol.build_system_prompt(
+        Problem(), "counter", tool_protocol=tool_protocol, tool_names=["RunController"], verbalize_variant="off"
+    )
+    assert f"Call {command} to execute" in prompt
+    assert command in ManagedSession(coordinator=c).reminder(1)
 
 
 @pytest.mark.integration

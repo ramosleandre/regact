@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from regact.agent.capabilities import ToolProtocol
+from regact.agent.capabilities import ToolProtocol, uses_control_cli
 from regact.features.base import FeatureContext
 from regact.problems.base import BaseProblem
 from regact.protocols.cwm.commands import enabled_commands
@@ -32,6 +32,8 @@ class CwmProtocol(ManagedProtocol):
         tool_names: list[str],
         verbalize_variant: str,
     ) -> str:
+        if self.coordinator is not None:
+            self.coordinator.commands_cli = uses_control_cli(tool_protocol)
         return build_prompt(
             problem,
             task_name,

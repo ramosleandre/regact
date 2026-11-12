@@ -3,6 +3,7 @@
 import math
 from dataclasses import asdict, dataclass, field
 
+from regact.agent.capabilities import uses_control_cli
 from regact.features.base import FeatureContext
 from regact.protocols.cwm.config import DataApiConfig, FeedbackConfig
 from regact.protocols.managed.prompting import build_prompt, reset_commands
@@ -25,7 +26,7 @@ class VanillaConfig:
     n_unique_observations_in_initial_collection: int = 1  # 1 = no random actions
     max_actions_per_initial_collection: int | None = 1000
     max_seconds_per_initial_collection: float | None = 30
-    max_actions_per_RunController: int | None = 2500
+    max_actions_per_RunController: int | None = 100
     n_tmp_images_saved_per_exploration: int = 0
     one_command_per_tool_call: bool = True
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
@@ -106,6 +107,8 @@ class VanillaProtocol(ManagedProtocol):
         self, problem, task_name, *, tool_protocol, tool_names, verbalize_variant
     ):
         ctx = FeatureContext(problem_name=problem.name, task_name=task_name, workdir="")
+        if self.coordinator is not None:
+            self.coordinator.commands_cli = uses_control_cli(tool_protocol)
         return build_prompt(
             problem,
             task_name,

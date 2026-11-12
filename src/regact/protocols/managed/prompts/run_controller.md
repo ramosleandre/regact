@@ -1,1 +1,1 @@
-- **Run it.** Call `python framework/commands.py RunController` to execute your controller in the real environment.
+- **Run it.** Call __RUN_CONTROLLER__ to execute your controller in the real environment.

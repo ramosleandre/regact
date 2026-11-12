@@ -103,6 +103,7 @@ def make_rig(tmp_path):
         problem=None,
         target=3,
         limits=None,
+        vision=False,
         **options,
     ):
         root = tmp_path / str(len(coordinators))
@@ -110,7 +111,7 @@ def make_rig(tmp_path):
         work.mkdir(parents=True)
         problem = problem or Problem()
         cfg = RunConfig(
-            AgentConfig(AgentName.SCRIPTED),
+            AgentConfig(AgentName.SCRIPTED, vision=vision),
             ProblemConfig("fake", seed=0, lifecycle=lifecycle),
             protocol=ProtocolConfig(
                 protocol,

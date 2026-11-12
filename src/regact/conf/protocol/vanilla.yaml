@@ -5,7 +5,7 @@ policy_programs: true  # false (the Act command) is not implemented yet
 n_unique_observations_in_initial_collection: 1  # 1 = start from the first observation, no random actions
 max_actions_per_initial_collection: 1000
 max_seconds_per_initial_collection: 30
-max_actions_per_RunController: 2500
+max_actions_per_RunController: 100
 n_tmp_images_saved_per_exploration: 0  # >0 needs agent.vision=true
 # A second command of the same name in one agent tool call is refused.
 one_command_per_tool_call: true

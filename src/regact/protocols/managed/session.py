@@ -80,6 +80,8 @@ class ManagedCoordinator:
     protocol_name = "vanilla"
     initial_phase = EXPLORATION
     uses_model = False
+    # False when the agent calls the commands as tools of its own (tool_protocol "native").
+    commands_cli = True
 
     def __init__(
         self,
@@ -151,16 +153,25 @@ class ManagedCoordinator:
                 LogComponent.ORCHESTRATOR, "INFO", kind, phase=str(self.phase), **payload
             )
 
+    def invocation(self, name: str) -> str:
+        return f"`python framework/commands.py {name}`" if self.commands_cli else f"the `{name}` tool"
+
     def phase_description(self, phase: str | None = None) -> str:
         phase = self.phase if phase is None else phase
         text = (
-            "Inspect the current dataset, build or repair world_model/, then validate it with UpdateCodeWorldModel."
+            f"Write or repair the CWM in `world_model/` and submit it with {self.invocation('UpdateCodeWorldModel')}."
             if phase == MODELING
-            else "Produce a controller in controller.py aiming to explore new and relevant states, then run it with RunController."
+            else f"Write a controller in `controller.py` and run it with {self.invocation('RunController')}."
         )
         if phase == EXPLORATION and "PlanInCWM" in self.commands:
-            text += " Optionally define a goal in goal.py and use PlanInCWM first."
+            text += f" Optionally, define a goal in `goal.py` and run {self.invocation('PlanInCWM')} first."
         return text
+
+    def next_step(self) -> str:
+        """What to do now, for reminders: only harnesses with phases name the phase."""
+        if not self.uses_model:
+            return self.phase_description()
+        return f"Current phase: {self.phase}. {self.phase_description()}"
 
     def change_phase(self, phase: str, reason: str, **evidence: Any) -> None:
         if phase == self.phase:
@@ -353,6 +364,7 @@ class ManagedCoordinator:
                 self.store.finish_episode(self.episode, "environment_done", self.initial_collection)
             self.event("dataset_prepared", **self.initial_collection)
             self.persist()
+            self._save_final_image()
 
     def _note_timing(self, phase: str, seconds: float) -> None:
         """Total and slowest duration per phase, so a call that overruns its deadline shows
@@ -1167,15 +1179,21 @@ class ManagedCoordinator:
         vision, saves its image); it is never stored with the result."""
         if self.options.exp_buffer:
             return response
-        obs = self.store.observation(self.current_id)
-        if self.config.agent.vision:
-            from regact.protocols.cwm.viewer import png
+        self._save_final_image()
+        return {**response, "observation": self.store.observation(self.current_id)}
 
-            try:
-                save_image_file(self.workdir, "final.png", png(self.problem, obs))
-            except (OSError, ValueError) as exc:
-                self.event("image_preview_error", error=str(exc)[:300])
-        return {**response, "observation": obs}
+    def _save_final_image(self) -> None:
+        """Without the buffer and with vision, ``tmp/images/final.png`` is the current observation,
+        from the task's start on."""
+        if self.options.exp_buffer or not self.config.agent.vision:
+            return
+        from regact.protocols.cwm.viewer import png
+
+        try:
+            obs = self.store.observation(self.current_id)
+            save_image_file(self.workdir, "final.png", png(self.problem, obs))
+        except (OSError, ValueError) as exc:
+            self.event("image_preview_error", error=str(exc)[:300])
 
     def note_grant(self, name: str, outcome: str, waited: float) -> None:
         with self.lock:
@@ -1357,8 +1375,7 @@ class ManagedSession(ProtocolSession):
         return self.coordinator.terminal
 
     def resume_notice(self) -> str:
-        phase = self.coordinator.phase
-        notice = f"Current phase: {phase}. {self.coordinator.phase_description(phase)}"
+        notice = self.coordinator.next_step()
         if self.coordinator.options.exp_buffer:
             return notice + " `data_api.summary()` gives the current position."
         current = self.coordinator.store.observation(self.coordinator.current_id)
@@ -1381,11 +1398,7 @@ class ManagedSession(ProtocolSession):
         self.coordinator.grants.call_finished(call_id)
 
     def reminder(self, reminders: int) -> str:
-        phase = self.coordinator.phase
-        return (
-            "Continue your work until the game is fully solved.\n"
-            f"Current phase: {phase}. {self.coordinator.phase_description(phase)}"
-        )
+        return "Continue your work until the game is fully solved.\n" + self.coordinator.next_step()
 
     def interaction_guidance(self) -> str:
         return ""
