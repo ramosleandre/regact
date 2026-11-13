@@ -128,6 +128,24 @@ def test_the_current_image_exists_before_the_first_command(make_rig):
     assert (c.workdir / "tmp" / "images" / "final.png").stat().st_size > 0
 
 
+class FramePictureProblem(Problem):
+    def render_frame(self, obs):
+        return numpy.full((2, 2, 3), obs.frame[0], dtype=numpy.uint8)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_the_current_image_follows_a_command_that_does_not_clear_the_images(make_rig):
+    c = make_rig(exp_buffer=False, target=1, vision=True, problem=FramePictureProblem())
+    final = c.workdir / "tmp" / "images" / "final.png"
+    initial = final.read_bytes()
+    exploration(c, (1, 1))
+    await ManagedTool("RunController", c).call({}, ToolContext(cwd=str(c.workdir)))
+    assert final.read_bytes() != initial
+    await ManagedTool("ResetEnvironment", c).call({}, ToolContext(cwd=str(c.workdir)))
+    assert final.read_bytes() == initial
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("exp_buffer", [True, False])
 def test_a_harness_without_phases_is_never_told_a_phase(make_rig, exp_buffer):

@@ -30,6 +30,7 @@ from regact.protocols.cwm.differences import describe, summarize
 from regact.protocols.cwm.ids import expand_id_ranges
 from regact.protocols.cwm.images import (
     clear_images,
+    remove_image_file,
     save_image_file,
     save_preview,
     select_preview_ids,
@@ -1191,6 +1192,8 @@ class ManagedCoordinator:
 
         try:
             obs = self.store.observation(self.current_id)
+            # Only RunController clears tmp/images; the image follows every command.
+            remove_image_file(self.workdir, "final.png")
             save_image_file(self.workdir, "final.png", png(self.problem, obs))
         except (OSError, ValueError) as exc:
             self.event("image_preview_error", error=str(exc)[:300])

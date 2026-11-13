@@ -53,6 +53,12 @@ def save_preview(workdir: Path, observation_id: int, png: bytes) -> None:
     save_image_file(workdir, f"obs_id_{observation_id}.png", png)
 
 
+def remove_image_file(workdir: Path, name: str) -> None:
+    """Unlink one image name (a planted link goes, never its target)."""
+    with image_directory(workdir) as folder, suppress(FileNotFoundError):
+        os.unlink(name, dir_fd=folder)
+
+
 def save_image_file(workdir: Path, name: str, png: bytes) -> None:
     with image_directory(workdir) as folder:
         fd = os.open(
