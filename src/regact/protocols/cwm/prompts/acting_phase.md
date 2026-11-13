@@ -1,7 +1,5 @@
 # Acting Phase
 
-**Goal:** explore new and relevant states, test uncertain game mechanisms and make progress toward solving the game. Choose a concrete experiment. Testing a predicted familiar outcome can expose an incorrect hypothesis.
-
 ## 1. Write `controller.py`
 
 Put a short, plain-text description of the experiment in the file's **module docstring** (the first triple-quoted string). Define `get_controller()` returning a new object with:

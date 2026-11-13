@@ -1,5 +1,7 @@
 """Data API and command transport shared by externally managed protocols."""
 
+import re
+
 from regact.env.server import AGENT_GAME_ID
 from regact.workspace.templates import TemplateFile
 
@@ -47,13 +49,12 @@ class ExplorationControllerFromListActions:
 '''
 DATA = '''"""Read recorded real experience. Reading never resets or steps the environment.
 
-Do not call this API inside submitted callbacks (controller.py, world_model/): they run without
-dataset access.
+Do not call this API inside submitted code (controller.py and what the framework runs with it):
+it runs without dataset access.
 
-- An observation is a dictionary: frame, reward, is_done, available_actions, info. It is exactly
-  what your controller and world model receive. Its values are plain Python lists and
-  dictionaries, not numpy (use np.array(...) to get an array); the game section of your
-  instructions describes frame.
+- An observation is a dictionary: frame, reward, is_done, available_actions, info, exactly as the
+  environment returns it. Its values are plain Python lists and dictionaries, not numpy (use
+  np.array(...) to get an array); the Environment section of your instructions describes them.
 - A transition is one recorded step: observation --action--> next_observation.
 - Each distinct observation and transition has a positive integer ID. A repeated step adds no new
   ID, so IDs are not a time order. For what happened in what order, use list_episodes() and
@@ -131,7 +132,7 @@ def _all(op: str) -> list[int]:
 def summary() -> dict[str, Any]:
     """The dataset summary, a dictionary with these keys:
 
-    phase; initial_observation_id; current_observation_id (the live environment);
+    __PHASE_KEY__initial_observation_id; current_observation_id (the live environment);
     controller_start_observation_id (where the next RunController starts);
     episode_id (the live episode); reset_actions;
     n_unique_observations, n_unique_transitions (number of IDs);
@@ -273,9 +274,55 @@ IMAGE_EXAMPLE = """
 Open observation.png with your image-reading tool. Saving a PNG prints its path and returns None; it does not display the image to you automatically. The function docstrings also cover transition and diagnostic images."""
 
 
+# Without a CWM nothing produces a diagnostic: its functions and options leave data_api.py.
+_DIAGNOSTIC_ONLY = (
+    (DATA[DATA.index("\n\ndef describe_diagnostic(") :], "\n"),
+    (
+        "docstrings also cover transition and diagnostic images",
+        "docstring also covers transition images",
+    ),
+    (
+        "transition_id=None, diagnostic_id=None, which=None",
+        "transition_id=None, which=None",
+    ),
+    (
+        '''      diagnostic_id: which="predicted", "observed" or "comparison" (both with the step's previous
+        observation and the differences); default "observed".
+''',
+        "",
+    ),
+    ('''      save_image("predicted.png", diagnostic_id=3, which="predicted")
+''', ""),
+    (
+        """Missing/ambiguous sources, invalid sides and
+    absent diagnostic observations raise ValueError. Not all diagnostics have
+    both sides. PNGs""",
+        """Missing/ambiguous sources and invalid sides
+    raise ValueError. PNGs""",
+    ),
+    (
+        "                   diagnostic_id=diagnostic_id, which=which)",
+        "                   which=which)",
+    ),
+    (
+        """    elif transition_id is not None:
+        source = f"transition {transition_id} ({which or 'after'})"
+    else:
+        source = f"diagnostic {diagnostic_id} ({which or 'observed'})"
+""",
+        """    else:
+        source = f"transition {transition_id} ({which or 'after'})"
+""",
+    ),
+)
+
+
 def templates(ctx, options, commands, *, vision):
     data = DATA.replace("__IMAGE_EXAMPLE__", IMAGE_EXAMPLE if vision else "")
     data += SAVE_IMAGE if vision else ""
+    if "UpdateCodeWorldModel" not in commands:
+        for old, new in _DIAGNOSTIC_ONLY:
+            data = data.replace(old, new)
     files = [("framework/commands.py", CONTROL)]
     if options.exp_buffer:
         files.append(("framework/data_api.py", data))
@@ -288,6 +335,12 @@ def templates(ctx, options, commands, *, vision):
                 "__COMMAND_HELP__", "\n".join(f"{name}: {text}" for name, text in commands.items())
             )
             .replace("__COMMAND_NAMES__", repr(tuple(commands)))
-            .replace("__BATCH__", repr(options.data_api.max_items)),
+            .replace("__BATCH__", repr(options.data_api.max_items))
+            .replace("__PHASE_KEY__", "phase; " if "UpdateCodeWorldModel" in commands else ""),
         )
-    yield TemplateFile("framework/action_list_controller.py", HELPER)
+    helper = HELPER
+    if "UpdateCodeWorldModel" not in commands:  # its controllers receive observations
+        helper = re.sub(r"\bstate\b", "obs", helper).replace(
+            "simulation and reality each use a fresh instance", "each call uses a fresh instance"
+        )
+    yield TemplateFile("framework/action_list_controller.py", helper)

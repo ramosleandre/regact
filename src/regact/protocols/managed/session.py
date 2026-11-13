@@ -577,7 +577,7 @@ class ManagedCoordinator:
                 )
             if op == "summary":
                 value = {
-                    "phase": self.phase,
+                    **({"phase": self.phase} if self.uses_model else {}),
                     "lifecycle": self.config.problem.lifecycle.value,
                     "initial_observation_id": self.initial_id,
                     "current_observation_id": self.current_id,

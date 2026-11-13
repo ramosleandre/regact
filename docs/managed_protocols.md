@@ -126,7 +126,7 @@ The generated `framework/data_api.py` contains full docstrings and examples. No 
 
 | Function | Returns / purpose |
 |---|---|
-| `summary()` | Current phase, observation/episode IDs, counts, reset count and recorded milestones |
+| `summary()` | Current phase (CWM only), observation/episode IDs, counts, reset count and recorded milestones |
 | `list_observation_ids()` | All unique observation IDs, ascending |
 | `list_transition_ids()` | All unique transition IDs, ascending |
 | `load_observations(ids)` | Complete observation dictionaries in the requested order; any number of IDs, one ID, or a range string `"[1:4, 8]"` |

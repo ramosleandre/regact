@@ -138,6 +138,30 @@ def test_a_harness_without_phases_is_never_told_a_phase(make_rig, exp_buffer):
 
 
 @pytest.mark.integration
+def test_the_dataset_summary_names_no_phase_without_a_cwm(make_rig):
+    c = make_rig(target=1)
+    assert "phase" not in c.data({"op": "summary"})
+    assert "phase" not in (c.workdir / "framework" / "data_api.py").read_text().lower()
+
+
+@pytest.mark.integration
+def test_without_a_cwm_data_api_has_no_diagnostics(tmp_path):
+    from regact.features.base import FeatureContext
+    from regact.protocols.managed.templates import templates
+
+    options = build_protocol(_config("vanilla")).options
+    ctx = FeatureContext(problem_name="fake", task_name="t", workdir=str(tmp_path))
+    files = {f.relpath: f.content for f in templates(ctx, options, {"RunController": ""}, vision=True)}
+    data = files["framework/data_api.py"]
+    compile(data, "data_api.py", "exec")
+    assert "diagnostic" not in data.lower() and "State" not in data
+    assert "def save_image(path, *, observation_id=None, transition_id=None, which=None):" in data
+    helper = files["framework/action_list_controller.py"]
+    compile(helper, "action_list_controller.py", "exec")
+    assert "state" not in helper.lower() and "simulation" not in helper and "def act(self, obs):" in helper
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "tool_protocol, command",
     [("client_cli", "`python framework/commands.py RunController`"), ("native", "the `RunController` tool")],
