@@ -197,13 +197,32 @@ def _hidden_bwrap_args(cmd: Argv) -> Argv:
     return ["/bin/sh", "-c", script, "sh", path, *cmd[split:]]
 
 
+def renames_into(root: str, directory: str) -> bool:
+    """Whether a directory under ``root`` can be renamed into ``directory``. Tried, not inferred
+    from ``st_dev``: two bind mounts of one filesystem share it yet refuse a rename between them
+    (Grid'5000 workers mount ``experiments/`` and ``~/.regact`` separately)."""
+    try:
+        os.makedirs(root, exist_ok=True)
+        probe = tempfile.mkdtemp(prefix=".probe-", dir=root)
+    except OSError:
+        return False
+    target = os.path.join(directory, os.path.basename(probe))
+    try:
+        os.rename(probe, target)
+    except OSError:
+        os.rmdir(probe)
+        return False
+    os.rmdir(target)
+    return True
+
+
 @contextlib.contextmanager
 def neutral_workdir(workdir: str, root: str | None) -> Iterator[None]:
     """Keep the workdir's files under ``root`` at a random name while the task runs, ``workdir``
     being a symlink to them, and move them back after. bwrap mounts the resolved path, and the
     agent can read a mount's source in ``/proc/self/mountinfo``: the task's own path names the
-    experiment, the model and the task. ``root`` must be on the workdir's filesystem (a rename);
-    ``None`` leaves the workdir in place."""
+    experiment, the model and the task. ``root`` should allow a rename into the task's folder
+    (``renames_into``); the files are copied otherwise. ``None`` leaves the workdir in place."""
     if root is None:
         yield
         return
@@ -215,7 +234,7 @@ def neutral_workdir(workdir: str, root: str | None) -> Iterator[None]:
         os.makedirs(root, exist_ok=True)
         real = os.path.join(root, uuid.uuid4().hex)
         if os.path.isdir(workdir):
-            os.rename(workdir, real)
+            shutil.move(workdir, real)
         else:
             os.makedirs(os.path.dirname(workdir), exist_ok=True)
             os.mkdir(real)
@@ -224,7 +243,7 @@ def neutral_workdir(workdir: str, root: str | None) -> Iterator[None]:
         yield
     finally:
         os.unlink(workdir)
-        os.rename(real, workdir)
+        shutil.move(real, workdir)
 
 
 def wrap_argv(

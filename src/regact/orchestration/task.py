@@ -59,6 +59,7 @@ from regact.security.runtime import (
     hide_from_agents,
     make_wrapper,
     neutral_workdir,
+    renames_into,
     resolve,
 )
 from regact.session.state import ExperimentState
@@ -194,16 +195,13 @@ def _requested_runtime(config: RunConfig) -> SandboxRuntime:
 
 def _neutral_workdir_root(config: RunConfig, output_dir: str) -> str | None:
     """Where the workdir's files live while the task runs under bwrap (see neutral_workdir): the
-    first of ``~/.regact/workdirs`` and ``<output_root>/.workdirs`` on the task's filesystem."""
-    device = os.stat(output_dir).st_dev
+    first of ``~/.regact/workdirs`` and ``<output_root>/.workdirs`` that renames into the task's
+    folder."""
     for root in (
         os.path.expanduser("~/.regact/workdirs"),
         os.path.join(os.path.abspath(config.output_root), ".workdirs"),
     ):
-        existing = root
-        while not os.path.exists(existing):
-            existing = os.path.dirname(existing)
-        if os.stat(existing).st_dev == device:
+        if renames_into(root, output_dir):
             return root
     logging.getLogger(__name__).warning(
         "no workdir root on the filesystem of %s: the agent can read its path in mountinfo",

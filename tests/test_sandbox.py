@@ -5,6 +5,7 @@ sandbox). One end-to-end test runs the probe under macOS ``sandbox-exec`` to sho
 read of a forbidden path flips from succeeding to denied; it is skipped off macOS.
 """
 
+import errno
 import os
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ from regact.security.runtime import (
     interpreter_chain_prefixes,
     make_wrapper,
     neutral_workdir,
+    renames_into,
     symlink_chain_dirs,
     wrap_argv,
 )
@@ -502,6 +504,33 @@ def test_neutral_workdir_takes_over_the_link_a_dead_launch_left(tmp_path):
     with neutral_workdir(str(workdir), str(tmp_path / "workdirs")):
         assert workdir.resolve() == real
     assert not workdir.is_symlink() and (workdir / "a.txt").read_text() == "a" and not real.exists()
+
+
+def _refuse_renames(monkeypatch):
+    """Rename as between two bind mounts of one filesystem: same st_dev, EXDEV."""
+
+    def rename(src, dst):
+        raise OSError(errno.EXDEV, "Invalid cross-device link", src)
+
+    monkeypatch.setattr(os, "rename", rename)
+
+
+def test_a_root_that_refuses_renames_is_not_taken_and_keeps_no_probe(tmp_path, monkeypatch):
+    task = tmp_path / "task"
+    task.mkdir()
+    assert renames_into(str(tmp_path / "workdirs"), str(task))
+    _refuse_renames(monkeypatch)
+    assert not renames_into(str(tmp_path / "workdirs"), str(task))
+    assert os.listdir(tmp_path / "workdirs") == [] and os.listdir(task) == []
+
+
+def test_neutral_workdir_copies_the_files_back_when_a_rename_is_refused(tmp_path, monkeypatch):
+    workdir = tmp_path / "task" / "workdir"
+    _refuse_renames(monkeypatch)
+    with neutral_workdir(str(workdir), str(tmp_path / "workdirs")):
+        (workdir / "controller.py").write_text("x = 1")
+    assert not workdir.is_symlink() and (workdir / "controller.py").read_text() == "x = 1"
+    assert os.listdir(tmp_path / "workdirs") == []
 
 
 def test_neutral_workdir_without_a_root_leaves_the_workdir_in_place(tmp_path):
