@@ -151,7 +151,7 @@ def test_the_prompt_and_reminders_name_the_command_as_the_agent_calls_it(
     prompt = protocol.build_system_prompt(
         Problem(), "counter", tool_protocol=tool_protocol, tool_names=["RunController"], verbalize_variant="off"
     )
-    assert f"Call {command} to execute" in prompt
+    assert f"Call {command} to execute your controller in the real environment. A call plays at most 100 actions." in prompt
     assert command in ManagedSession(coordinator=c).reminder(1)
 
 

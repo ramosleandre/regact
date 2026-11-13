@@ -57,6 +57,7 @@ def test_prompt_only_teaches_available_cwm_interfaces(tmp_path, dialect, helpers
         tool_names=list(enabled_commands(protocol.options)),
         verbalize_variant="off",
     )
+    assert "run it with `RunController` (below). A call plays at most 100 actions. Every" in prompt
     all_docs = [p for p in tmp_path.rglob("*.md")]
     text = prompt + "\n".join(p.read_text() for p in all_docs)
     for absent in (

@@ -64,6 +64,11 @@ def workspace_tree(
     return "\n".join(rows)
 
 
+def action_cap_sentence(options: Any) -> str:
+    cap = options.max_actions_per_RunController
+    return f" A call plays at most {cap} actions." if cap is not None else ""
+
+
 def image_preview_instructions(options: Any, *, can_view_images: bool = True) -> str:
     if not options.exp_buffer:
         return (
@@ -172,6 +177,7 @@ def build_prompt(
                 RUN_CONTROLLER="`python framework/commands.py RunController`"
                 if uses_control_cli(tool_protocol)
                 else "the `RunController` tool",
+                ACTION_CAP=action_cap_sentence(options),
             )
         )
     steps.append(

@@ -10,8 +10,8 @@ from regact.problems.base import BaseProblem
 from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.limits import describe
+from regact.protocols.managed.prompting import action_cap_sentence, reset_commands
 from regact.protocols.managed.prompting import build_prompt as build_managed_prompt
-from regact.protocols.managed.prompting import reset_commands
 from regact.workspace.templates import TemplateFile
 
 _PROMPTS = Path(__file__).with_name("prompts")
@@ -105,6 +105,7 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "PLANNER_NODES": options.planner.max_nodes_per_planner_call,
         "PLANNER_DEPTH": options.planner.max_depth_per_planner_call,
         "LOCAL_HELPERS": _LOCAL_HELPERS if options.workspace_helpers_enabled else "",
+        "ACTION_CAP": action_cap_sentence(options),
         **extra,
     }
     text = (_PROMPTS / name).read_text(encoding="utf-8")
