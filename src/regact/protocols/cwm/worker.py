@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import selectors
+import shutil
 import signal
 import subprocess
 import sys
@@ -41,7 +42,7 @@ class Worker:
         runtime: SandboxRuntime = SandboxRuntime.AUTO,
         deny_read: list[str] | None = None,
         task_deadline: Callable[[], float] | None = None,
-        budget_key: str = "protocol.execution.max_seconds_per_RunController",
+        budget_label: str = "per RunController call",
         budget_seconds: float | None = None,
         load_model: bool = True,
         clock: budgets.AgentClock | None = None,
@@ -49,9 +50,8 @@ class Worker:
     ) -> None:
         # The subprocess changes cwd to private scratch; bundle paths must survive that.
         bundle = bundle.resolve()
-        self.bundle_prefix = f"{bundle}{os.sep}"
         self.config = config
-        self.budget_key = budget_key
+        self.budget_label = budget_label
         self.budget_seconds = budget_seconds
         self.deadline = deadline
         self.task_deadline = task_deadline or (lambda: float("inf"))
@@ -67,11 +67,15 @@ class Worker:
             raise WorkerError(
                 "CWM execution requires a usable OS sandbox", kind="isolation_unavailable"
             )
+        # The bundle sits under the run's output folder, whose path names the experiment and the
+        # task; the worker (and so the submitted code) only ever sees this copy.
+        bundle = Path(shutil.copytree(bundle, Path(self.scratch.name) / "bundle"))
+        self.bundle_prefix = f"{bundle}{os.sep}"
         entry = Path(__file__).with_name("worker_entry.py")
         wrap = make_wrapper(
             backend,
             workdir=self.scratch.name,
-            allow_read=[str(bundle), str(entry)],
+            allow_read=[str(entry)],
             deny_egress=True,
             deny_read=deny_read or [],
         )
@@ -153,16 +157,15 @@ class Worker:
 
     def _operation_timeout(self) -> WorkerError:
         error = WorkerError(
-            f"Operation stopped at its deadline ({self.budget_key}={self.budget_seconds:g} seconds; an earlier task deadline or interruption can also stop it)."
+            f"Operation stopped at its deadline ({self.budget_seconds:g} seconds {self.budget_label}; an earlier task deadline or interruption can also stop it)."
             if self.budget_seconds is not None
             else "Operation stopped at its deadline.",
             kind="operation_timeout",
         )
         if self.budget_seconds is not None:
             error.context["budget"] = {
-                "parameter": self.budget_key,
                 "value": self.budget_seconds,
-                "unit": "seconds",
+                "unit": f"seconds {self.budget_label}",
             }
         return error
 
@@ -174,13 +177,12 @@ class Worker:
             raise self._operation_timeout()
         if now >= limit:
             error = WorkerError(
-                f"Callback exceeded protocol.execution.max_seconds_per_call={budgets.describe(self.config.max_seconds_per_call)} seconds.",
+                f"A function call of the submitted code exceeded its limit of {budgets.describe(self.config.max_seconds_per_call)} seconds.",
                 kind="code_timeout",
             )
             error.context["budget"] = {
-                "parameter": "protocol.execution.max_seconds_per_call",
                 "value": self.config.max_seconds_per_call,
-                "unit": "seconds per callback",
+                "unit": "seconds per function call",
             }
             raise error
         return min(limit, self.deadline, self.task_deadline()) - now
@@ -193,7 +195,7 @@ class Worker:
             chunk = os.read(self.proc.stdout.fileno(), 65536)
             if not chunk:
                 raise WorkerError(
-                    f"Execution of submitted code stopped before returning a result. The process may have terminated explicitly, crashed, or exceeded a resource limit; the cause is not established. Configured memory limit: protocol.execution.max_memory_mb={budgets.describe(self.config.max_memory_mb)} MiB.",
+                    f"Execution of submitted code stopped before returning a result. The process may have terminated explicitly, crashed, or exceeded a resource limit; the cause is not established. Its memory limit is {budgets.describe(self.config.max_memory_mb)} MiB.",
                     kind="worker_exit",
                 )
             self.buffer += chunk

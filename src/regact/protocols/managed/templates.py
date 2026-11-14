@@ -8,14 +8,14 @@ from regact.workspace.templates import TemplateFile
 HELPER = '''"""Controllers built from actions; simulation and reality each use a fresh instance."""
 
 
-class ExplorationControllerFromListActions:
+class ActionListController:
     """Execute actions in order, optionally stopping when achieved(state) is true.
 
     Example in controller.py:
-        from framework.action_list_controller import ExplorationControllerFromListActions
+        from framework.action_list_controller import ActionListController
         def get_controller():
             actions = [1, 2, 1]  # Replace with actions valid for your experiment.
-            return ExplorationControllerFromListActions(actions)
+            return ActionListController(actions)
 
     Pass a list/iterable of problem-format actions, not a filename. Optionally
     pass achieved=your_predicate to stop early and report objective attainment.

@@ -69,7 +69,7 @@ class VanillaConfig:
 
 
 CONTROLLER = '''"""Describe your intended experiment here."""
-class ExplorationController:
+class Controller:
     """A fresh instance is created for every RunController call."""
     def act(self, obs):
         """Return one problem-format action from the full observation dictionary."""
@@ -80,8 +80,8 @@ class ExplorationController:
         return False
 
 def get_controller():
-    """Return a fresh controller; submitted code cannot access the dataset or network."""
-    return ExplorationController()
+    """Return a fresh controller; it runs isolated from the network and the framework."""
+    return Controller()
 '''
 
 

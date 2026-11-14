@@ -176,7 +176,7 @@ class Coordinator(ManagedCoordinator):
         clock = budgets.AgentClock(seconds)
         started = time.monotonic()
         with self.worker(
-            bundle, seconds, "protocol.execution.max_seconds_per_UpdateCodeWorldModel", clock=clock
+            bundle, seconds, "per UpdateCodeWorldModel", clock=clock
         ) as worker:
             summary, live = validate(
                 worker,
@@ -281,14 +281,14 @@ class Coordinator(ManagedCoordinator):
                 self.worker(
                     model,
                     self.options.planner.max_seconds_per_planner_call,
-                    "protocol.planner.max_seconds_per_planner_call",
+                    "per PlanInCWM call",
                 )
             )
             goal_worker = stack.enter_context(
                 self.worker(
                     bundle,
                     self.options.planner.max_seconds_per_planner_call,
-                    "protocol.planner.max_seconds_per_planner_call",
+                    "per PlanInCWM call",
                 )
             )
             worker.deadline = goal_worker.deadline = deadline

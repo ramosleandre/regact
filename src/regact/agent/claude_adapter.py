@@ -57,8 +57,14 @@ def claude_deny_settings(
     Read tool, never arbitrary code the agent runs, so it is defense-in-depth on top of
     the OS sandbox, not a substitute for it.
     """
+    from regact.problems.base import all_secret_modules
+
     policy = policy or default_policy()
-    deny = [f"Read(**/{sub.rstrip('/')}/**)" for sub in sorted(policy.forbidden_path_substrings)]
+    # Every game's packages, whatever the task: the agent can read this file, and a list naming
+    # one family would name the game it plays.
+    paths = {sub.rstrip("/") for sub in policy.forbidden_path_substrings}
+    paths |= {module.replace(".", "/") for module in all_secret_modules()}
+    deny = [f"Read(**/{path}/**)" for path in sorted(paths)]
     if deny_images:  # a text-only model rejects any request that carries an image
         deny += [f"Read(**/*.{suffix})" for suffix in _IMAGE_SUFFIXES]
     return {"permissions": {"deny": deny}}

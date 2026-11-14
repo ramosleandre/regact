@@ -71,7 +71,7 @@ def achieved(state):
         "controller.py",
         '''"""Replace this docstring with the experimental goal (used for logging)."""
 
-class ExplorationController:
+class Controller:
     """Acts on the State carried by the accepted CWM; each real exploration gets a fresh instance."""
     def act(self, state):
         """Return one action in the problem's format. Private memory is allowed."""
@@ -86,6 +86,6 @@ class ExplorationController:
 
 def get_controller():
     """Return a new controller. Do not read the data API inside submitted callbacks."""
-    return ExplorationController()
+    return Controller()
 ''',
     )

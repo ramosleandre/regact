@@ -75,7 +75,7 @@ def test_common_sections_and_runtime_guidance(game, lifecycle, dialect, image_co
         if image_count:
             assert "up to 3 observation images" in prompt
             assert "tmp/images/obs_id_<ID>.png" in prompt
-            assert "including a refused one" in prompt
+            assert "cleared at the start of every call" in prompt
         else:
             assert "Automatic image previews are disabled" in prompt
             assert "tmp/images/" not in prompt

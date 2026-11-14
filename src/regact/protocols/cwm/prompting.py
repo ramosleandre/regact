@@ -45,7 +45,7 @@ _LOCAL_HELPERS = """
 Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
 
-_IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at every new submission, including a refused one; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
+_IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at the start of every call; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
 
 """
 _DIAGNOSTIC_IMAGES = """ `save_image(diagnostic_id=..., which="observed", path=...)` and `which="predicted"` help compare images, when the diagnostic contains them. Size errors and code exceptions may have no image; inspect their structured data."""
@@ -75,7 +75,7 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "ACTION_LIST_GUIDANCE": (
             "For a controller built from a planned action list, see `docs/plan_in_CWM.md`."
             if planner
-            else "For a fixed sequence of actions, use `ExplorationControllerFromListActions` "
+            else "For a fixed sequence of actions, use `ActionListController` "
             "from `framework/action_list_controller.py`; see its docstring."
         ),
         "CALLBACK_KINDS": "CWM, controller and goal" if planner else "CWM and controller",

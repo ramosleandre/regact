@@ -65,7 +65,7 @@ def get_controller():
 
 This simple example assumes an available action is directly executable; parameterized actions need the game's action format/helper. In CWM, `act` and `is_done` receive the accepted CWM's **State**, not the observation dictionary.
 
-`is_done` is checked before the next action. Returning `False` is valid; environment termination and budgets still stop execution. An optional `objective_reached(input) -> bool` reports a chosen subgoal independently of stopping. It is not required and does not establish full-game success. The supplied `ExplorationControllerFromListActions` stops when its list is exhausted; exhaustion alone is not goal attainment.
+`is_done` is checked before the next action. Returning `False` is valid; environment termination and budgets still stop execution. An optional `objective_reached(input) -> bool` reports a chosen subgoal independently of stopping. It is not required and does not establish full-game success. The supplied `ActionListController` stops when its list is exhausted; exhaustion alone is not goal attainment.
 
 Controllers can keep private memory during a call. Every later `RunController` constructs a new object, even when it continues the same physical episode.
 

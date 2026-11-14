@@ -324,11 +324,7 @@ def test_controller_timeout_preserves_episode_and_next_call_gets_fresh_budget(ma
     assert result.get("real_actions") == 0 and result.get("stop_reason") == "controller_call_time_limit", result
     assert result["error_type"] == "operation_timeout"
     feedback = present("RunController", result, c.options, c.config.limits)
-    assert feedback["budget"] == {
-        "parameter": "protocol.execution.max_seconds_per_RunController",
-        "value": 1,
-        "unit": "seconds of submitted-code execution per RunController call",
-    }
+    assert feedback["budget"] == {"value": 1, "unit": "seconds of controller and CWM code per call"}
     assert feedback["error"]["budget"] == feedback["budget"]
     assert "reset" not in feedback["message"].lower()
     assert c.terminal is None and c.env.live.last_obs.frame[0] == 2
@@ -444,7 +440,8 @@ async def test_vanilla_feedback_transport_and_limits(make_rig):
     response = await ManagedTool("RunController", c).call({}, ToolContext(cwd=str(c.workdir)))
     value = json.loads(response.data)
     assert value["real_actions"] == 1
-    assert value["budget"]["parameter"] == "protocol.max_actions_per_RunController"
+    assert value["budget"] == {"value": 1, "unit": "actions per call"}
+    assert value["message"] == "The call stopped at its limit of 1 actions per call."
     assert value["current_observation_id"] == 4
     reset = await ManagedTool("ResetEnvironment", c).call({}, ToolContext(cwd=str(c.workdir)))
     assert json.loads(reset.data)["current_observation_id"] == 1

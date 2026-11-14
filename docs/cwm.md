@@ -157,7 +157,7 @@ The planner is disabled by default. Enable `protocol.planner.enabled=true` to ex
 1. Write a goal description in `goal.py`'s module docstring.
 2. Define `achieved(state) -> bool` and optionally `utility(state) -> float` in `[0, 1]`.
 3. Run `python framework/commands.py PlanInCWM` with no arguments.
-4. Inspect the returned candidate and, if useful, import its `ACTIONS` into an `ExplorationControllerFromListActions` instance in `controller.py`.
+4. Inspect the returned candidate and, if useful, import its `ACTIONS` into an `ActionListController` instance in `controller.py`.
 5. Call `RunController` separately to apply it to the real environment.
 
 If utility is absent, it is `float(achieved(state))`. An achieved goal must have utility 1; utility 1 alone does not imply achievement. Callbacks must be repeatable and non-mutating.

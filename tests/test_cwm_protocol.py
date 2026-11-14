@@ -149,11 +149,11 @@ def accept(c, bad=False):
 def exploration(c, actions=(1, 1, 1, 1), extra=""):
     (c.workdir / "controller.py").write_text(
         (
-            '"""Reach a new position."""\nfrom framework.action_list_controller import Exp'
-            "lorationControllerFromListActions\n"
+            '"""Reach a new position."""\n'
+            "from framework.action_list_controller import ActionListController\n"
         )
         + extra
-        + ("\ndef get_controller(): return ExplorationControllerFromListActions(")
+        + ("\ndef get_controller(): return ActionListController(")
         + repr(list(actions))
         + ")\n"
     )

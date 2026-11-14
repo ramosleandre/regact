@@ -235,14 +235,14 @@ def test_pure_model_env_is_usable_inside_isolated_controller(rig):
     ).write_text('''"""Inspect one simulated successor before acting."""
 from framework.cwm_env import EnvCWM
 from world_model.model_state import State
-class ExplorationController:
+class Controller:
  def is_done(self,s): return s.n >= 4
  def act(self,s):
   assert isinstance(s, State), "local and submitted imports must share the same State"
   simulation=EnvCWM(initial_state=s)
   assert simulation.step(1).n == s.n+1
   return 1
-def get_controller(): return ExplorationController()
+def get_controller(): return Controller()
 ''')
     result = c.tool("RunController", {})
     assert result["real_actions"] == 4 and not result.get("error"), result

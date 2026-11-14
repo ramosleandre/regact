@@ -93,10 +93,21 @@ def image_preview_instructions(options: Any, *, can_view_images: bool = True) ->
         f"After a `RunController` call, up to {count} observation images are saved as "
         "`tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations "
         "encountered. The feedback lists their paths; open them with your image-reading tool. "
-        "This temporary folder is cleared at the start of every call, including a refused "
-        "one; copy images elsewhere if you need to keep them. Recorded data remains "
-        "available through `framework.data_api`."
+        "This temporary folder is cleared at the start of every call; copy images elsewhere "
+        "if you need to keep them. Recorded data remains available through `framework.data_api`."
     )
+
+
+def execution_limits(options: Any) -> str:
+    """The limits every submitted-code process runs under (the same in every configuration)."""
+    e = options.execution
+    parts = []
+    if e.max_memory_mb is not None:
+        parts.append(f"Each process running them may use {e.max_memory_mb} MiB")
+    if e.max_seconds_per_call is not None:
+        parts.append(f"each of their function calls may take {e.max_seconds_per_call:g} seconds")
+    text = (", and ".join(parts) + ". ") if parts else ""
+    return " " + text + "Only the Python files they import statically are shipped with them."
 
 
 def printing_instructions(problem: BaseProblem) -> str:
@@ -105,7 +116,9 @@ def printing_instructions(problem: BaseProblem) -> str:
         return (
             "The observation's grid is printed first, one row per line and one hex digit per "
             "cell (`a` = 10 ... `f` = 15), then the observation as JSON, where a placeholder "
-            "marks the grid's place in `frame`; your controller receives it as integers."
+            "marks the grid's place in `frame`. When `frame` is a list of grids, only the last "
+            "one is printed and the placeholder counts the others. Your controller receives the "
+            "whole `frame`, as integers."
         )
     return "The observation is printed as JSON, one line per grid row."
 
@@ -196,6 +209,7 @@ def build_prompt(
         OBJECTIVE_NOTE=" " + config.objective_note if config.objective_note else "",
         CALLBACKS="Controllers and the CWM" if uses_model else "Controllers",
         INACCESSIBLE="the dataset, " if buffer else "",
+        EXECUTION_LIMITS=execution_limits(options),
     )
     return PromptBuilder().assemble_system_prompt(
         [

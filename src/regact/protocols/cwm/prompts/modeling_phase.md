@@ -13,7 +13,7 @@ If framework tools are available directly, invoke them by name. Otherwise use th
 | `model_render.py` | `render(state) -> dict` | Reconstruct the complete observation dictionary. |
 | `model_transition.py` | `step(state, action) -> State` | Predict the State after one game-format action. It must carry everything later observations depend on, including what the screen does not show. |
 
-Use normal workspace imports, e.g. `from world_model.model_state import State` or `from world_model.model_transition import step`; Regact makes the workspace root importable in scripts and submitted code. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
+Use normal workspace imports, e.g. `from world_model.model_state import State` or `from world_model.model_transition import step`; the framework makes the workspace root importable in scripts and submitted code. Callbacks must be repeatable for identical inputs and must not mutate their inputs. `step` predicts the game; it never contacts the real environment.
 
 A world model computes observations from the game's rules. Do not copy recorded observations or transitions into your code and look them up (by action history, by observation id, by frame): such a table predicts nothing new and is not allowed. The game's static content you read from the data (level layouts, sprites, colours) may be written into code.
 
@@ -23,7 +23,7 @@ The complete observation contains `frame`, `reward`, `is_done`, `available_actio
 
 An *episode* begins at an environment start, or at a framework reset command when the game has one, and runs until the next one. `get_initial_state` builds the State from the episode's first observation; from there the State evolves through `step`, one recorded action at a time. Completing a level, and a reset that is a game action, are ordinary actions: `step` predicts them, and the State carries through them. Later observations can depend on things the screen does not show, and `step` carries them.
 
-Example of hidden state: a budget bar with 64 cells for a budget of 75 clicks, where a click blocked by a wall still spends budget. One frame cannot tell how many clicks are left. Keep a `clicks` field in the State: `get_initial_state` sets it from the full bar, `step` adds 1 on every click (blocked ones included) and resets it when a level completes, and `render` draws the bar from it.
+Example of hidden state: a door that opens after its switch has been pressed three times, with nothing on screen counting the presses. One frame cannot tell how many presses are left. Keep a `presses` field in the State: `get_initial_state` sets it to 0, `step` adds 1 on every press and resets it when a level completes, and `render` draws the door from it.
 
 Your controller receives the State carried this way. A hidden field that is wrong but has not yet shown up on screen misleads the controller until a contradiction reveals it.
 
@@ -48,7 +48,7 @@ Submitting is the cheapest way to check your CWM against everything recorded: it
 | `Refused` | Checks finished but some failed. | Inspect evidence, revise the CWM, submit again. |
 | `Incomplete` | Validation could not finish, e.g. a code error or timeout. | Fix the reported error or expensive computation, then retry. |
 
-`checked` counts the episodes and steps processed, not just successful checks. `cwm_version` identifies the accepted frozen code; `dataset_version` identifies the evidence checked. These are identifiers, not quality scores: cwm_version counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. You may explore only while the current phase is Acting Phase. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise real exploration is refused before taking a real action.
+`checked` counts the episodes and steps processed, not just successful checks. `cwm_version` identifies the accepted frozen code. It is an identifier, not a quality score: it counts accepted CWMs (1, 2, 3, ...). A refused/incomplete replacement leaves the previous accepted version unchanged. Controllers run only in the Acting Phase. Editing CWM files or their imported dependencies does not update the accepted CWM. Submit those changes with UpdateCodeWorldModel first; otherwise RunController is refused before taking an action.
 
 Counterexamples include evidence IDs and one of these failure types:
 
@@ -57,7 +57,7 @@ Counterexamples include evidence IDs and one of these failure types:
 - `compression_ratio`: States are too large on average or for one State; size feedback includes the smallest/largest State and their observation IDs.
 - `non_deterministic_model`: identical callback inputs produced different outputs.
 
-`failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during exploration, described in "Reading a contradiction" in `docs/acting_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
+`failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during a controller call, described in "Reading a contradiction" in `docs/acting_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
 To understand a counterexample, start with its `details` call, `data_api.describe_diagnostic(diagnostic_id)`: the differences, your model's State before the step and the State it predicted, all bounded. `data_api.load_diagnostic(diagnostic_id)` returns the whole record and can be very large. Use `load_observations` or `load_transitions` from `data_api` with the returned IDs, and `data_api.list_episodes()` and `data_api.load_history(episode_id)` to see what happened in order. Only when a hidden field may have gone wrong before the failing step, replay the episode locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then `state = step(state, action)` for each action, checking the field you suspect.__DIAGNOSTIC_IMAGES__
 
@@ -69,6 +69,6 @@ The framework saves the submitted Python files and their static local imports. E
 
 One callback request has a __CALL_SECONDS__ second limit, including communication and serialization. This applies to imports/startup, CWM `get_initial_state`/`render`/`step`, controller creation and `act`/`is_done`__GOAL_CALLBACK_LIMIT__. It is not a timeout on your Bash commands. Each submitted-code process has a __MEMORY_MB__ MiB memory limit. An `unlimited` value disables that particular cap; whole-task limits still apply.
 
-Budget errors name the effective limit and value. They usually stop one operation, not the whole task. When a command changes the phase, its result has a `phase_change` field: `from`, `to`, and `next_step`. `task_stop` means the task ended. `history_complete=false` indicates an environment or recording failure: stored counts may omit actions that actually happened.
+Budget errors name the effective limit and value. They usually stop one operation, not the whole task. When a command changes the phase, its result has a `phase_change` field, such as `"Modeling Phase -> Acting Phase"`. `task_stop` means the task ended. `history_complete=false` indicates an environment or recording failure: stored counts may omit actions that actually happened.
 
 __LOCAL_HELPERS__

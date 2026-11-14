@@ -397,7 +397,7 @@ class Playback:
             execution,
             deny_read=denied,
             deadline=time.monotonic() + 120,
-            budget_key="viewer reconstruction time limit",
+            budget_label="for the viewer reconstruction",
             budget_seconds=120,
         ) as worker:
             state = record.get("initial_state")

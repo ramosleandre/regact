@@ -157,10 +157,10 @@ def test_moved_action_helper_works_in_isolated_submission(rig):  # noqa: F811
         c.workdir / "controller.py"
     ).write_text('''"""Test new states with the provided action constant."""
 from framework.arc_agi_helper import ACTION1
-from framework.action_list_controller import ExplorationControllerFromListActions
+from framework.action_list_controller import ActionListController
 
 def get_controller():
-    return ExplorationControllerFromListActions([ACTION1] * 4)
+    return ActionListController([ACTION1] * 4)
 ''')
     result = c.tool("RunController", {})
     assert not result.get("error"), result

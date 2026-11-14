@@ -56,12 +56,12 @@ To use the returned file, write `controller.py`:
 """Describe what this action sequence should test or achieve."""
 
 from plans.plan_003 import ACTIONS  # use the path actually returned
-from framework.action_list_controller import ExplorationControllerFromListActions
+from framework.action_list_controller import ActionListController
 from goal import achieved  # optional; stops early when the goal is reached
 
 
 def get_controller():
-    return ExplorationControllerFromListActions(ACTIONS, achieved=achieved)
+    return ActionListController(ACTIONS, achieved=achieved)
 ```
 
 Then call `RunController`. The framework runs it from the start defined by the task lifecycle with per-action CWM checks; there is no additional simulated episode. Revalidate any changed CWM source before submitting. Omit `achieved=achieved` if you want to execute the entire list; list exhaustion stops it but does not report that a goal was reached. Plans are not automatically submitted and stay predictions from the CWM version used to generate them. Reconsider old plans after accepting a new CWM.

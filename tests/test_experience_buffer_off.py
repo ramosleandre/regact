@@ -193,7 +193,7 @@ def test_the_prompt_and_reminders_name_the_command_as_the_agent_calls_it(
     prompt = protocol.build_system_prompt(
         Problem(), "counter", tool_protocol=tool_protocol, tool_names=["RunController"], verbalize_variant="off"
     )
-    assert f"Call {command} to execute your controller in the real environment. A call plays at most 100 actions." in prompt
+    assert f"Call {command} to execute your controller in the environment. A call plays at most 100 actions." in prompt
     assert command in ManagedSession(coordinator=c).reminder(1)
 
 
@@ -222,6 +222,22 @@ def test_a_controller_error_and_its_invalid_action_are_bounded(make_rig, exp_buf
     result = c.tool("RunController", {})
     assert result["stop_reason"] == "controller_error"
     assert len(result["error"]) <= 200
+
+
+@pytest.mark.integration
+def test_submitted_code_runs_from_a_path_that_names_no_run(make_rig):
+    c = make_rig(target=1)
+    (c.workdir / "controller.py").write_text(
+        '"""Report where it runs."""\n'
+        "import os, sys\n"
+        "class C:\n"
+        "    def act(self, obs): return [__file__, os.getcwd(), *sys.argv]\n"
+        "def get_controller(): return C()\n"
+    )
+    c.options.feedback.max_controller_error_chars = None
+    result = c.tool("RunController", {})
+    assert result["stop_reason"] == "controller_error"
+    assert str(c.root) not in json.dumps(result["error_context"]["action"])
 
 
 @pytest.mark.integration

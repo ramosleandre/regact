@@ -94,6 +94,8 @@ def test_claude_deny_settings_blocks_game_data_not_the_workdir() -> None:
     deny = claude_deny_settings("/tmp/wd")["permissions"]["deny"]
     # The game data is denied wherever it lives...
     assert "Read(**/environnement/**)" in deny
+    # ...for every game whatever the task, so the list does not name the one being played.
+    assert {"Read(**/arc_agi/**)", "Read(**/minigrid/**)", "Read(**/baba/**)"} <= set(deny)
     # ...but reads are NOT blanket-denied (that would cripple the agent's own workdir).
     assert "Read(/**)" not in deny
     assert all("/**)" in rule and rule != "Read(/**)" for rule in deny)

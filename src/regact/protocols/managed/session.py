@@ -517,7 +517,7 @@ class ManagedCoordinator:
         self,
         bundle: Path,
         seconds: float | None,
-        budget_key: str = "protocol.execution.max_seconds_per_RunController",
+        budget_label: str = "per RunController call",
         *,
         clock: budgets.AgentClock | None = None,
     ) -> Worker:
@@ -533,7 +533,7 @@ class ManagedCoordinator:
             runtime=SandboxRuntime(self.config.sandbox_opts.get("backend", "auto")),
             deny_read=_secret_module_paths(all_secret_modules()),
             task_deadline=lambda: self.deadline,
-            budget_key=budget_key,
+            budget_label=budget_label,
             budget_seconds=seconds,
             load_model=self.uses_model,
             clock=clock,
@@ -655,7 +655,8 @@ class ManagedCoordinator:
                 ]
                 if len(sources) != 1:
                     raise ValueError(
-                        "save_image requires exactly one observation_id, transition_id or diagnostic_id"
+                        "save_image requires exactly one observation_id, transition_id"
+                        + (" or diagnostic_id" if self.uses_model else "")
                     )
                 source = sources[0]
                 identifier = body[source]
@@ -677,7 +678,9 @@ class ManagedCoordinator:
                 elif source == "observation_id":
                     if which is not None:
                         raise ValueError(
-                            "which applies only to transitions or diagnostics; omit it for an observation"
+                            "which applies only to transitions"
+                            + (" or diagnostics" if self.uses_model else "")
+                            + "; omit it for an observation"
                         )
                     obs = self.store.observation(identifier)
                 else:
@@ -958,9 +961,8 @@ class ManagedCoordinator:
                 result["error_context"] = dict(getattr(exc, "context", {}))
                 if reason == "controller_call_time_limit":
                     result["error_context"]["budget"] = {
-                        "parameter": "protocol.execution.max_seconds_per_RunController",
                         "value": self.options.execution.max_seconds_per_RunController,
-                        "unit": "seconds of submitted-code execution per RunController call",
+                        "unit": "seconds of controller and CWM code per call",
                     }
                     result["error"] = (
                         "This controller call used up its submitted-code time limit."
@@ -1331,19 +1333,17 @@ class ManagedTool(Tool):
                     waited,
                 )
             if outcome == "refused":
+                message = (
+                    f"Only one {self.name} is accepted per tool call, and one was "
+                    f"already issued since your last tool call started. This "
+                    f"{self.name} was NOT executed. To run it, issue {self.name} "
+                    "again in a new tool call. Commands issued by a loop or a "
+                    "background process are refused the same way."
+                )
                 return ToolOutput(
-                    data=format_feedback(
-                        {
-                            "status": "Refused",
-                            "message": (
-                                f"Only one {self.name} is accepted per tool call, and one was "
-                                f"already issued since your last tool call started. This "
-                                f"{self.name} was NOT executed. To run it, issue {self.name} "
-                                "again in a new tool call. Commands issued by a loop or a "
-                                "background process are refused the same way."
-                            ),
-                        }
-                    ),
+                    data=format_feedback({"status": "Refused", "message": message})
+                    if self.coordinator.options.exp_buffer
+                    else f"{self.name}: refused. {message}",
                     is_error=True,
                 )
         job = asyncio.create_task(

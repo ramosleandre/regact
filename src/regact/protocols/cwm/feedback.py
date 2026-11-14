@@ -34,7 +34,7 @@ ENDINGS = {
 }
 REASONS = {
     "plan_exhausted": "The action list finished.",
-    "controller_done": "The controller requested the end of this exploration.",
+    "controller_done": "The controller requested the end of this call.",
     "goal_achieved": "The controller's goal predicate is true in the real environment.",
     "controller_call_time_limit": "This controller call used up its submitted-code time limit.",
     "environment_done": "The environment ended the episode. Use an available reset command before continuing.",
@@ -51,8 +51,7 @@ REASONS = {
         "The state-size ratio exceeded the acceptance threshold on new experience."
     ),
     "controller_error": (
-        "The controller failed. Recorded experience is retained and this "
-        "exploration receives worst metrics; repair controller.py."
+        "The controller failed. The actions it played are kept; repair controller.py."
     ),
     "model_error": (
         "The CWM failed while processing real experience. Inspect the error and validate a repair."
@@ -122,34 +121,28 @@ def mismatch_summary(example: dict[str, Any], differences: dict[str, Any] | None
 def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | None:
     mapping = {
         "max_actions_per_RunController": (
-            "protocol.max_actions_per_RunController",
             c.max_actions_per_RunController,
-            "real actions per RunController call",
+            "actions per call",
         ),
         "max_actions_per_episode": (
-            "limits.max_actions_per_episode",
             limits.max_actions_per_episode,
-            "real actions per episode",
+            "actions per episode",
         ),
         "real_action_limit": (
-            "limits.max_actions_per_task",
             limits.max_actions_per_task,
-            "real actions across the task, including dataset preparation and explicit resets",
+            "actions across the task, including dataset preparation and explicit resets",
         ),
         "walltime_limit": (
-            "limits.max_seconds_per_task",
             limits.max_seconds_per_task,
             "seconds per task",
         ),
         "controller_call_time_limit": (
-            "protocol.execution.max_seconds_per_RunController",
             c.execution.max_seconds_per_RunController,
-            "seconds of submitted-code execution per RunController call",
+            "seconds of controller and CWM code per call",
         ),
         "search_memory_limit": (
-            "protocol.execution.max_memory_mb",
             c.execution.max_memory_mb / 4 if c.execution.max_memory_mb is not None else None,
-            "MiB of serialized search records (one quarter of max_memory_mb)",
+            "MiB of serialized search records (a quarter of the process memory limit)",
         ),
     }
     if reason.startswith("max_") and hasattr(getattr(c, "planner", None), reason):
@@ -163,20 +156,19 @@ def budget(reason: str, c: CwmConfig, limits: LimitsConfig) -> dict[str, Any] | 
             if "nodes" in reason
             else "actions of search depth"
         )
-        mapping[reason] = ("protocol.planner." + reason, value, unit + " per planner call")
+        mapping[reason] = (value, unit + " per planner call")
     if reason not in mapping:
         return None
-    key, value, unit = mapping[reason]
+    value, unit = mapping[reason]
     if reason == "search_memory_limit":
         return {
-            "parameter": key,
             "value": c.execution.max_memory_mb,
             "unit": "MiB per isolated Python process",
             "search_queue_max_bytes": c.execution.max_memory_mb * 1024 * 1024 // 4
             if c.execution.max_memory_mb is not None
             else None,
         }
-    return {"parameter": key, "value": value, "unit": unit}
+    return {"value": value, "unit": unit}
 
 
 def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) -> dict[str, Any]:
@@ -247,13 +239,13 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             else (
                 f"Planner found a plan as a {r['n_actions']}-length action list "
                 f"in the Code World Model. Saved at {r.get('path')}. "
-                "Submit an ExplorationControllerFromListActions instance using this plan "
+                "Submit an ActionListController instance using this plan "
                 "with RunController to apply it in the real environment."
             )
             if found
             else (
                 "No path with a new predicted observation was found within this search. "
-                "Try another goal or a direct exploration controller."
+                "Try another goal or write a controller directly."
             )
         )
         for key in ("path", "cwm_version", "elapsed_seconds", "n_states_searched"):
@@ -278,14 +270,14 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         out = {
             "status": "Incomplete" if error else "Completed",
             "message": REASONS.get(
-                reason,
-                "Exploration finished." if not error else "Exploration failed; inspect the error.",
+                reason, "The call finished." if not error else "The call failed; inspect the error."
             ),
         }
         if reason:
             out["stop_reason"] = reason
+        if r.get("exploration_id") is not None:
+            out["call_id"] = r["exploration_id"]
         for key in (
-            "exploration_id",
             "cwm_version",
             "real_actions",
             "actual_novel_observations",
@@ -300,6 +292,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                 continue  # the counterexample names the call that loads it
             if key in r and (key != "new_milestones" or r[key]):
                 out[key] = r[key]
+        if reason.startswith("reset_"):
+            out.pop("real_actions", None)  # a reset is not counted in the score
         if reason == "prediction_mismatch" and "real_actions" in r:
             n = r["real_actions"]
             out["message"] = (
@@ -345,22 +339,22 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         callback = r.get("error_context", {}).get("callback")
         if r.get("error_type") == "InvalidActionError":
             error = (
-                "Invalid action from the exploration controller. The real environment rejected it: "
-                + error
+                "Invalid action from the controller. The environment rejected it: " + error
             )
         elif callback in ("get_initial_state", "render", "step"):
             error = f"CWM {callback} failed: {error}"
         elif callback in ("act", "is_done", "controller_init"):
-            error = f"Exploration controller {callback} failed: {error}"
+            error = f"Controller {callback} failed: {error}"
         if callback and "MemoryError" in error:
             error = error.rstrip().rstrip(":") + (
-                f". Each submitted-code process may use at most {c.execution.max_memory_mb} MiB "
-                "(protocol.execution.max_memory_mb)."
+                f". Each controller or CWM process may use at most {c.execution.max_memory_mb} MiB."
             )
         elif callback and ("ConnectError" in error or "Connection refused" in error):
             error = error.rstrip().rstrip(".") + (
-                ". Submitted code runs isolated: it cannot use data_api, the network or the "
-                "framework commands. Give it what it needs as constants or files in its folder."
+                ". Your controller runs isolated: it cannot use "
+                + ("data_api, " if c.exp_buffer else "")
+                + "the network or the framework commands. Give it what it needs as constants or "
+                "in the Python files it imports."
             )
         out["error"] = {
             "type": "execution_stopped"
@@ -374,6 +368,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
     reason = r.get("search_stop_reason") or r.get("stop_reason") or ""
     if limit := budget(reason, c, limits):
         out["budget"] = limit
+        if out.get("message") == "The call finished.":
+            out["message"] = f"The call stopped at its limit of {limit['value']} {limit['unit']}."
     if r.get("exit_reason"):
         reason = r["exit_reason"]
         out["task_stop"] = {

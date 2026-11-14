@@ -5,9 +5,9 @@
 Put a short, plain-text description of the experiment in the file's **module docstring** (the first triple-quoted string). Define `get_controller()` returning a new object with:
 
 - `act(state)`: return one action in the game's format, using a CWM State as input.
-- `is_done(state)`: return True to stop this exploration before its next action. The default False is valid: the game ending or an action/time limit can stop it. Add an earlier stopping condition when it suits your experiment.
+- `is_done(state)`: return True to stop this call before its next action. The default False is valid: the game ending or an action/time limit can stop it. Add an earlier stopping condition when it suits your experiment.
 
-The controller may retain internal memory. Each real exploration starts with a fresh controller instance. Your controller receives the State carried by the accepted CWM: built by `get_initial_state` at the start of the episode, then advanced by `step` and checked against every real observation. __CONTROLLER_KINDS__ cannot query the dataset or the live environment themselves.
+The controller may retain internal memory. Each RunController call starts with a fresh controller instance. Your controller receives the State carried by the accepted CWM: built by `get_initial_state` at the start of the episode, then advanced by `step` and checked against every real observation. __CONTROLLER_KINDS__ cannot query the dataset or the live environment themselves.
 
 Optional `objective_reached(state) -> bool` reports whether your particular goal was achieved. It is independent of `is_done`: stopping because a list ran out does not establish success. You do not need this optional method to submit a controller.
 
@@ -26,7 +26,7 @@ The command follows the task lifecycle described in your instructions: it contin
 
 If the CWM cannot compute a prediction, the action is not executed: repair the reported error and revalidate. An incorrect prediction is recorded as a counterexample after executing the action.
 
-## 3. Read the exploration feedback
+## 3. Read the call's feedback
 
 The result is an indented JSON dictionary. A refusal before starting explains what to fix. Real-execution feedback reports:
 
@@ -51,24 +51,24 @@ When a prediction does not match reality, the result's `message` says in one sen
 
 `differences` lists every field of the observation that differs (`frame`, `info`, `is_done`, ...). Each field is reported separately and within its own limits, so a large frame difference never hides a difference in another field.
 
-Values are listed by path, for example `{"where": "info.state", "predicted": "NOT_FINISHED", "observed": "GAME_OVER"}`. At most __DIFF_ITEMS__ values are listed per field; `other differences` counts the rest.
+Values are listed by path, for example `{"where": "reward", "predicted": 0.0, "observed": 1.0}`. At most __DIFF_ITEMS__ values are listed per field; `other differences` counts the rest.
 
 A grid, such as one frame layer, is summarized as regions. A region is a group of differing cells that touch, including diagonally. `cells_differing` counts the differing cells of the grid and `cells_total` all its cells. At most __DIFF_REGIONS__ regions are listed, largest first; `other_regions` counts the rest.
 
 Each region gives:
 
 - `where`, in Python slice notation with exclusive ends, row first, then column (on a screen: y, then x):
-  - `frame[0][45:50, 34:39]`: the rectangle of rows 45 to 49 and columns 34 to 38 of layer 0;
-  - `frame[0][63, 0:64]`: one row; `frame[0][63, 63]`: one cell;
+  - `frame[0][5:8, 2:6]`: the rectangle of rows 5 to 7 and columns 2 to 5 of layer 0;
+  - `frame[0][9, 0:12]`: one row; `frame[0][9, 11]`: one cell;
   - `frame[0][0:4, 0] + frame[0][3, 1:4]`: exactly these cells, as a sum of rectangles;
-  - `within frame[0][9:45, 27:57]`: an irregular region somewhere inside this rectangle, not filling it.
+  - `within frame[0][1:9, 2:11]`: an irregular region somewhere inside this rectangle, not filling it.
 - `cells`: how many cells of the region differ.
 - Either `changes`, the `predicted -> observed` value pairs with their cell counts (at most __DIFF_CHANGES__, then `other changes`), or, for a small region holding several changes or an irregular shape, the area itself: `predicted | observed` gives one string per row, the predicted row on the left of `|` and the observed row on the right. `crop` names that area when it differs from `where`.
 
 When the two grids do not have the same shape, only their shapes are given.
 
-Observations from `data_api` are nested lists. To use a `where` in code, convert the layer first: `numpy.array(obs["frame"][0])[45:50, 34:39]`.
+Observations from `data_api` are nested lists. To use a `where` in code, convert the layer first: `numpy.array(obs["frame"][0])[5:8, 2:6]`.
 
 __IMAGE_PREVIEWS__## 4. Follow the next phase
 
-A CWM contradiction (incorrect prediction or reconstruction, or a compactness failure on new evidence) stops the controller call and returns you to the **Modeling Phase**. Use the new data to repair and resubmit the CWM. Ordinary exploration completion leaves you in the **Acting Phase**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the result's `phase_change` field and the reported error. Controller errors receive worst performance metrics; already recorded experience is retained. A successful subgoal does not end the task unless the full game is solved.
+A CWM contradiction (incorrect prediction or reconstruction, or a compactness failure on new evidence) stops the controller call and returns you to the **Modeling Phase**. Use the new data to repair and resubmit the CWM. A call that ends without a contradiction leaves you in the **Acting Phase**: choose the next experiment. Execution failures can require revalidation without demonstrating a wrong game rule; follow the result's `phase_change` field and the reported error. A controller error keeps the actions already played and their recorded experience. A successful subgoal does not end the task unless the full game is solved.
