@@ -42,7 +42,7 @@ _LOCAL_HELPERS = """
 
 `serialized_size(value)` returns the bytes the compactness check counts for a State or an observation, and `serialize(value)` the JSON text it measures.
 
-Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before submitting a real exploration. Submitted callbacks must supply a State explicitly, not load data through the factory.
+Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before running a controller. Submitted callbacks must supply a State explicitly, not load data through the factory.
 """
 
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at the start of every call; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
@@ -68,7 +68,7 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "PLANNING_WORKFLOW": (
             "- **Optional planning.** In the Acting Phase, define a goal in `goal.py` and "
             "use `PlanInCWM` to find an action list in the accepted CWM. You can then use "
-            "that list in your exploration controller. See `docs/plan_in_CWM.md`.\n"
+            "that list in your controller. See `docs/plan_in_CWM.md`.\n"
             if planner
             else ""
         ),

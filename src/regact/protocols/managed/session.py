@@ -606,7 +606,7 @@ class ManagedCoordinator:
                 value = [
                     {
                         "episode_id": e["episode_id"],
-                        "started_by": e["purpose"],
+                        "started_by": "call" if e["purpose"] == "exploration" else e["purpose"],
                         "start_observation_id": e["initial_obs_id"],
                         "n_steps": e["n_steps"],
                         "live": e["episode_id"] == self.episode,

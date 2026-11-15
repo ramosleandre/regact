@@ -72,13 +72,13 @@ def achieved(state):
         '''"""Replace this docstring with the experimental goal (used for logging)."""
 
 class Controller:
-    """Acts on the State carried by the accepted CWM; each real exploration gets a fresh instance."""
+    """Acts on the State carried by the accepted CWM; each RunController call gets a fresh instance."""
     def act(self, state):
         """Return one action in the problem's format. Private memory is allowed."""
         raise NotImplementedError("Choose an action for this state")
 
     def is_done(self, state):
-        """Return True to stop this exploration early; framework limits still apply."""
+        """Return True to stop this call early; framework limits still apply."""
         return False
 
     # Optional: objective_reached(self, state) -> bool for a distinct goal-achieved signal.
