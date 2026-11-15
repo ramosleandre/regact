@@ -310,3 +310,19 @@ def test_a_failed_callback_shows_its_error_under_the_message():
     shown = present("RunController", failed, CwmConfig(), LimitsConfig())
     assert list(shown)[:3] == ["status", "message", "error"]
     assert "at most 2048 MiB" in shown["error"]["message"]
+
+
+def test_a_comparison_survives_a_prediction_that_renders_oddly():
+    import numpy as np
+
+    from regact.protocols.cwm.viewer import comparison_png
+
+    class Picture:
+        def render_frame(self, obs):
+            # A malformed predicted frame (one grid level too deep) renders with an extra axis.
+            depth = 4 if isinstance(obs.frame[0][0], list) else 3
+            return np.zeros((8, 8, 4, 3) if depth == 4 else (8, 8, 3), dtype=np.uint8)
+
+    obs = {"frame": [[1, 2]], "reward": 0.0, "is_done": False, "available_actions": [1], "info": {}}
+    odd = {**obs, "frame": [[[1, 2]]]}
+    assert comparison_png(Picture(), obs, odd, obs).startswith(b"\x89PNG")

@@ -69,7 +69,10 @@ def comparison_png(
             frame = problem.render_frame(Obs.from_json(obs))
         except Exception:  # a predicted observation can be malformed
             return None
-        return None if frame is None else np.asarray(frame, dtype=np.uint8)[..., :3]
+        if frame is None:
+            return None
+        image = np.asarray(frame, dtype=np.uint8)
+        return image[..., :3] if image.ndim == 3 else None  # malformed frames render oddly
 
     drawn = [draw(previous), draw(predicted), draw(observed)]
     if drawn[2] is None:
