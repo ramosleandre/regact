@@ -1048,16 +1048,22 @@ class ManagedCoordinator:
         if not previews or not self.options.n_tmp_images_saved_per_exploration:
             return
         selected = select_preview_ids(observations, self.options.n_tmp_images_saved_per_exploration)
-        saved = []
-        try:
-            from regact.protocols.cwm.viewer import png
+        from regact.protocols.cwm.viewer import png
 
-            for oid in selected:
+        saved = []
+        skipped: dict[str, list[int]] = {}
+        for oid in selected:
+            try:
                 save_preview(self.workdir, oid, png(self.problem, self.store.observation(oid)))
                 saved.append(oid)
-        except Exception as exc:
+            except Exception as exc:
+                skipped.setdefault(str(exc), []).append(oid)
+        if skipped:
             result["image_preview_error"] = budgets.truncate_error(
-                f"Could not save all observation previews: {exc}",
+                "; ".join(
+                    f"No preview for observation {', '.join(map(str, ids))}: {reason}"
+                    for reason, ids in skipped.items()
+                ),
                 self.options.feedback.max_error_chars,
             )
             self.event("image_preview_error", error=result["image_preview_error"])
@@ -1182,14 +1188,16 @@ class ManagedCoordinator:
         vision, saves its image); it is never stored with the result."""
         if self.options.exp_buffer:
             return response
-        self._save_final_image()
+        error = self._save_final_image()
+        if error:
+            response = {**response, "image_preview_error": error}
         return {**response, "observation": self.store.observation(self.current_id)}
 
-    def _save_final_image(self) -> None:
+    def _save_final_image(self) -> str | None:
         """Without the buffer and with vision, ``tmp/images/final.png`` is the current observation,
-        from the task's start on."""
+        from the task's start on; returns why it could not be saved."""
         if self.options.exp_buffer or not self.config.agent.vision:
-            return
+            return None
         from regact.protocols.cwm.viewer import png
 
         try:
@@ -1198,7 +1206,10 @@ class ManagedCoordinator:
             remove_image_file(self.workdir, "final.png")
             save_image_file(self.workdir, "final.png", png(self.problem, obs))
         except (OSError, ValueError) as exc:
-            self.event("image_preview_error", error=str(exc)[:300])
+            error = f"tmp/images/final.png was not saved: {str(exc)[:300]}"
+            self.event("image_preview_error", error=error)
+            return error
+        return None
 
     def note_grant(self, name: str, outcome: str, waited: float) -> None:
         with self.lock:

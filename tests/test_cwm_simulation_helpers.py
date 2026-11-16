@@ -171,6 +171,26 @@ async def test_real_exploration_ids_preview_cap_and_next_submission_clears(rig, 
 
 
 @pytest.mark.integration
+async def test_an_observation_without_an_image_skips_only_its_own_preview(rig, monkeypatch):
+    c, _ = rig
+    accept(c)
+    c.options.n_tmp_images_saved_per_exploration = 4
+
+    def png(problem, obs):
+        if obs["frame"][0] == 1:  # observation 2
+            raise ValueError("the observation has no image")
+        return bytes([obs["frame"][0]])
+
+    monkeypatch.setattr("regact.protocols.cwm.viewer.png", png)
+    exploration(c, (1,) * 5)
+    result, _ = await submit(c)
+    assert result["observation_images"] == "tmp/images/obs_id_<n>.png for <n> in [1, 5:6]"
+    assert result["image_preview_error"] == (
+        "No preview for observation 2: the observation has no image"
+    )
+
+
+@pytest.mark.integration
 async def test_partial_real_error_retains_ids_and_identifies_invalid_action(rig, monkeypatch):
     c, _ = rig
     accept(c)

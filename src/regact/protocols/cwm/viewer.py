@@ -36,7 +36,7 @@ def png(problem: BaseProblem, obs: dict[str, Any], task_name: str | None = None)
         else problem.render_frame_for_viewer(Obs.from_json(obs), task_name)
     )
     if frame is None:
-        raise ValueError("this problem has no image renderer")
+        raise ValueError("the observation has no image")
     image = frame if isinstance(frame, Image.Image) else Image.fromarray(frame)
     stream = io.BytesIO()
     image.save(stream, format="PNG")
@@ -76,7 +76,7 @@ def comparison_png(
 
     drawn = [draw(previous), draw(predicted), draw(observed)]
     if drawn[2] is None:
-        raise ValueError("this problem has no image renderer")
+        raise ValueError("the observed observation has no image")
     h = max(a.shape[0] for a in drawn if a is not None)
     w = max(a.shape[1] for a in drawn if a is not None)
 

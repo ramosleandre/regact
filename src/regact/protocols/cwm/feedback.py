@@ -430,4 +430,6 @@ def summary_line(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfi
         line += "; error: " + out["error"]["message"]
     if "task_stop" in out:
         line += "; " + out["task_stop"]["message"]
+    if r.get("image_preview_error"):
+        line += "; " + r["image_preview_error"]
     return line

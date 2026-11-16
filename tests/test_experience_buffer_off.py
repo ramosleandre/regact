@@ -146,6 +146,26 @@ async def test_the_current_image_follows_a_command_that_does_not_clear_the_image
     assert final.read_bytes() == initial
 
 
+class GameOverPictureProblem(Problem):
+    def render_frame(self, obs):
+        return None if obs.frame[0] == 1 else numpy.zeros((2, 2, 3), dtype=numpy.uint8)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_observation_without_an_image_is_named_in_the_summary(make_rig):
+    c = make_rig(exp_buffer=False, target=1, vision=True, problem=GameOverPictureProblem())
+    final = c.workdir / "tmp" / "images" / "final.png"
+    exploration(c, (1,))
+    out = await ManagedTool("RunController", c).call({}, ToolContext(cwd=str(c.workdir)))
+    assert out.data.partition("\n")[0].endswith(
+        "; tmp/images/final.png was not saved: the observation has no image"
+    )
+    assert not final.exists()
+    reset = await ManagedTool("ResetEnvironment", c).call({}, ToolContext(cwd=str(c.workdir)))
+    assert "final.png" not in reset.data.partition("\n")[0] and final.exists()
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("exp_buffer", [True, False])
 def test_a_harness_without_phases_is_never_told_a_phase(make_rig, exp_buffer):
