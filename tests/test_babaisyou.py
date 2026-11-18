@@ -425,3 +425,18 @@ def test_a_stage_is_played_through_the_environment():
             _, _, done, _, info = env.step(code[move])
     assert done and info["levels_completed"] == 2
     assert problem.secret_modules() == ("regact.problems.grid_games.babaisyou",)
+
+
+def test_a_tile_with_many_stacked_entries_still_renders():
+    """MAKE can stack more entries in one cell than the tile has pixel rows; the picture keeps the
+    first ones and counts the rest, and a tile within the limit is drawn as before."""
+    import numpy as np
+
+    from regact.problems.grid_games import babaisyou
+
+    few = [[["flag:right"] * babaisyou._MAX_BANDS]]
+    many = [[["flag:right"] * 41]]
+    more = [[["flag:right"] * 42]]
+    pictures = [np.asarray(babaisyou._render(frame)) for frame in (few, many, more)]
+    assert all(p.shape == (babaisyou._TILE, babaisyou._TILE, 3) for p in pictures)
+    assert not (pictures[0] == pictures[1]).all() and not (pictures[1] == pictures[2]).all()

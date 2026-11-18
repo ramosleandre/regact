@@ -200,8 +200,9 @@ class BabaIsYouProblem(GridGameProblem):
         ).scores()
 
     def render_frame(self, obs: Obs) -> Any | None:
-        """Each tile with its entries written in it (several entries share the tile in bands):
-        word blocks white on black, objects black on a colour of their own."""
+        """Each tile with its entries written in it (several entries share the tile in bands,
+        and past _MAX_BANDS the last band counts the rest): word blocks white on black, objects black
+        on a colour of their own."""
         return _render(obs.frame)
 
     def render_obs_text(self, obs: Obs) -> str | None:
@@ -222,6 +223,7 @@ class BabaIsYouProblem(GridGameProblem):
 
 
 _TILE = 40
+_MAX_BANDS = 5  # more entries than this in one tile: the last band counts the rest
 
 
 def _colour(name: str) -> tuple[int, int, int]:
@@ -245,10 +247,17 @@ def _render(frame: Any) -> Any | None:
             entries = [e for e in cell if isinstance(e, str)]
             if not entries:
                 continue
+            if len(entries) > _MAX_BANDS:
+                hidden = len(entries) - _MAX_BANDS + 1
+                entries = entries[: _MAX_BANDS - 1] + [f"+{hidden}"]
             band = _TILE // len(entries)
             for k, entry in enumerate(entries):
                 top, left = y * _TILE + k * band, x * _TILE
                 box = (left, top, left + _TILE - 1, top + band - 1)
+                if entry.startswith("+"):
+                    pen.rectangle(box, fill=(20, 20, 24), outline=(235, 235, 235))
+                    pen.text((left + 2, top - 1), entry, fill=(255, 255, 255))
+                    continue
                 if entry == engine.EDGE:
                     pen.rectangle(box, fill=(60, 60, 64))
                     continue
