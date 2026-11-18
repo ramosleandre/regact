@@ -16,7 +16,7 @@ def templates(
     options = options or CwmConfig()
     commands = commands or enabled_commands(options)
     yield from common_templates(ctx, options, commands, vision=vision)
-    if options.workspace_helpers_enabled:
+    if options.workspace_helpers_enabled and not options.stochastic:
         yield TemplateFile("framework/cwm_env.py", CWM_ENV)
     from regact.protocols.cwm.prompting import workspace_docs
 
@@ -46,14 +46,28 @@ class State:
         ),
         (
             "transition",
-            "step(state, action)",
-            "Predict the State after one problem-format action, without real interaction. Carry everything later observations depend on, including what the screen does not show. Do not mutate either input.",
+            "step(state, action, choose)" if options.stochastic else "step(state, action)",
+            "Predict the State after one problem-format action, without real interaction. Carry everything later observations depend on, including what the screen does not show. Do not mutate either input."
+            + (" Ask choose(name, dist) for every outcome the State and action do not decide." if options.stochastic else ""),
         ),
     ]:
         yield TemplateFile(
             f"world_model/model_{name}.py",
             f'from world_model.model_state import State\n\ndef {signature}:\n    """{doc}"""\n    raise NotImplementedError("Implement using recorded experience")\n',
         )
+    if options.stochastic:
+        yield TemplateFile(
+            "world_model/model_explain.py",
+            'def explain(state, action, obs):\n    """Optional. Values for some of step\'s choices, by name, read from the observed next\n    observation obs; the framework searches the others. Do not mutate the inputs."""\n    return {}\n',
+        )
+        yield TemplateFile(
+            "world_model/model_reset.py",
+            'from world_model.model_initial_state import get_initial_state\n\n\ndef reset(state, obs):\n    """Optional. The State after a reset: state is the State the previous life ended in, obs\n    the first observation of the new one. Keep what is still true. Do not mutate the inputs."""\n    return get_initial_state(obs)\n',
+        )
+        if options.workspace_helpers_enabled:
+            from regact.protocols.cwm.workspace_helpers import CWM_STOCHASTIC
+
+            yield TemplateFile("framework/cwm_stochastic.py", CWM_STOCHASTIC)
     if "PlanInCWM" in commands:
         yield TemplateFile(
             "goal.py",

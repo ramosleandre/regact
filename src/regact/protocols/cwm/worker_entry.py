@@ -5,8 +5,10 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import importlib
+import inspect
 import json
 import math
+import random
 import resource
 import sys
 import time
@@ -105,6 +107,95 @@ def state_result(state: Any) -> Any:
     return encode(state)
 
 
+class _Trace:
+    """One run of a stochastic step: the value given to every `choose` and its probability."""
+
+    def __init__(self, pins: dict[str, Any], prefix: list[Any], rng: Any = None) -> None:
+        self.pins, self.prefix, self.rng = pins, prefix, rng
+        self.items: list[tuple[str, Any, float, bool]] = []  # name, value, probability, pinned
+        self.free: list[tuple[Any, float, list[tuple[Any, float]]]] = []  # value, p, alternatives
+        self.dists: list[list[tuple[Any, float]]] = []  # per item, its values most probable first
+        self.possible = True
+
+    def choose(self, name: Any, dist: Any) -> Any:
+        if not isinstance(name, str) or not name:
+            raise TypeError("choose(name, dist): name must be a non-empty string")
+        if any(name == item[0] for item in self.items):
+            raise ValueError(f"choose was called twice with the name {name!r} in one step")
+        if isinstance(dist, dict):
+            options = list(dist.items())
+        elif isinstance(dist, (list, tuple, set, frozenset)) and dist:
+            values = list(dist) if isinstance(dist, (list, tuple)) else sorted(dist, key=repr)
+            options = [(value, 1 / len(values)) for value in values]
+        else:
+            raise TypeError(f"choose({name!r}): dist must be a dictionary value -> probability "
+                            "or a non-empty list of equally likely values")
+        total = 0.0
+        for _, p in options:
+            if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1:
+                raise ValueError(f"choose({name!r}): probabilities must be numbers in [0, 1]")
+            total += p
+        if abs(total - 1) > 1e-6:
+            raise ValueError(f"choose({name!r}): probabilities sum to {total}, not 1")
+        ranked = sorted((item for item in options if item[1] > 0), key=lambda item: -item[1])
+        self.dists.append(ranked)
+        if name in self.pins:
+            value = self.pins[name]
+            p = next((q for v, q in ranked if v == value), 0.0)
+            if p == 0:
+                self.possible = False
+                value, p = ranked[0][0], 0.0
+            self.items.append((name, value, p, True))
+            return value
+        k = len(self.free)
+        if self.rng is not None:
+            value, p = self.rng.choices(ranked, weights=[q for _, q in ranked])[0]
+        elif k < len(self.prefix):
+            value = self.prefix[k]
+            p = next(q for v, q in ranked if v == value)
+        else:
+            value, p = ranked[0]
+        self.free.append((value, p, ranked))
+        self.items.append((name, value, p, False))
+        return value
+
+    def bits(self) -> float:
+        return sum(-math.log2(p) for _, _, p, _ in self.items) if self.possible else math.inf
+
+
+def run_step(state: Any, action: Any, trace: _Trace) -> Any:
+    before = encode(state)
+    result = agent(step, state, action, trace.choose)
+    if encode(state) != before:
+        raise ValueError("CWM/goal callbacks must not mutate their input")
+    return result
+
+
+def choice_values(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or not all(isinstance(k, str) for k in value):
+        raise TypeError("explain must return a dictionary: choice name -> value")
+    for name, item in value.items():
+        if item is not None and type(item) not in (bool, int, float, str):
+            raise TypeError(f"explain: the value of {name!r} must be a string, number, boolean or None")
+    return value
+
+
+def run_step_op(request: dict[str, Any]) -> dict[str, Any]:
+    """One run of step with the given values: `pins` by name, `prefix` for the other choices in
+    call order, the most probable value for the rest. Every choice comes back with its values
+    and probabilities, so the trusted side prices the run and searches the alternatives."""
+    trace = _Trace(request.get("pins") or {}, request.get("prefix") or [])
+    after = run_step(decode(request["state"]), request["action"], trace)
+    return {
+        "state": state_result(after),
+        "possible": trace.possible,
+        "choices": [
+            [name, value, p, pinned, [[v, q] for v, q in ranked]]
+            for (name, value, p, pinned), ranked in zip(trace.items, trace.dists, strict=True)
+        ],
+    }
+
+
 def handle(request: dict[str, Any]) -> Any:
     global controller
     op = request["op"]
@@ -112,6 +203,22 @@ def handle(request: dict[str, Any]) -> Any:
         return state_result(immutable_call(get_initial_state, request["obs"]))
     if op == "render":
         return immutable_call(render, decode(request["state"]))
+    if op == "run_step":
+        return run_step_op(request)
+    if op == "explain":
+        if explain is None:
+            return {}
+        return choice_values(immutable_call(explain, decode(request["state"]), request["action"], request["obs"]))
+    if op == "start_state":
+        previous = request.get("previous")
+        if reset is None or previous is None:
+            return state_result(immutable_call(get_initial_state, request["obs"]))
+        return state_result(immutable_call(reset, decode(previous), request["obs"]))
+    if op == "step" and STOCHASTIC:
+        # outside validation: the likeliest outcome, or a sampled one when a seed is given
+        seed = request.get("seed")
+        rng = random.Random(seed) if seed is not None else None
+        return state_result(run_step(decode(request["state"]), request["action"], _Trace({}, [], rng)))
     if op == "step":
         return state_result(immutable_call(step, decode(request["state"]), request["action"]))
     if op == "goal":
@@ -133,10 +240,20 @@ def handle(request: dict[str, Any]) -> Any:
             raise ValueError("an achieved goal must have utility 1")
         return {"achieved": achieved, "utility": utility}
     if op == "controller_init":
-        controller = agent(lambda: importlib.import_module("controller").get_controller())
+        controller = agent(lambda: importlib.import_module(request.get("module", "controller")).get_controller())
         if not callable(getattr(controller, "act", None)):
             raise TypeError("get_controller must return an object with act(state)")
         return None
+    if op == "surprise_bits":
+        # the controller's own threshold for stopping on an unlikely step; absent = the default
+        if not hasattr(controller, "stop_on_surprise_bits"):
+            return {"set": False}
+        value = controller.stop_on_surprise_bits
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0
+        ):
+            raise TypeError("stop_on_surprise_bits must be a positive number, or None to never stop")
+        return {"set": True, "value": None if value is None or math.isinf(value) else float(value)}
     if op == "is_done":
         if getattr(controller, "is_done", None) is None:
             return False  # optional: without it, only the environment and the limits stop a call
@@ -173,6 +290,7 @@ if __name__ == "__main__":
     # Mirror the agent workspace: one root, ordinary package imports, one State class.
     sys.path.insert(0, str(BUNDLE))
     wire = sys.stdout
+    STOCHASTIC, explain, reset = False, None, None
     try:
         with contextlib.redirect_stdout(sys.stderr):
             if len(sys.argv) < 4 or sys.argv[3] == "1":
@@ -181,6 +299,11 @@ if __name__ == "__main__":
                 get_initial_state = agent(load, "world_model.model_initial_state").get_initial_state
                 render = agent(load, "world_model.model_render").render
                 step = agent(load, "world_model.model_transition").step
+                STOCHASTIC = len(inspect.signature(step).parameters) == 3
+                if STOCHASTIC and (BUNDLE / "world_model" / "model_explain.py").exists():
+                    explain = agent(load, "world_model.model_explain").explain
+                if STOCHASTIC and (BUNDLE / "world_model" / "model_reset.py").exists():
+                    reset = agent(load, "world_model.model_reset").reset
         wire.write(json.dumps({"ready": True, "seconds": spent}) + "\n")
         wire.flush()
     except BaseException as exc:

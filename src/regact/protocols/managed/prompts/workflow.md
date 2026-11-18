@@ -1,7 +1,7 @@
 # Workflow
 
 __PROTOCOL_INTRO____PROTOCOL_STEPS__
-- **Final objective.** Complete the game. Keep working until it is solved or the framework ends the task for budget reasons. Seek understanding as well as immediate progress.__OBJECTIVE_NOTE__
+- **Final objective.** __OBJECTIVE__ Seek understanding as well as immediate progress.__OBJECTIVE_NOTE__
 
 __LIFECYCLE__
 

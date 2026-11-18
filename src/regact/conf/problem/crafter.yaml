@@ -1,0 +1,12 @@
+name: crafter
+tasks: []               # every seed of kwargs.seeds, as crafter_s<seed>
+lifecycle: single_instance
+obs_mode: raw
+info_mode: informative
+seed: null              # ignored: a task's map is the seed in its name
+kwargs:
+  seeds: [0, 1, 2, 3, 4]
+  # Frozen evaluation when a task ends: its final controller plays one life per map below.
+  # 10 episodes of at most 2000 steps is BALROG's Crafter setting.
+  eval_seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+  eval_max_actions: 2000

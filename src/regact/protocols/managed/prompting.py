@@ -206,6 +206,7 @@ def build_prompt(
         PROTOCOL_INTRO=workflow_intro.strip() + "\n\n" if workflow_intro else "",
         PROTOCOL_STEPS="\n".join(steps),
         LIFECYCLE=lifecycle_instructions(config),
+        OBJECTIVE=problem.objective_prompt(),
         OBJECTIVE_NOTE=" " + config.objective_note if config.objective_note else "",
         CALLBACKS="Controllers and the CWM" if uses_model else "Controllers",
         INACCESSIBLE="the dataset, " if buffer else "",
@@ -215,7 +216,8 @@ def build_prompt(
         [
             _render("role.md"),
             workspace,
-            _render("environment.md", ACTION_FORMAT=problem.action_format()),
+            problem.environment_prompt()
+            or _render("environment.md", ACTION_FORMAT=problem.action_format()),
             workflow,
         ],
         tool_protocol=tool_protocol,

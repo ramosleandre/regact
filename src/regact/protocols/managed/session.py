@@ -46,6 +46,7 @@ from regact.protocols.cwm.store import (
 )
 from regact.protocols.cwm.validation import diagnostic_pointer
 from regact.protocols.cwm.worker import Worker, WorkerError
+from regact.protocols.managed.evaluation import SKIPPED_EXITS, evaluate
 from regact.protocols.managed.grants import GRANT_WAIT_LOGGED_SECONDS, CommandGrants
 from regact.protocols.managed.observation_text import observation_text
 from regact.protocols.managed.prompting import reset_commands
@@ -126,6 +127,7 @@ class ManagedCoordinator:
         self.accepted: dict[str, Any] | None = None
         self.latest: dict[str, Any] | None = None
         self.best: dict[str, Any] | None = None
+        self.evaluation: dict[str, Any] | None = None  # the frozen evaluation, once the task ended
         self.closed = False
         self.episode: int | None = None
         self.active_request: int | None = None
@@ -231,6 +233,7 @@ class ManagedCoordinator:
         return self.problem.main_scores(
             {
                 **(self.latest or {}).get("aggregate", {}),
+                **(self.evaluation or {}).get("metrics", {}),
                 **self.problem.derived_trace_metrics(
                     self.task, info_trace(self.store.db, self.problem.counts_as_action)
                 ),
@@ -262,6 +265,7 @@ class ManagedCoordinator:
                 "main_metrics": metrics,
                 "latest_exploration": self.latest,
                 "best_exploration": self.best,
+                **({"evaluation": self.evaluation["metrics"]} if self.evaluation else {}),
                 "config": dataclasses.asdict(self.options),
             },
         )
@@ -481,7 +485,12 @@ class ManagedCoordinator:
                 new_milestones.append(item)
                 self.event("milestone_observed", milestone=item)
         evidence["new_milestones"] = new_milestones
-        if self.uses_model and evidence["conflicting_witnesses"]:
+        # a stochastic CWM expects the same history to lead to different observations
+        if (
+            self.uses_model
+            and evidence["conflicting_witnesses"]
+            and not getattr(self.options, "stochastic", False)
+        ):
             self.terminal = "observation_determinism_violation"
             self.event("observation_determinism_violation", **evidence)
         return after, evidence
@@ -773,6 +782,16 @@ class ManagedCoordinator:
     def after_valid_run(self):
         pass
 
+    def controller_started(self, controller) -> None:
+        pass
+
+    def stop_after_step(self) -> str | None:
+        """A reason to end the call after a checked step, the model still standing."""
+        return None
+
+    def annotate_run(self, result: dict[str, Any]) -> None:
+        pass
+
     def explore(self) -> dict[str, Any]:
         model = self.exploration_model()
         bundle, manifest = snapshot(
@@ -854,6 +873,7 @@ class ManagedCoordinator:
                     )
                     role = "controller"
                     controller.call("controller_init")
+                    self.controller_started(controller)
                     for _ in budgets.action_indices(self.options.max_actions_per_RunController):
                         if obs["is_done"]:
                             reason = "environment_done"
@@ -899,6 +919,9 @@ class ManagedCoordinator:
                             break
                         role = "model"
                         self.check_prediction(predicted, obs, evidence)
+                        if stop := self.stop_after_step():
+                            reason = stop
+                            break
                         # Always check the final real observation, even at an action cap.
                         state = self.controller_input(worker, obs)
                         role = "controller"
@@ -998,6 +1021,7 @@ class ManagedCoordinator:
                 },
             }
             result["stop_reason"] = reason
+            self.annotate_run(result)
         # A single-instance episode spans several calls; its metrics count all of them.
         steps = self.env.live.episode_action_count
         metrics = self.problem.compute_episode_metrics(Obs.from_json(obs), steps=steps)
@@ -1239,6 +1263,15 @@ class ManagedCoordinator:
                     self.active_request = None
                 self.event("cwm_run_finished", reason=self.terminal)
                 self.persist()
+                if self.terminal not in SKIPPED_EXITS:
+                    self.deadline = float("inf")  # shutdown brought it forward to stop the workers
+                    try:
+                        self.evaluation = evaluate(self)
+                    except Exception as exc:
+                        self.event("evaluation_failed", error=f"{type(exc).__name__}: {exc}"[:500])
+                    self.persist()
+                    if self.evaluation and self.context is not None:  # the loop saved it earlier
+                        self.context.experiment.save(str(self.output / "logs/experiment_state.json"))
             finally:
                 try:
                     self.env.close()
@@ -1412,7 +1445,7 @@ class ManagedSession(ProtocolSession):
         self.coordinator.grants.call_finished(call_id)
 
     def reminder(self, reminders: int) -> str:
-        return "Continue your work until the game is fully solved.\n" + self.coordinator.next_step()
+        return self.coordinator.problem.continue_reminder() + "\n" + self.coordinator.next_step()
 
     def interaction_guidance(self) -> str:
         return ""

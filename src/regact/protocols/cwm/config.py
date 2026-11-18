@@ -60,6 +60,11 @@ class CwmConfig:
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
     one_command_per_tool_call: bool = True
+    # CWM-stochastic: step(state, action, choose) names its random choices; a recorded step is
+    # explained by values of those choices, and costs -log2 of their probability, in bits.
+    stochastic: bool = False
+    max_nodes_per_explanation: int | None = 2000  # step runs searched to explain one transition
+    max_surprise_bits_per_choice: float | None = 10  # a choice value this unlikely stops the call
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
@@ -91,6 +96,7 @@ class CwmConfig:
                     "workspace_helpers_enabled",
                     "one_command_per_tool_call",
                     "enabled",
+                    "stochastic",
                 ):
                     if type(value) is not bool:
                         raise ValueError(f"{prefix}{key} must be a boolean")
@@ -105,7 +111,10 @@ class CwmConfig:
                         or value <= 0
                     ):
                         raise ValueError(f"{prefix}{key} must be a positive finite number")
-                    if "seconds" not in key and "ratio" not in key and not isinstance(value, int):
+                    if (
+                        not any(word in key for word in ("seconds", "ratio", "bits"))
+                        and not isinstance(value, int)
+                    ):
                         raise ValueError(f"{prefix}{key} must be an integer")
 
         validate(dataclasses.asdict(config), "protocol.")

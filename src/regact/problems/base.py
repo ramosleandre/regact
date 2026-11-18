@@ -53,6 +53,22 @@ class BaseProblem(ABC):
         """Explicit reset capabilities for externally managed controller protocols."""
         return {"ResetEnvironment": "Reset the whole environment from its initial state."}
 
+    def environment_prompt(self) -> str | None:
+        """This problem's own Environment section for the managed protocols, when the common one
+        (a deterministic game with levels, scored on actions) does not describe it."""
+        return None
+
+    def objective_prompt(self) -> str:
+        """The final objective, as the managed protocols state it."""
+        return (
+            "Complete the game. Keep working until it is solved or the framework ends the task "
+            "for budget reasons."
+        )
+
+    def continue_reminder(self) -> str:
+        """What an agent that stopped early is told."""
+        return "Continue your work until the game is fully solved."
+
     def action_format(self) -> str:
         """The game-agnostic prompt line saying how to write an action."""
         return "An action is an integer from `available_actions`."
@@ -215,6 +231,19 @@ class BaseProblem(ABC):
         ``(real actions so far, observation info)`` after every real step of the whole task."""
         return {}
 
+    def evaluation_tasks(self, task_name: str) -> list[str]:
+        """Held-out tasks the final controller of ``task_name`` plays once each when the task
+        ends, with no agent (see ``protocols.managed.evaluation``). Empty: no such evaluation."""
+        return []
+
+    def evaluation_max_actions(self) -> int | None:
+        """The most actions of one evaluation episode."""
+        return None
+
+    def evaluation_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
+        """Scores of a frozen evaluation; each episode carries its last observation's ``info``."""
+        return {}
+
     @abstractmethod
     def build_prompt(
         self,
@@ -268,7 +297,7 @@ def all_secret_modules() -> tuple[str, ...]:
 
 def _load_builtins() -> None:
     """Import built-in problem modules so they self-register (no game lib needed to import)."""
-    from regact.problems import arc_agi, grid_games, minigrid  # noqa: F401
+    from regact.problems import arc_agi, crafter, grid_games, minigrid  # noqa: F401
 
 
 def observation_prompt(text: str, *, direct_interaction: bool) -> str:

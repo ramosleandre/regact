@@ -512,3 +512,65 @@ def test_workers_without_an_os_sandbox_need_an_explicit_opt_in(protocol_name):
     with pytest.raises(ValueError, match="allow_unisolated_workers"):
         build_protocol(config()).validate()
     build_protocol(config(allow_unisolated_workers=True)).validate()
+
+
+class SkippingNative(Native):
+    def step(self, a):
+        self.n += 1  # two per action: not what a CWM learned on Native predicts
+        return super().step(a)
+
+
+class HeldOutProblem(Problem):
+    def make_env(self, task):
+        return SkippingNative() if task == "held_skipping" else Native()
+
+    def evaluation_tasks(self, task):
+        return ["held_same", "held_skipping"]
+
+    def evaluation_max_actions(self):
+        return 2
+
+    def evaluation_metrics(self, episodes):
+        return {"eval_actions": sum(e["actions"] for e in episodes)}
+
+
+@pytest.mark.parametrize("protocol", ["vanilla", "cwm"])
+def test_frozen_evaluation_plays_the_final_controller_on_held_out_tasks(make_rig, protocol):
+    c = make_rig(protocol, problem=HeldOutProblem())
+    exploration(c, (1,))
+    c.tool("RunController", {})
+    (c.workdir / "final_controller.py").write_text(
+        (c.workdir / "controller.py").read_text().replace("[1]", "[1, 1, 1]")
+    )
+    before = c.store.summary()
+    c.close("tool_call_limit")
+    result = json.loads((c.root / "evaluation.json").read_text())
+    assert result["controller"] == "final_controller.py"
+    same, skipping = result["episodes"]
+    assert (same["task"], same["actions"], same["stop_reason"]) == ("held_same", 2, "max_actions")
+    assert skipping["action_list"] == [1, 1]
+    if protocol == "cwm":  # an unexplained step rebuilds the State from the observation
+        assert (same["regrounded"], skipping["regrounded"]) == (0, 2)
+    status = json.loads((c.root / "status.json").read_text())
+    assert status["evaluation"] == {"eval_actions": 4}
+    assert {k: status[k] for k in before} == before  # nothing recorded as experience
+
+
+def test_frozen_evaluation_falls_back_and_skips_resumable_exits(make_rig):
+    c = make_rig("vanilla", problem=HeldOutProblem())
+    exploration(c, (1,))
+    c.tool("RunController", {})
+    (c.workdir / "final_controller.py").write_text("def get_controller(:\n")
+    c.close("walltime_limit")
+    result = json.loads((c.root / "evaluation.json").read_text())
+    assert result["controller"] == "last RunController call"
+    assert [e["stop_reason"] for e in result["episodes"]] == ["controller_done"] * 2
+
+    never_ran = make_rig("vanilla", problem=HeldOutProblem())
+    never_ran.close("tool_call_limit")
+    result = json.loads((never_ran.root / "evaluation.json").read_text())
+    assert [e["stop_reason"] for e in result["episodes"]] == ["no_controller"] * 2
+
+    interrupted = make_rig("vanilla", problem=HeldOutProblem())
+    interrupted.close("interrupted")
+    assert not (interrupted.root / "evaluation.json").exists()

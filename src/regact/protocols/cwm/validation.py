@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import heapq
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -112,6 +114,177 @@ def compactness_failure(
 
 
 _REPEAT_EVERY = 10  # repeatability is checked on episode starts and every 10th step
+_SURPRISES = 5  # most expensive steps listed in a loss report
+_BUCKETS = (0.01, 0.05, 0.2, 0.5, 0.8, 0.95, 1.0)  # upper edges of the calibration buckets
+_ALPHABET = 64  # values a component is assumed able to take, for the no-model reference
+
+
+def advance(
+    worker: Worker, explainer: Worker | None, state: Any, action: Any, obs: Any, config: CwmConfig
+) -> dict[str, Any]:
+    """Explain one real step with a stochastic CWM: the cheapest values of step's random choices
+    under which render gives ``obs``. ``explainer`` is a second process running the same model,
+    so what ``explain`` reads in the observation reaches ``step`` only as choice values, each
+    paid for. The search runs here: the process running ``step`` never sees ``obs``."""
+    pins = explainer.call("explain", state=state, action=action, obs=obs) if explainer else {}
+    target = canonical(obs)
+    queue: list[tuple[float, int, list[Any]]] = [(0.0, 0, [])]
+    nodes, first, tie = 0, None, 0
+    while queue and not budgets.reached(nodes, config.max_nodes_per_explanation):
+        _, _, prefix = heapq.heappop(queue)
+        run = worker.call("run_step", state=state, action=action, pins=pins, prefix=prefix)
+        nodes += 1
+        first = first or run
+        if run["possible"]:
+            rendered = worker.call("render", state=run["state"])
+            if canonical(rendered) == target:
+                bits = sum(-math.log2(p) for _, _, p, _, _ in run["choices"])
+                return {**run, "explained": True, "bits": bits, "nodes": nodes}
+        cost, k = 0.0, 0
+        for _, value, p, pinned, ranked in run["choices"]:
+            if pinned:
+                continue
+            if k >= len(prefix):
+                taken = [v for _, v, _, pin, _ in run["choices"] if not pin][:k]
+                for other, q in ranked:
+                    if other != value:
+                        tie += 1
+                        heapq.heappush(queue, (cost - math.log2(q), tie, [*taken, other]))
+            cost -= math.log2(p)
+            k += 1
+    assert first is not None
+    return {
+        **first,
+        "explained": False,
+        "bits": None,
+        "nodes": nodes,
+        "exhausted": not queue,
+        "impossible": [name for name, _, p, _, _ in first["choices"] if p == 0],
+    }
+
+
+def choice_group(name: str) -> str:
+    """`cow@3,4` and `cow@5,1` are two uses of the choice `cow`."""
+    return name.split("@", 1)[0]
+
+
+class Loss:
+    """Bits paid by a stochastic CWM for its explanations, per choice group, with two references
+    computed here: the same explanations priced with frequencies learned online (KT estimator),
+    and a model-free coder predicting each observation component from its previous value."""
+
+    def __init__(self) -> None:
+        self.steps = 0
+        self.total = 0.0
+        self.adaptive = 0.0
+        self.no_model = 0.0
+        self.groups: dict[str, dict[str, Any]] = {}
+        self.surprises: list[dict[str, Any]] = []
+        self.calibration = [[0, 0.0, 0] for _ in _BUCKETS]  # options, expected, happened
+        self._contexts: dict[tuple[str, str], dict[str, int]] = {}
+
+    def add(self, result: dict[str, Any], where: dict[str, Any], before: Any, after: Any) -> None:
+        self.steps += 1
+        self.total += result["bits"]
+        worst = None
+        for name, value, p, _pinned, ranked in result["choices"]:
+            for other, q in ranked:  # reliability: do things given probability q happen q of the time?
+                bucket = self.calibration[min(len(_BUCKETS) - 1, sum(q > edge for edge in _BUCKETS[:-1]))]
+                bucket[0] += 1
+                bucket[1] += q
+                bucket[2] += other == value
+            group = self.groups.setdefault(
+                choice_group(name), {"uses": 0, "bits": 0.0, "values": {}, "declared": {}}
+            )
+            key = canonical(value)
+            seen, n = group["values"].get(key, 0), group["uses"]
+            k = max(2, len(group["values"]) + (seen == 0))
+            self.adaptive -= math.log2((seen + 0.5) / (n + k / 2))
+            group["uses"] += 1
+            group["bits"] -= math.log2(p)
+            group["values"][key] = seen + 1
+            group["declared"][key] = group["declared"].get(key, 0.0) + p
+            if worst is None or p < worst[1]:
+                worst = (name, p)
+        self.no_model += self._components(before, after)
+        if worst is not None:
+            self.surprises.append(
+                {
+                    "episode_id": where["episode_id"],
+                    "step": where["step"],
+                    "bits": round(result["bits"], 2),
+                    "least_likely_choice": worst[0],
+                    "probability": round(worst[1], 5),
+                }
+            )
+            self.surprises = sorted(self.surprises, key=lambda item: -item["bits"])[:_SURPRISES]
+
+    def _components(self, before: Any, after: Any) -> float:
+        old, bits = dict(_leaves(before)), 0.0
+        for path, value in _leaves(after):
+            counts = self._contexts.setdefault((path, canonical(old.get(path))), {})
+            key, n = canonical(value), sum(counts.values())
+            bits -= math.log2((counts.get(key, 0) + 0.5) / (n + _ALPHABET / 2))
+            counts[key] = counts.get(key, 0) + 1
+        return bits
+
+    def report(self) -> dict[str, Any]:
+        steps = max(1, self.steps)
+        groups = []
+        for name, g in sorted(self.groups.items(), key=lambda item: -item[1]["bits"]):
+            n = g["uses"]
+            entropy = -sum(c / n * math.log2(c / n) for c in g["values"].values())
+            groups.append(
+                {
+                    "choice": name,
+                    "uses": n,
+                    "bits": round(g["bits"], 1),
+                    "excess_bits": round(g["bits"] - n * entropy, 1),
+                    # for each value: how often it happened, and the probability it had then
+                    "observed": _top({k: c / n for k, c in g["values"].items()}),
+                    "declared": {
+                        k: round(g["declared"][k] / g["values"][k], 3)
+                        for k in _top({k: c / n for k, c in g["values"].items()})
+                    },
+                }
+            )
+        return {
+            "steps": self.steps,
+            "total": round(self.total, 1),
+            "per_step": round(self.total / steps, 3),
+            "references_per_step": {
+                "adaptive_frequencies": round(self.adaptive / steps, 3),
+                "no_model": round(self.no_model / steps, 3),
+            },
+            "calibration": [
+                {
+                    "declared_up_to": edge,
+                    "options": n,
+                    "expected_to_happen": round(expected, 1),
+                    "happened": happened,
+                }
+                for edge, (n, expected, happened) in zip(_BUCKETS, self.calibration, strict=True)
+                if n
+            ],
+            "by_choice": groups,
+            "largest_surprises": self.surprises,
+        }
+
+
+def _top(shares: dict[str, float], n: int = 6) -> dict[str, float]:
+    ranked = sorted(shares.items(), key=lambda item: -item[1])
+    return {key: round(value, 3) for key, value in ranked[:n]}
+
+
+def _leaves(value: Any, path: str = "") -> Any:
+    if isinstance(value, dict):
+        for key in sorted(value):
+            yield from _leaves(value[key], f"{path}.{key}")
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            yield from _leaves(item, f"{path}[{i}]")
+    else:
+        yield path, value
 
 
 def validate(
@@ -122,6 +295,7 @@ def validate(
     live_episode: int | None = None,
     progress: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     explained_until: int | None = None,
+    explainer: Worker | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Replay every recorded episode in time order: get_initial_state on its first observation,
     then step carries the State, and render is checked against every recorded observation.
@@ -144,7 +318,10 @@ def validate(
         "observation_bytes": 0,
     }
     sizes: dict[str, Any] = {}
-    repeated = store.repeated_histories()
+    loss = Loss() if config.stochastic else None
+    # a stochastic State depends on what happened before, not only on the episode's own history
+    repeated = set() if config.stochastic else store.repeated_histories()
+    previous_final: Any = None  # the State at the end of the previous episode, for reset()
     validated: dict[str, Any] = {}  # repeated history hash -> State there, validated once
     diverged: set[str] = set()  # repeated history hashes where a failure is already reported
 
@@ -234,7 +411,10 @@ def validate(
                 state, alive = None, False
             else:
                 start = store.observation(episode["initial_obs_id"])
-                state = call("get_initial_state", True, where, obs=start)
+                if config.stochastic:
+                    state = worker.call("start_state", previous=previous_final, obs=start)
+                else:
+                    state = call("get_initial_state", True, where, obs=start)
                 alive = reached(
                     episode["start_hash"],
                     state,
@@ -265,18 +445,28 @@ def validate(
                 before = item["after_obs_id"]
                 repeat = item["step_index"] % _REPEAT_EVERY == 0
                 before_state = state
-                state = call("step", repeat, where, state=state, action=item["action"])
                 observed = store.observation(item["after_obs_id"])
+                if loss is None:
+                    state = call("step", repeat, where, state=state, action=item["action"])
+                else:
+                    advanced = advance(worker, explainer, state, item["action"], observed, config)
+                    state = advanced["state"]
+                    where = {**where, **explanation_note(advanced)}
                 ok = explains(state, observed, "prediction_mismatch", where, repeat, before_state)
+                if ok and loss is not None:
+                    loss.add(advanced, where, store.observation(where["from_observation_id"]), observed)
                 if not reached(item["history_hash"], state, ok):
                     alive = False  # the rest of this episode cannot be predicted from here
                     break
             if episode_id == live_episode and alive:
                 live = {"state": state, "hash": store.last_hash(episode_id)}
+            previous_final = state if alive else None
             summary["episodes_checked"] += 1
         for key in (*SIZE_KEYS, "smallest_state", "largest_state"):
             if key in sizes:
                 summary[key] = sizes[key]
+        if loss is not None:
+            summary["bits"] = loss.report()
         summary["state_obs_size_ratio"] = sizes.get("state_bytes", 0) / max(
             1, sizes.get("observation_bytes", 0)
         )
@@ -294,6 +484,18 @@ def validate(
     summary["complete"] = True
     summary["accepted"] = not summary["failures"]
     return summary, live
+
+
+def explanation_note(advanced: dict[str, Any]) -> dict[str, Any]:
+    """Why a stochastic step was not explained, for its counterexample."""
+    if advanced["explained"]:
+        return {}
+    note: dict[str, Any] = {"explanation_search_steps": advanced["nodes"]}
+    if advanced.get("impossible"):
+        note["choices_given_probability_0"] = advanced["impossible"][:10]
+    if not advanced.get("exhausted"):
+        note["search_budget_reached"] = True
+    return {"explanation": note}
 
 
 def _finish_counts(summary: dict[str, Any]) -> None:

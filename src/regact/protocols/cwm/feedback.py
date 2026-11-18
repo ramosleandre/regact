@@ -50,6 +50,10 @@ REASONS = {
     "compression_ratio": (
         "The state-size ratio exceeded the acceptance threshold on new experience."
     ),
+    "surprise": (
+        "The last step was explained by the CWM, but one of its choices took a value the CWM "
+        "called very unlikely. The CWM is still accepted; see `surprise`."
+    ),
     "controller_error": (
         "The controller failed. The actions it played are kept; repair controller.py."
     ),
@@ -217,6 +221,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
         for key in ("failures", "counterexamples", "counterexamples_omitted"):
             if r.get(key):
                 out[key] = r[key]
+        if status == "Accepted" and r.get("bits"):
+            out["bits"] = r["bits"]
         if "counterexamples" in out:
             out["counterexamples"] = [
                 {k: round(v, 3) if k == "ratio" else v for k, v in e.items()}
@@ -287,6 +293,8 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
             "counterexample",
             "differences",
             "new_milestones",
+            "bits",
+            "surprise",
         ):
             if key == "diagnostic_id" and "counterexample" in r:
                 continue  # the counterexample names the call that loads it

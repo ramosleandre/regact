@@ -29,6 +29,7 @@ dependencies = [
 # networkx + imageio (imageio is a core dep above) are what minigrid[wfc] needs for the
 # WFC procedural envs; the pattern PNGs they read are vendored under problems/minigrid/.
 minigrid = ["gymnasium>=0.29", "minigrid>=2.3", "networkx>=3.0"]
+crafter = ["crafter>=1.8"]
 arc = ["arc-agi>=0.9.9"]  # <0.9 (e.g. Adastra's 0.0.7) lacks arc_agi.OperationMode
 # BabaIsAI is not on PyPI: pinned to the commit the v8-envs integration was checked against.
 babaisai = ["baba @ git+https://github.com/nacloos/baba-is-ai@40ae1b2"]

@@ -32,6 +32,9 @@ _DESCRIPTIONS = {
     "world_model/model_render.py": 'define your "render: State -> observation (dictionary)"',
     "world_model/model_state.py": 'define your class "State"',
     "world_model/model_transition.py": 'define your "step: State, action -> State"',
+    "world_model/model_explain.py": '(optional) define your "explain: State, action, obs -> choices"',
+    "world_model/model_reset.py": '(optional) define your "reset: State, obs -> State"',
+    "framework/cwm_stochastic.py": "run and score your stochastic CWM locally",
 }
 _LOCAL_HELPERS = """
 ## Local simulation helpers
@@ -43,6 +46,24 @@ _LOCAL_HELPERS = """
 `serialized_size(value)` returns the bytes the compactness check counts for a State or an observation, and `serialize(value)` the JSON text it measures.
 
 Local execution uses the shell tool's timeout, not isolated-callback limits. Start a new script after edits. Validate changed CWM files with UpdateCodeWorldModel before running a controller. Submitted callbacks must supply a State explicitly, not load data through the factory.
+"""
+
+_STOCHASTIC_INTRO = """
+- **A stochastic model.** This environment is random or hides part of its state. Your `step` names its random choices, a recorded step must be *explained* by values of those choices, and each explanation costs bits. Read "Stochastic world model" at the end of `docs/modeling_phase.md` before writing `step`.
+"""
+
+_STOCHASTIC_ACTING = """
+**With a stochastic CWM, read this document with one change.** The CWM does not predict an observation before the action. After each real action, the framework *explains* the new observation: it looks for values of your `step`'s choices under which `render` gives exactly that observation, and the State they produce is carried on. Where this document says "prediction", read "the observation given by the most probable values of your choices". A step with no explanation is the contradiction described below. A step explained by a very unlikely value stops the call as a *surprise*, which you can tune from your controller. See "Stochastic world model" in `docs/modeling_phase.md`.
+"""
+
+_STOCHASTIC_HELPERS = """
+## Local helpers
+
+`framework/cwm_stochastic.py` runs your current workspace CWM locally; it submits nothing and takes no real action. `current_state()` returns the State your CWM gives for the live episode. `explain_step(state, action, obs)` does what the framework does for one recorded step and returns the explanation, its bits, or the best attempt when there is none. `sample_step(state, action, rng)` draws one outcome of `step`, for trying a plan in your model. `replay(episode_id)` explains a whole recorded episode and reports the bits per choice. Read their docstrings.
+"""
+
+_EVALUATION = """
+- **Final evaluation with the CWM.** The final evaluation described under Environment runs the controller with your accepted CWM, exactly as `RunController` does, except that nobody can repair the CWM there. When it cannot explain an observation, the State is rebuilt from that observation alone with `get_initial_state` and the life goes on: what the State remembered is lost. Nothing else stops the life early.
 """
 
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at the start of every call; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
@@ -104,13 +125,28 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         "PLANNER_CALLS": options.planner.max_cwm_calls_per_planner_call,
         "PLANNER_NODES": options.planner.max_nodes_per_planner_call,
         "PLANNER_DEPTH": options.planner.max_depth_per_planner_call,
-        "LOCAL_HELPERS": _LOCAL_HELPERS if options.workspace_helpers_enabled else "",
+        "LOCAL_HELPERS": (
+            ""
+            if not options.workspace_helpers_enabled
+            else _STOCHASTIC_HELPERS
+            if options.stochastic
+            else _LOCAL_HELPERS
+        ),
+        "STATE_BYTES": options.max_state_bytes_always_allowed,
         "ACTION_CAP": action_cap_sentence(options),
+        "EXPLAIN_NODES": options.max_nodes_per_explanation,
+        "SURPRISE_BITS": options.max_surprise_bits_per_choice,
         **extra,
     }
     text = (_PROMPTS / name).read_text(encoding="utf-8")
+    if options.stochastic and name == "modeling_phase.md":
+        text += (_PROMPTS / "modeling_phase_stochastic.md").read_text(encoding="utf-8")
+    if options.stochastic and name == "acting_phase.md":
+        text = text.replace("# Acting Phase\n", "# Acting Phase\n" + _STOCHASTIC_ACTING, 1)
     for key, value in values.items():
         text = text.replace(f"__{key}__", str(value) if isinstance(value, str) else describe(value))
+    if options.stochastic and name == "workflow.md":
+        text = text.rstrip() + _STOCHASTIC_INTRO
     return text
 
 
@@ -155,7 +191,8 @@ def build_prompt(
         descriptions=_DESCRIPTIONS,
         commands={**enabled_commands(options), **reset_commands(config, problem)},
         workspace_extensions=workspace_notes,
-        phase_steps=_render("workflow.md", options),
+        phase_steps=_render("workflow.md", options).rstrip()
+        + (_EVALUATION if problem.evaluation_tasks(task_name) else "\n"),
         workflow_intro=_render("intro.md", options),
         initial_guidance="You begin in the **Modeling Phase**.",
         uses_model=True,

@@ -1,0 +1,12 @@
+# CWM-stochastic: the cwm protocol for environments that are random or hide part of their state.
+# Select with protocol=cwm_stochastic. Only the keys that differ from cwm.yaml are commented.
+defaults:
+  - cwm
+  - _self_
+
+stochastic: true
+max_nodes_per_explanation: 2000
+max_surprise_bits_per_choice: 10  # probability below 1/1024
+# The State may hold what the agent remembers (a map), which grows past one observation.
+threshold_max_state_obs_size_ratio: 0.99
+max_state_bytes_always_allowed: 262144
