@@ -112,7 +112,7 @@ async def test_without_the_buffer_a_call_prints_a_summary_and_the_observation(ma
     assert json.loads(rest)["frame"] == [2] * 30
     reset = await ManagedTool("ResetEnvironment", c).call({}, ToolContext(cwd=str(c.workdir)))
     first, _, rest = reset.data.partition("\n")
-    assert first == "ResetEnvironment: the environment restarted from its initial state"
+    assert first == "ResetEnvironment: the environment was reset"
     assert json.loads(rest)["frame"] == [0] * 30
     assert "The current observation" in session.resume_notice()
 

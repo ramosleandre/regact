@@ -530,6 +530,9 @@ class HeldOutProblem(Problem):
     def evaluation_max_actions(self):
         return 2
 
+    def evaluation_trajectories(self, task):
+        return [("held_same", [1, 1, 1]), ("held_skipping", [1, 1])]
+
     def evaluation_metrics(self, episodes):
         return {"eval_actions": sum(e["actions"] for e in episodes)}
 
@@ -552,7 +555,14 @@ def test_frozen_evaluation_plays_the_final_controller_on_held_out_tasks(make_rig
     if protocol == "cwm":  # an unexplained step rebuilds the State from the observation
         assert (same["regrounded"], skipping["regrounded"]) == (0, 2)
     status = json.loads((c.root / "status.json").read_text())
-    assert status["evaluation"] == {"eval_actions": 4}
+    if protocol == "cwm":  # the CWM alone explains the three steps it learned, not the other two
+        assert [r["explained"] for r in result["model_replays"]] == [3, 0]
+        scores = status["evaluation"]
+        assert scores["eval_model_explained_rate"] == 0.6 and scores["eval_time_limit_stops"] == 0
+        assert scores["eval_no_model_bits_per_step"] > 0 and "eval_model_bits_per_step" not in scores
+    else:
+        assert status["evaluation"] == {"eval_actions": 4, "eval_time_limit_stops": 0}
+        assert result["model_replays"] == []
     assert {k: status[k] for k in before} == before  # nothing recorded as experience
 
 

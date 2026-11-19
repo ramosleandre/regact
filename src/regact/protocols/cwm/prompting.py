@@ -63,7 +63,7 @@ _STOCHASTIC_HELPERS = """
 """
 
 _EVALUATION = """
-- **Final evaluation with the CWM.** The final evaluation described under Environment runs the controller with your accepted CWM, exactly as `RunController` does, except that nobody can repair the CWM there. When it cannot explain an observation, the State is rebuilt from that observation alone with `get_initial_state` and the life goes on: what the State remembered is lost. Nothing else stops the life early.
+- **Final evaluation with the CWM.** The final evaluation described under Environment runs the controller with your accepted CWM, exactly as `RunController` does, except that nobody can repair the CWM there. When it cannot explain an observation, the State is rebuilt from that observation alone with `get_initial_state` and the life goes on: what the State remembered is lost. Nothing else stops the life early. Your accepted CWM is also scored by itself, on play recorded in other new worlds: the share of the steps it explains, and their cost in bits.
 """
 
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at the start of every call; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.

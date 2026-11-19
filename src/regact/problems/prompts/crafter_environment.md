@@ -12,5 +12,5 @@ Every observation is a dictionary with five keys:
 
 An action is an integer from `available_actions`.
 
-Your score is the number of different achievements unlocked: more is better, and reaching them with fewer actions is better. Which achievements exist and how to unlock them is for you to discover; each new one is reported as a milestone. A life ends when the player dies or after 10000 actions. A reset then starts a new life at the starting point of the same world: the inventory is lost, the achievements already unlocked are kept. The task is won when every achievement is unlocked.
+{score} Which achievements exist and how to unlock them is for you to discover; each new one is reported as a milestone. A life ends when the player dies or after 10000 actions. A reset then starts a new life {reset}: the inventory is lost, the achievements already unlocked are kept. {won}
 {evaluation}

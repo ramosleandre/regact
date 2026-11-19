@@ -53,12 +53,12 @@ class BaseProblem(ABC):
         """Explicit reset capabilities for externally managed controller protocols."""
         return {"ResetEnvironment": "Reset the whole environment from its initial state."}
 
-    def environment_prompt(self) -> str | None:
+    def environment_prompt(self, task_name: str) -> str | None:
         """This problem's own Environment section for the managed protocols, when the common one
         (a deterministic game with levels, scored on actions) does not describe it."""
         return None
 
-    def objective_prompt(self) -> str:
+    def objective_prompt(self, task_name: str) -> str:
         """The final objective, as the managed protocols state it."""
         return (
             "Complete the game. Keep working until it is solved or the framework ends the task "
@@ -239,6 +239,11 @@ class BaseProblem(ABC):
     def evaluation_max_actions(self) -> int | None:
         """The most actions of one evaluation episode."""
         return None
+
+    def evaluation_trajectories(self, task_name: str) -> list[tuple[str, list[Any]]]:
+        """Reference action lists, each on a held-out task, that the accepted CWM alone is
+        replayed on: how much of what happens there it explains."""
+        return []
 
     def evaluation_metrics(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
         """Scores of a frozen evaluation; each episode carries its last observation's ``info``."""

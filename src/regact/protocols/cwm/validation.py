@@ -206,7 +206,7 @@ class Loss:
             group["declared"][key] = group["declared"].get(key, 0.0) + p
             if worst is None or p < worst[1]:
                 worst = (name, p)
-        self.no_model += self._components(before, after)
+        self.no_model += self.no_model_bits(before, after)
         if worst is not None:
             self.surprises.append(
                 {
@@ -219,7 +219,8 @@ class Loss:
             )
             self.surprises = sorted(self.surprises, key=lambda item: -item["bits"])[:_SURPRISES]
 
-    def _components(self, before: Any, after: Any) -> float:
+    def no_model_bits(self, before: Any, after: Any) -> float:
+        """What the model-free coder pays for one step, learning from it as it goes."""
         old, bits = dict(_leaves(before)), 0.0
         for path, value in _leaves(after):
             counts = self._contexts.setdefault((path, canonical(old.get(path))), {})

@@ -38,7 +38,7 @@ REASONS = {
     "goal_achieved": "The controller's goal predicate is true in the real environment.",
     "controller_call_time_limit": "This controller call used up its submitted-code time limit.",
     "environment_done": "The environment ended the episode. Use an available reset command before continuing.",
-    "reset_environment": "The environment restarted from its initial state.",
+    "reset_environment": "The environment was reset.",
     "reset_level": "The current level restarted; completed levels are preserved.",
     "prediction_mismatch": (
         "Reality contradicted a predicted observation. Inspect the counterexample."

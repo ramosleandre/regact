@@ -5,17 +5,24 @@ player, written as names instead of pixels, the player's facing, the inventory a
 The world position and the full map stay hidden. ``crafter`` is imported lazily in
 :meth:`make_env`.
 
-This is "seeded Crafter": a task is one map (``crafter_s3`` is seed 3). Every life starts on it
-with an empty inventory, and the achievements unlocked in earlier lives of the task stay unlocked.
-Creatures need not move the same way twice.
+Two kinds of task, alike in everything but the map of each life:
 
-When a task ends, its final controller plays one life on each of ``eval_seeds``, maps the agent
-never saw, for at most ``eval_max_actions`` actions: 10 episodes of 2000 steps is BALROG's setting.
+- seeded (``crafter_s3``): every life starts on the same map, seed 3. It measures how far an
+  agent gets in one world it can come back to.
+- unseeded (``crafter_u3``): every life is on a new map, drawn from the task's own stream. It
+  measures what an agent learns about the game. When such a task ends, its final controller
+  plays one life on each of ``eval_seeds``, maps no task ever shows, for at most
+  ``eval_max_actions`` actions (10 episodes of 2000 steps is BALROG's setting), and its CWM is
+  replayed alone on the reference action lists of ``data/reference_actions.json``.
+
+In both, a life starts with an empty inventory and the achievements unlocked in earlier lives of
+the task stay unlocked.
 """
 
 from __future__ import annotations
 
 import functools
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -32,7 +39,10 @@ from regact.workspace.templates import TemplateFile
 _PROMPT = Path(__file__).parents[1] / "prompts" / "crafter.md"
 _ENVIRONMENT = Path(__file__).parents[1] / "prompts" / "crafter_environment.md"
 _TASK = "crafter_s"  # + the map seed
+_UNSEEDED = "crafter_u"  # + the index of a stream of maps
 TASK = _TASK + "0"
+_STREAM = 1000  # life i of crafter_u<k> is map (k + 1) * _STREAM + i, away from the other seeds
+_REFERENCE = Path(__file__).parent / "data" / "reference_actions.json"
 ACTIONS = (
     "noop", "move_left", "move_right", "move_up", "move_down", "do", "sleep",
     "place_stone", "place_table", "place_furnace", "place_plant",
@@ -51,10 +61,25 @@ OUTSIDE = "void"  # a window cell beyond the edge of the world
 _FACING = {(-1, 0): "left", (1, 0): "right", (0, -1): "up", (0, 1): "down"}
 _UNIT = 48  # px per tile in pictures
 _VITALS = ("health", "food", "drink", "energy")
+# the sentences of the Environment section that differ: a seeded task, then an unseeded one
+_SCORE = (
+    "Your score is the number of different achievements unlocked: more is better, and reaching "
+    "them with fewer actions is better.",
+    "The game counts achievements: unlocking more of them in a life is better, and reaching "
+    "them with fewer actions is better.",
+)
+_RESET = (
+    "at the starting point of the same world",
+    "in a new world (the same game and rules, on a map you have not seen)",
+)
+_WON = (
+    "The task is won when every achievement is unlocked.",
+    "The task also ends once every achievement has been unlocked over your lives.",
+)
 _EVALUATION = """
-**Final evaluation.** The task can end at any moment, when your budget runs out. One controller is then run without you in {n} other worlds of the same game, which you never see: one life in each, from the start of a life with nothing unlocked, for at most {cap} actions. The controller runs there as a single call, with no limit of actions per call. A life there ends when the player dies, when the controller stops (`is_done`) or raises an error, or at the action limit. The achievements it unlocks per life are reported next to your score, and matter as much.
+**Final evaluation.** The task can end at any moment, when your budget runs out. One controller is then run without you in {n} more new worlds: one life in each, from the start of a life with nothing unlocked, for at most {cap} actions. The controller runs there as a single call, with no limit of actions per call. A life there ends when the player dies, when the controller stops (`is_done`) or raises an error, or at the action limit. The achievements it unlocks per life are the main result of the task.
 
-The controller evaluated is the file `{file}`, read as it stands when the task ends. It has the same interface as `controller.py` and the framework never runs it during the task: to try it, reset and run its code as `controller.py`. Create it as soon as you have a controller that plays a whole life from its start, keep it valid, and improve it as you learn. It must not rely on this world's map. Without this file, the controller of your last `RunController` call is evaluated.
+The controller evaluated is the file `{file}`, read as it stands when the task ends. It has the same interface as `controller.py` and the framework never runs it during the task: to try it, reset and run its code as `controller.py`. Create it as soon as you have a controller that plays a whole life from its start, keep it valid, and improve it as you learn. Without this file, the controller of your last `RunController` call is evaluated.
 """
 _NIGHT = (0, 16, 64)  # what the picture is tinted toward as daylight falls
 
@@ -68,8 +93,10 @@ _HELPER = (
 class CrafterEnv:
     """One Crafter task behind the gym-like interface the env server drives."""
 
-    def __init__(self, seed: int) -> None:
+    def __init__(self, seed: int, *, new_map_each_life: bool = False) -> None:
         self._seed = seed
+        self._new_map_each_life = new_map_each_life
+        self._lives = 0  # started so far
         self._unlocked: set[str] = set()  # over every life of the task
         self._env = self._world()
 
@@ -82,10 +109,11 @@ class CrafterEnv:
                 ordered = sorted(objs, key=lambda o: (type(o).__name__, *map(int, o.pos)))
                 super()._balance_chunk(chunk, ordered)
 
-        return Env(seed=self._seed)
+        return Env(seed=self._seed + self._lives if self._new_map_each_life else self._seed)
 
     def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
-        self._env = self._world()  # a new life on the same map
+        self._env = self._world()
+        self._lives += 1
         self._env.reset()
         return self._frame(), self._info()
 
@@ -183,6 +211,7 @@ class CrafterProblem(BaseProblem):
         "best_life_achievements",
         "eval_progress",
         "eval_crafter_score",
+        "eval_model_explained_rate",
     )
     progress_label = "Achievements unlocked"
 
@@ -192,22 +221,43 @@ class CrafterProblem(BaseProblem):
         seeds: list[int] | None = None,
         eval_seeds: list[int] | None = None,
         eval_max_actions: int | None = 2000,
+        unseeded: list[int] | None = None,
     ) -> None:
         self._seeds = [0] if seeds is None else [int(s) for s in seeds]
+        self._unseeded = [int(k) for k in unseeded or []]
         self._eval_seeds = [int(s) for s in eval_seeds or []]
         self._eval_max_actions = eval_max_actions
 
     def make_env(self, task_name: str) -> Any:
-        seed = task_name.removeprefix(_TASK)
-        if not task_name.startswith(_TASK) or not seed.isdigit():
+        prefix = _UNSEEDED if task_name.startswith(_UNSEEDED) else _TASK
+        number = task_name.removeprefix(prefix)
+        if not task_name.startswith(prefix) or not number.isdigit():
             raise RegactError(ErrorCategory.EVAL_HARNESS, f"unknown crafter task {task_name!r}")
-        return CrafterEnv(int(seed))
+        if prefix == _UNSEEDED:
+            return CrafterEnv((int(number) + 1) * _STREAM, new_map_each_life=True)
+        return CrafterEnv(int(number))
 
     def get_task_names(self) -> list[str]:
-        return [f"{_TASK}{seed}" for seed in self._seeds]
+        return [f"{_TASK}{seed}" for seed in self._seeds] + [
+            f"{_UNSEEDED}{k}" for k in self._unseeded
+        ]
 
     def evaluation_tasks(self, task_name: str) -> list[str]:
+        if not task_name.startswith(_UNSEEDED):  # a seeded task learns one map, not the game
+            return []
         return [f"{_TASK}{seed}" for seed in self._eval_seeds]
+
+    def evaluation_trajectories(self, task_name: str) -> list[tuple[str, list[Any]]]:
+        held_out = set(self.evaluation_tasks(task_name))
+        if not held_out or not _REFERENCE.is_file():
+            return []
+        recorded = json.loads(_REFERENCE.read_text(encoding="utf-8"))
+        return [
+            (name, actions)
+            for name, lists in recorded["tasks"].items()
+            if name in held_out
+            for actions in lists.values()
+        ]
 
     def evaluation_max_actions(self) -> int | None:
         return self._eval_max_actions
@@ -235,20 +285,35 @@ class CrafterProblem(BaseProblem):
             raise RegactError(ErrorCategory.ENV_RUNTIME, f"crafter: obs_mode {mode!r} not supported")
         return CrafterRenderer()
 
-    def environment_prompt(self) -> str | None:
+    def environment_prompt(self, task_name: str) -> str | None:
+        evaluated = len(self.evaluation_tasks(task_name))
         evaluation = _EVALUATION.format(
-            n=len(self._eval_seeds), cap=self._eval_max_actions, file=FINAL_CONTROLLER
+            n=evaluated, cap=self._eval_max_actions, file=FINAL_CONTROLLER
         )
-        text = _ENVIRONMENT.read_text(encoding="utf-8")
-        return text.replace("{evaluation}", evaluation if self._eval_seeds else "").strip()
+        kind = int(task_name.startswith(_UNSEEDED))
+        return (
+            _ENVIRONMENT.read_text(encoding="utf-8")
+            .replace("{score}", _SCORE[kind])
+            .replace("{reset}", _RESET[kind])
+            .replace("{won}", _WON[kind])
+            .replace("{evaluation}", evaluation if evaluated else "")
+            .strip()
+        )
 
     def reset_commands(self) -> dict[str, str]:
         return {
-            "ResetEnvironment": "Start a new life at the starting point of the same world: the "
-            "inventory is lost, the achievements already unlocked are kept."
+            "ResetEnvironment": "Start a new life: the inventory is lost, the achievements "
+            "already unlocked are kept."
         }
 
-    def objective_prompt(self) -> str:
+    def objective_prompt(self, task_name: str) -> str:
+        if self.evaluation_tasks(task_name):
+            return (
+                "Learn to play this game in worlds you have not seen. Your lives here are for "
+                f"discovering its rules and for testing what you build; `{FINAL_CONTROLLER}`, as "
+                "it stands when the task ends, is the main result. Keep working until the "
+                "framework ends the task for budget reasons."
+            )
         return (
             "Unlock as many achievements as you can. Keep working until all are unlocked or the "
             "framework ends the task for budget reasons."
@@ -422,6 +487,7 @@ class CrafterProblem(BaseProblem):
     def config_kwargs(self) -> dict[str, Any]:
         return {
             "seeds": self._seeds,
+            "unseeded": self._unseeded,
             "eval_seeds": self._eval_seeds,
             "eval_max_actions": self._eval_max_actions,
         }

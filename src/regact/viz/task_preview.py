@@ -22,7 +22,7 @@ def render_task_png(task_name: str) -> bytes:
     """A small PNG preview of ``task_name``'s starting state. Raises if the task can't render."""
     if task_name.startswith("MiniGrid"):
         rgb = _minigrid_rgb(task_name)
-    elif task_name.startswith("crafter_s"):
+    elif task_name.startswith("crafter_"):
         rgb = _grid_game_rgb(build_crafter(), task_name)
     elif (game := _grid_game_of(task_name)) is not None:
         rgb = _grid_game_rgb(game, task_name)

@@ -40,9 +40,15 @@ def test_crafter_observation_and_actions():
 
 
 def test_crafter_metrics_per_life_and_on_held_out_worlds():
-    problem = build_problem("crafter", {"seeds": [0, 7], "eval_seeds": [100, 101]})
-    assert problem.get_task_names() == ["crafter_s0", "crafter_s7"]
-    assert problem.evaluation_tasks("crafter_s0") == ["crafter_s100", "crafter_s101"]
+    problem = build_problem(
+        "crafter", {"seeds": [0, 7], "unseeded": [2], "eval_seeds": [100, 101]}
+    )
+    assert problem.get_task_names() == ["crafter_s0", "crafter_s7", "crafter_u2"]
+    assert problem.evaluation_tasks("crafter_s0") == []  # one map teaches that map
+    assert problem.evaluation_tasks("crafter_u2") == ["crafter_s100", "crafter_s101"]
+    replays = problem.evaluation_trajectories("crafter_u2")
+    assert [name for name, _ in replays] == ["crafter_s100"] * 2 + ["crafter_s101"] * 2
+    assert problem.evaluation_trajectories("crafter_s0") == []
     wood, both = ["collect_wood"], ["collect_wood", "wake_up"]
     trace = [  # the second life starts after a reset, which counts as one action
         (1, {"achievements": [], "life_achievements": []}),
@@ -85,15 +91,31 @@ def test_crafter_lives_share_the_map_and_keep_achievements():
     assert done and len(info["achievements"]) == len(cr.ACHIEVEMENTS)
 
 
+def test_an_unseeded_task_gives_each_life_a_new_map():
+    problem = build_problem("crafter", {"unseeded": [0]})
+    env = problem.make_env("crafter_u0")
+    first, _ = env.reset()
+    env._env._player.achievements["collect_wood"] += 1
+    env.step(0)
+    second, info = env.reset()
+    assert second["view"] != first["view"] and info["achievements"] == ["collect_wood"]
+    again = problem.make_env("crafter_u0")  # the stream of maps is the task's own
+    assert again.reset()[0] == first and again.reset()[0] == second
+    assert problem.make_env("crafter_u1").reset()[0]["view"] != first["view"]
+
+
 def test_crafter_prompts_state_its_own_rules():
-    problem = build_problem("crafter", {})
-    section = problem.environment_prompt()
+    problem = build_problem("crafter", {"unseeded": [0], "eval_seeds": [100, 101]})
+    section = problem.environment_prompt(cr.TASK)
     assert "stochastic" in section and "levels: completing" not in section
     for name in (*cr.ACTIONS, *cr.ACHIEVEMENTS):  # information-minimal: none is named
         assert name == "do" or name not in section
-    assert "final_controller.py" not in section  # no held-out worlds configured
-    held_out = build_problem("crafter", {"eval_seeds": [100, 101]}).environment_prompt()
-    assert "in 2 other worlds" in held_out and "`final_controller.py`" in held_out
+    assert "final_controller.py" not in section and "same world" in section
+    assert "final_controller.py" not in problem.objective_prompt(cr.TASK)
+    unseeded = problem.environment_prompt("crafter_u0")
+    assert "in a new world" in unseeded and "same world" not in unseeded and "{" not in unseeded
+    assert "in 2 more new worlds" in unseeded and "`final_controller.py`" in unseeded
+    assert "`final_controller.py`" in problem.objective_prompt("crafter_u0")
     assert "fully solved" not in problem.continue_reminder()
     prompt = problem.build_prompt(cr.TASK, info_mode=InfoMode.INFORMATIVE)
     assert "`5` do" in prompt and "{" not in prompt
