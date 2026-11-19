@@ -44,8 +44,8 @@ class Coordinator(ManagedCoordinator):
 
     online_bits = [0, 0.0]  # real steps explained during acting, and what they cost
 
-    def task_metrics(self):
-        metrics = super().task_metrics()
+    def task_metrics(self, trace=None):
+        metrics = super().task_metrics(trace)
         if metrics is not None and self.options.stochastic and self.online_bits[0]:
             metrics = {**metrics, "online_bits_per_step": round(self.online_bits[1] / self.online_bits[0], 3)}
         return metrics

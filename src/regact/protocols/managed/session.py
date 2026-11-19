@@ -228,20 +228,25 @@ class ManagedCoordinator:
     def after_restore(self) -> None:
         """Protocol state beyond the shared one (the accepted CWM)."""
 
-    def task_metrics(self) -> dict[str, Any]:
+    def trace_metrics(self) -> dict[str, Any]:
+        """Everything the problem derives from the task's real actions so far."""
+        return self.problem.derived_trace_metrics(
+            self.task, info_trace(self.store.db, self.problem.counts_as_action)
+        )
+
+    def task_metrics(self, trace: dict[str, Any] | None = None) -> dict[str, Any]:
         """The problem's main metrics over all the task's real actions so far."""
         return self.problem.main_scores(
             {
                 **(self.latest or {}).get("aggregate", {}),
                 **(self.evaluation or {}).get("metrics", {}),
-                **self.problem.derived_trace_metrics(
-                    self.task, info_trace(self.store.db, self.problem.counts_as_action)
-                ),
+                **(self.trace_metrics() if trace is None else trace),
             }
         )
 
     def persist(self) -> None:
-        metrics = self.task_metrics()
+        trace = self.trace_metrics()
+        metrics = self.task_metrics(trace)
         if self.context is not None:
             self.context.experiment.main_metrics = metrics
         atomic_json(
@@ -263,6 +268,7 @@ class ManagedCoordinator:
                 ),
                 "accepted_cwm": self.accepted,
                 "main_metrics": metrics,
+                "trace_metrics": trace,
                 "latest_exploration": self.latest,
                 "best_exploration": self.best,
                 **({"evaluation": self.evaluation["metrics"]} if self.evaluation else {}),

@@ -468,8 +468,10 @@ def test_a_run_records_the_problems_main_metrics(make_rig, monkeypatch):
         lambda self, task, trace: {"steps_seen": len(trace), "other": 1},
     )
     c.persist()
-    recorded = json.loads((c.root / "status.json").read_text())["main_metrics"]
+    status = json.loads((c.root / "status.json").read_text())
+    recorded = status["main_metrics"]
     assert recorded == {"steps_seen": c.store.summary()["n_total_transitions"]}
+    assert status["trace_metrics"] == {**recorded, "other": 1}
     assert c.task_metrics() == recorded
 
 
