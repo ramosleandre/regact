@@ -119,6 +119,8 @@ class ManagedCoordinator:
         self.milestones: list[dict[str, Any]] = []
         # Where the run was each time the problem's progress first reached a new value.
         self.progress: list[dict[str, Any]] | None = []
+        # Where the run was at each reset: the end of an episode on the run's x axes.
+        self.resets: list[dict[str, Any]] = []
         self.started: float | None = None  # monotonic start of the agent's work, resumes included
         self.terminal: str | None = None
         self.deadline = float("inf")
@@ -219,6 +221,7 @@ class ManagedCoordinator:
         saved = json.loads(status.read_text()) if status.exists() else {}
         self.initial_collection = saved.get("initial_collection")
         self.progress = saved.get("progress")  # None: recorded before this was tracked
+        self.resets = saved.get("resets", [])
         self.accepted = saved.get("accepted_cwm")
         self.latest, self.best = saved.get("latest_exploration"), saved.get("best_exploration")
         self.phase = self.store.last_phase() or self.initial_phase
@@ -262,6 +265,7 @@ class ManagedCoordinator:
                 "initial_collection": self.initial_collection,
                 "milestones": self.milestones,
                 **({} if self.progress is None else {"progress": self.progress}),
+                "resets": self.resets,
                 **self.store.summary(),
                 **(
                     {"novel_prediction": novel_prediction(self.store.db)} if self.uses_model else {}
@@ -387,6 +391,7 @@ class ManagedCoordinator:
     def _reset(self, purpose: str, **metadata: Any) -> dict[str, Any]:
         if self.episode is not None:
             self.store.finish_episode(self.episode, "reset", {})
+            self.resets.append({"episode_id": self.episode, **self._where()})
         env = (
             self.env.live if self.single_instance and self.env.live is not None else self.env.make()
         )
@@ -397,21 +402,23 @@ class ManagedCoordinator:
         )
         return obs
 
+    def _where(self) -> dict[str, Any]:
+        """The run's position on its x axes, now."""
+        experiment = self.context.experiment if self.context is not None else None
+        trace = info_trace(self.store.db, self.problem.counts_as_action)
+        return {
+            "env_actions": trace[-1][0] if trace else 0,
+            "tool_calls": experiment.tool_calls_total if experiment is not None else 0,
+            "seconds": round(time.monotonic() - self.started, 1) if self.started else 0.0,
+        }
+
     def _note_progress(self, info: dict[str, Any]) -> None:
         value = self.problem.progress_value(info)
         if value is None or self.progress is None:
             return
         if value <= max((point["value"] for point in self.progress), default=0):
             return
-        experiment = self.context.experiment if self.context is not None else None
-        self.progress.append(
-            {
-                "value": value,
-                "env_actions": info_trace(self.store.db, self.problem.counts_as_action)[-1][0],
-                "tool_calls": experiment.tool_calls_total if experiment is not None else 0,
-                "seconds": round(time.monotonic() - self.started, 1) if self.started else 0.0,
-            }
-        )
+        self.progress.append({"value": value, **self._where()})
 
     def comparison_image(self, diagnostic_id: int) -> bytes:
         from regact.protocols.cwm.viewer import comparison_png
@@ -749,6 +756,7 @@ class ManagedCoordinator:
             previous = self.episode
             if previous is not None:
                 self.store.finish_episode(previous, "reset_" + kind, {})
+                self.resets.append({"episode_id": previous, **self._where()})
             self.episode, self.current_id = self.store.start_episode(
                 obs, "reset_" + kind, {"previous_observation_id": before}
             )
@@ -1451,7 +1459,7 @@ class ManagedSession(ProtocolSession):
         self.coordinator.grants.call_finished(call_id)
 
     def reminder(self, reminders: int) -> str:
-        return self.coordinator.problem.continue_reminder() + "\n" + self.coordinator.next_step()
+        return self.coordinator.problem.continue_reminder(self.coordinator.task) + "\n" + self.coordinator.next_step()
 
     def interaction_guidance(self) -> str:
         return ""

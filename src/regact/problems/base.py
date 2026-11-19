@@ -65,7 +65,7 @@ class BaseProblem(ABC):
             "for budget reasons."
         )
 
-    def continue_reminder(self) -> str:
+    def continue_reminder(self, task_name: str | None = None) -> str:
         """What an agent that stopped early is told."""
         return "Continue your work until the game is fully solved."
 

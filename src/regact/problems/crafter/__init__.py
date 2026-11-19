@@ -5,18 +5,18 @@ player, written as names instead of pixels, the player's facing, the inventory a
 The world position and the full map stay hidden. ``crafter`` is imported lazily in
 :meth:`make_env`.
 
-Two kinds of task, alike in everything but the map of each life:
+Three kinds of task. A life always starts with an empty inventory and nothing unlocked, and its
+score is the number of achievements unlocked within it.
 
 - seeded (``crafter_s3``): every life starts on the same map, seed 3. It measures how far an
   agent gets in one world it can come back to.
 - unseeded (``crafter_u3``): every life is on a new map, drawn from the task's own stream. It
-  measures what an agent learns about the game. When such a task ends, its final controller
-  plays one life on each of ``eval_seeds``, maps no task ever shows, for at most
-  ``eval_max_actions`` actions (10 episodes of 2000 steps is BALROG's setting), and its CWM is
-  replayed alone on the reference action lists of ``data/reference_actions.json``.
-
-In both, a life starts with an empty inventory and the achievements unlocked in earlier lives of
-the task stay unlocked.
+  measures how an agent plays while it learns the game.
+- controller synthesis (``crafter_c3``): the maps of ``crafter_u3``, but the result is a program.
+  When the task ends, its final controller plays one life on each of ``eval_seeds``, maps no
+  task ever shows, for at most ``eval_max_actions`` actions (BALROG's setting is 10 episodes of
+  2000 steps), and its CWM is replayed alone on the reference action lists of
+  ``data/reference_actions.json``.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ _PROMPT = Path(__file__).parents[1] / "prompts" / "crafter.md"
 _ENVIRONMENT = Path(__file__).parents[1] / "prompts" / "crafter_environment.md"
 _TASK = "crafter_s"  # + the map seed
 _UNSEEDED = "crafter_u"  # + the index of a stream of maps
+_SYNTHESIS = "crafter_c"  # + the same index: the same maps, scored by the final controller
 TASK = _TASK + "0"
 _STREAM = 1000  # life i of crafter_u<k> is map (k + 1) * _STREAM + i, away from the other seeds
 _REFERENCE = Path(__file__).parent / "data" / "reference_actions.json"
@@ -49,6 +50,27 @@ ACTIONS = (
     "make_wood_pickaxe", "make_stone_pickaxe", "make_iron_pickaxe",
     "make_wood_sword", "make_stone_sword", "make_iron_sword",
 )  # fmt: skip
+_ACTION_ID = {name: i for i, name in enumerate(ACTIONS)}
+# what each action does, as BALROG's prompt tells its agent
+_ACTION_HELP = (
+    "do nothing",
+    "move left on flat ground",
+    "move right on flat ground",
+    "move up on flat ground",
+    "move down on flat ground",
+    "multiuse action to collect material, drink from lake and hit creature in front",
+    "sleep when energy level is below maximum",
+    "place a stone in front",
+    "place a table",
+    "place a furnace",
+    "place a plant",
+    "craft a wood pickaxe with a nearby table and wood in inventory",
+    "craft a stone pickaxe with a nearby table, wood, and stone in inventory",
+    "craft an iron pickaxe with a nearby table and furnace, wood, coal, and iron in inventory",
+    "craft a wood sword with a nearby table and wood in inventory",
+    "craft a stone sword with a nearby table, wood, and stone in inventory",
+    "craft an iron sword with a nearby table and furnace, wood, coal, and iron in inventory",
+)
 ACHIEVEMENTS = (
     "collect_coal", "collect_diamond", "collect_drink", "collect_iron", "collect_sapling",
     "collect_stone", "collect_wood", "defeat_skeleton", "defeat_zombie", "eat_cow", "eat_plant",
@@ -61,32 +83,23 @@ OUTSIDE = "void"  # a window cell beyond the edge of the world
 _FACING = {(-1, 0): "left", (1, 0): "right", (0, -1): "up", (0, 1): "down"}
 _UNIT = 48  # px per tile in pictures
 _VITALS = ("health", "food", "drink", "energy")
-# the sentences of the Environment section that differ: a seeded task, then an unseeded one
-_SCORE = (
-    "Your score is the number of different achievements unlocked: more is better, and reaching "
-    "them with fewer actions is better.",
-    "The game counts achievements: unlocking more of them in a life is better, and reaching "
-    "them with fewer actions is better.",
-)
+_DIED = "the player died"
+_SCORE = "Your score in a life is the number of different achievements unlocked in it: play each life to unlock as many as you can."
+_SCORE_SYNTHESIS = "A life is scored by the number of different achievements unlocked in it."
 _RESET = (
     "at the starting point of the same world",
     "in a new world (the same game and rules, on a map you have not seen)",
 )
-_WON = (
-    "The task is won when every achievement is unlocked.",
-    "The task also ends once every achievement has been unlocked over your lives.",
-)
 _EVALUATION = """
-**Final evaluation.** The task can end at any moment, when your budget runs out. One controller is then run without you in {n} more new worlds: one life in each, from the start of a life with nothing unlocked, for at most {cap} actions. The controller runs there as a single call, with no limit of actions per call. A life there ends when the player dies, when the controller stops (`is_done`) or raises an error, or at the action limit. The achievements it unlocks per life are the main result of the task.
+**Final evaluation.** The task can end at any moment, when your budget runs out. One controller is then run without you in {n} more new worlds: one life in each, for at most {cap} actions. The controller runs there as a single call, with no limit of actions per call. A life there ends when the player dies, when the controller stops (`is_done`) or raises an error, or at the action limit. The achievements it unlocks per life are the result of the task.
 
 The controller evaluated is the file `{file}`, read as it stands when the task ends. It has the same interface as `controller.py` and the framework never runs it during the task: to try it, reset and run its code as `controller.py`. Create it as soon as you have a controller that plays a whole life from its start, keep it valid, and improve it as you learn. Without this file, the controller of your last `RunController` call is evaluated.
 """
 _NIGHT = (0, 16, 64)  # what the picture is tinted toward as daylight falls
 
 _HELPER = (
-    '"""Crafter action ids and achievement names."""\n\n'
-    + "\n".join(f"{name.upper()} = {i}" for i, name in enumerate(ACTIONS))
-    + f"\n\nACTION_NAMES = {list(ACTIONS)!r}\nACHIEVEMENTS = {list(ACHIEVEMENTS)!r}\n"
+    '"""Crafter action and achievement names."""\n\n'
+    f"ACTIONS = {list(ACTIONS)!r}\nACHIEVEMENTS = {list(ACHIEVEMENTS)!r}\n"
 )
 
 
@@ -97,7 +110,6 @@ class CrafterEnv:
         self._seed = seed
         self._new_map_each_life = new_map_each_life
         self._lives = 0  # started so far
-        self._unlocked: set[str] = set()  # over every life of the task
         self._env = self._world()
 
     def _world(self) -> Any:
@@ -118,15 +130,11 @@ class CrafterEnv:
         return self._frame(), self._info()
 
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-        if type(action) is not int or not 0 <= action < len(ACTIONS):
-            raise InvalidActionError(
-                f"expected an action in 0..{len(ACTIONS) - 1}; got {action!r}"
-            )
-        _, reward, done, _ = self._env.step(action)
+        if type(action) is not str or action not in _ACTION_ID:
+            raise InvalidActionError(f"expected an action name of available_actions; got {action!r}")
+        _, reward, done, _ = self._env.step(_ACTION_ID[action])
         dead = self._env._player.health <= 0
-        info = self._info()
-        won = len(info["achievements"]) == len(ACHIEVEMENTS)
-        return self._frame(), round(float(reward), 6), dead or won, bool(done and not dead), info
+        return self._frame(), round(float(reward), 6), dead, bool(done and not dead), self._info()
 
     def render(self) -> Any:
         return self._env.render()
@@ -166,12 +174,7 @@ class CrafterEnv:
 
     def _info(self) -> dict[str, Any]:
         life = sorted(n for n, count in self._env._player.achievements.items() if count > 0)
-        self._unlocked.update(life)
-        return {
-            "achievements": sorted(self._unlocked),
-            "life_achievements": life,
-            "available_actions": list(range(len(ACTIONS))),
-        }
+        return {"achievements": life, "available_actions": list(ACTIONS)}
 
 
 class CrafterRenderer(ObsRenderer):
@@ -195,25 +198,26 @@ def _milestones(env: Any) -> list[str]:
     before = set(_unlocked(prev.info if prev is not None else None))
     out = [f"achievement unlocked: {name}" for name in _unlocked(last.info) if name not in before]
     health = ((last.frame or {}).get("inventory") or {}).get("health", 1)
-    if getattr(env, "last_terminated", False) and health <= 0:  # a win also ends the life
-        out.append("the player died")
+    if getattr(env, "last_terminated", False) and health <= 0:
+        out.append(_DIED)
     return out
 
 
 class CrafterProblem(BaseProblem):
-    """A task is a Crafter world. The score is the number of achievements unlocked over the
-    task's lives; the task is won when all are."""
+    """A task is a Crafter world or a stream of them. A life is scored by the achievements
+    unlocked within it; no task ends early, since one good life is not a solved game."""
 
     name = "crafter"
     main_metrics = (
         "achievements",
         "first_life_achievements",
         "best_life_achievements",
+        "mean_life_achievements",
         "eval_progress",
         "eval_crafter_score",
         "eval_model_explained_rate",
     )
-    progress_label = "Achievements unlocked"
+    progress_label = "Achievements unlocked in one life"
 
     def __init__(
         self,
@@ -222,28 +226,32 @@ class CrafterProblem(BaseProblem):
         eval_seeds: list[int] | None = None,
         eval_max_actions: int | None = 2000,
         unseeded: list[int] | None = None,
+        synthesis: list[int] | None = None,
     ) -> None:
         self._seeds = [0] if seeds is None else [int(s) for s in seeds]
         self._unseeded = [int(k) for k in unseeded or []]
+        self._synthesis = [int(k) for k in synthesis or []]
         self._eval_seeds = [int(s) for s in eval_seeds or []]
         self._eval_max_actions = eval_max_actions
 
     def make_env(self, task_name: str) -> Any:
-        prefix = _UNSEEDED if task_name.startswith(_UNSEEDED) else _TASK
+        prefix = next((p for p in (_UNSEEDED, _SYNTHESIS) if task_name.startswith(p)), _TASK)
         number = task_name.removeprefix(prefix)
         if not task_name.startswith(prefix) or not number.isdigit():
             raise RegactError(ErrorCategory.EVAL_HARNESS, f"unknown crafter task {task_name!r}")
-        if prefix == _UNSEEDED:
+        if prefix != _TASK:
             return CrafterEnv((int(number) + 1) * _STREAM, new_map_each_life=True)
         return CrafterEnv(int(number))
 
     def get_task_names(self) -> list[str]:
-        return [f"{_TASK}{seed}" for seed in self._seeds] + [
-            f"{_UNSEEDED}{k}" for k in self._unseeded
+        return [
+            *(f"{_TASK}{seed}" for seed in self._seeds),
+            *(f"{_UNSEEDED}{k}" for k in self._unseeded),
+            *(f"{_SYNTHESIS}{k}" for k in self._synthesis),
         ]
 
     def evaluation_tasks(self, task_name: str) -> list[str]:
-        if not task_name.startswith(_UNSEEDED):  # a seeded task learns one map, not the game
+        if not task_name.startswith(_SYNTHESIS):
             return []
         return [f"{_TASK}{seed}" for seed in self._eval_seeds]
 
@@ -290,37 +298,49 @@ class CrafterProblem(BaseProblem):
         evaluation = _EVALUATION.format(
             n=evaluated, cap=self._eval_max_actions, file=FINAL_CONTROLLER
         )
-        kind = int(task_name.startswith(_UNSEEDED))
+        actions = "\n".join(f"- `{n}`: {h}" for n, h in zip(ACTIONS, _ACTION_HELP, strict=True))
         return (
             _ENVIRONMENT.read_text(encoding="utf-8")
-            .replace("{score}", _SCORE[kind])
-            .replace("{reset}", _RESET[kind])
-            .replace("{won}", _WON[kind])
+            .replace("{actions}", actions)
+            .replace("{achievements}", ", ".join(f"`{name}`" for name in ACHIEVEMENTS))
+            .replace("{score}", _SCORE_SYNTHESIS if evaluated else _SCORE)
+            .replace("{reset}", _RESET[not task_name.startswith(_TASK)])
             .replace("{evaluation}", evaluation if evaluated else "")
             .strip()
         )
 
+    def action_format(self) -> str:
+        return "An action is one of the names in `available_actions`, as a string."
+
     def reset_commands(self) -> dict[str, str]:
-        return {
-            "ResetEnvironment": "Start a new life: the inventory is lost, the achievements "
-            "already unlocked are kept."
-        }
+        return {"ResetEnvironment": "Start a new life, with an empty inventory and nothing unlocked."}
 
     def objective_prompt(self, task_name: str) -> str:
         if self.evaluation_tasks(task_name):
             return (
-                "Learn to play this game in worlds you have not seen. Your lives here are for "
-                f"discovering its rules and for testing what you build; `{FINAL_CONTROLLER}`, as "
-                "it stands when the task ends, is the main result. Keep working until the "
-                "framework ends the task for budget reasons."
+                f"Produce a program that plays this game by itself: `{FINAL_CONTROLLER}`, a "
+                "controller that plays a whole life well, from its start, in a world it has never "
+                "seen. It is the result of this task: when the task ends, it is run without you "
+                "in new worlds and scored by the achievements it unlocks per life. Your own lives "
+                "here are the means: use them to learn the game and to test what you build. Keep "
+                "working until the framework ends the task for budget reasons."
             )
         return (
-            "Unlock as many achievements as you can. Keep working until all are unlocked or the "
+            "Unlock as many achievements as you can within a life. Keep working until the "
             "framework ends the task for budget reasons."
         )
 
-    def continue_reminder(self) -> str:
-        return "Continue your work: the task is not over."
+    def continue_reminder(self, task_name: str | None = None) -> str:
+        reminder = "Continue your work: the task is not over."
+        if task_name and self.evaluation_tasks(task_name):
+            reminder += (
+                f" `{FINAL_CONTROLLER}` is what will be evaluated: keep it up to date with the "
+                "best whole-life controller you have."
+            )
+        return reminder
+
+    def is_perfect(self, aggregate: dict[str, Any]) -> bool:
+        return False
 
     def progress_value(self, info: dict[str, Any]) -> float | None:
         return len(_unlocked(info))
@@ -432,26 +452,33 @@ class CrafterProblem(BaseProblem):
     def derived_trace_metrics(
         self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
     ) -> dict[str, Any]:
-        """``achievements``: how many are unlocked at the end; ``actions_to_last``: the real
-        actions played when the last one was unlocked; ``lives``: per life, the actions played in
-        the task when it ended and the achievements unlocked within it."""
-        best, at = 0, 0
+        """``lives``: per life, the task's real actions when it ended, the achievements unlocked
+        within it and whether the player died (a life can also be abandoned by a reset). The mean
+        and the worst are over the lives played to their death, when there are any.
+        ``achievements`` counts those unlocked in at least one life, ``actions_to_last`` the real
+        actions played when the last of them first was."""
+        seen: set[str] = set()
+        at = 0
         lives: list[list[int]] = []
         previous = None
         for actions, info in trace:
-            if len(_unlocked(info)) > best:
-                best, at = len(_unlocked(info)), actions
+            if not seen.issuperset(_unlocked(info)):
+                seen.update(_unlocked(info))
+                at = actions
             # a reset is counted as one action, so a step right after one is two further on
             if previous is None or actions > previous + 1:
-                lives.append([actions, 0])
-            lives[-1] = [actions, len(info.get("life_achievements") or [])]
+                lives.append([actions, 0, 0])
+            lives[-1] = [actions, len(_unlocked(info)), int(_DIED in (info.get("milestones") or []))]
             previous = actions
-        out: dict[str, Any] = {"achievements": best, "actions_to_last": at}
+        out: dict[str, Any] = {"achievements": len(seen), "actions_to_last": at}
         if lives:
+            ended = [n for _, n, died in lives if died] or [n for _, n, _ in lives]
             out.update(
                 lives=lives,
                 first_life_achievements=lives[0][1],
-                best_life_achievements=max(n for _, n in lives),
+                best_life_achievements=max(n for _, n, _ in lives),
+                mean_life_achievements=round(sum(ended) / len(ended), 2),
+                worst_life_achievements=min(ended),
             )
         return out
 
@@ -477,7 +504,7 @@ class CrafterProblem(BaseProblem):
             )
         body = (
             _PROMPT.read_text(encoding="utf-8")
-            .replace("{actions}", ", ".join(f"`{i}` {name}" for i, name in enumerate(ACTIONS)))
+            .replace("{actions}", ", ".join(f"`{name}`" for name in ACTIONS))
             .replace("{achievements}", ", ".join(f"`{name}`" for name in ACHIEVEMENTS))
             .replace("{n_achievements}", str(len(ACHIEVEMENTS)))
             .rstrip()
@@ -488,6 +515,7 @@ class CrafterProblem(BaseProblem):
         return {
             "seeds": self._seeds,
             "unseeded": self._unseeded,
+            "synthesis": self._synthesis,
             "eval_seeds": self._eval_seeds,
             "eval_max_actions": self._eval_max_actions,
         }

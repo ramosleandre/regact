@@ -5,9 +5,10 @@ obs_mode: raw
 info_mode: informative
 seed: null              # ignored: a task's maps come from its name
 kwargs:
-  seeds: [0, 1, 2, 3, 4]     # seeded tasks crafter_s<seed>: every life on that map
-  unseeded: [0, 1, 2, 3, 4]  # unseeded tasks crafter_u<k>: every life on a new map
-  # Frozen evaluation when an unseeded task ends: its final controller plays one life per map
-  # below. 10 episodes of at most 2000 steps is BALROG's Crafter setting.
-  eval_seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+  seeds: [0, 1, 2, 3, 4]      # seeded tasks crafter_s<seed>: every life on that map
+  unseeded: [0, 1, 2, 3, 4]   # unseeded tasks crafter_u<k>: every life on a new map
+  synthesis: [0, 1, 2, 3, 4]  # crafter_c<k>: the maps of crafter_u<k>, scored by the final controller
+  # Frozen evaluation when a synthesis task ends: its final controller plays one life per map
+  # below, of at most eval_max_actions actions (BALROG: 10 episodes of 2000 steps).
+  eval_seeds: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129]
   eval_max_actions: 2000

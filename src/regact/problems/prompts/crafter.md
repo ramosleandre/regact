@@ -2,7 +2,7 @@
 
 Crafter is an open-world survival game on a 2D grid. You control one player who can move, collect resources, craft tools, place objects, eat, drink, sleep and fight.
 
-**Goal:** unlock as many of the {n_achievements} achievements as you can, over one or several lives. Each achievement counts once. The achievements are: {achievements}.
+**Goal:** unlock as many of the {n_achievements} achievements as you can within a life. Each achievement counts once per life. The achievements are: {achievements}.
 
 The game does not tell you how to unlock them: find out by playing. The world is random and creatures move on their own, so the same actions do not always give the same result.
 
@@ -16,7 +16,7 @@ The game does not tell you how to unlock them: find out by playing. The world is
 - `sleeping`: whether the player is asleep.
 - `daylight`: from 0 (night) to 1 (day).
 
-`obs.info["achievements"]` lists the achievements unlocked so far. `obs.reward` is +1 when an achievement is unlocked for the first time, and it follows health changes (+0.1 or -0.1 per point).
+`obs.info["achievements"]` lists the achievements unlocked so far in the current life. `obs.reward` is +1 when an achievement is unlocked for the first time, and it follows health changes (+0.1 or -0.1 per point).
 
 ## Actions
 
@@ -26,4 +26,4 @@ A move turns the player to face that direction, and also moves it one cell when 
 
 ## End of a life
 
-The life ends when `health` reaches 0 (`obs.is_done` is true) or after 10000 actions. A new life starts at the same place on the same map with an empty inventory; unlocked achievements are kept.
+The life ends when `health` reaches 0 (`obs.is_done` is true) or after 10000 actions. A new life starts with an empty inventory and nothing unlocked.

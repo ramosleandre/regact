@@ -16,49 +16,51 @@ The open-world survival game of [Hafner (ICLR 2022)](https://arxiv.org/abs/2109.
 | Episode length | a life ends at death or after 10000 actions (the package's own limit) | `crafter.Env(length=10000)` |
 | Reset | the `ResetEnvironment` command starts a new life: same map (seeded) or a new one (unseeded) | `tests/test_crafter.py` |
 
-## Tasks: two settings
+## Tasks: three settings
 
-Both settings share everything but the map of each life: a life starts with an empty inventory, and the achievements unlocked in earlier lives of the task stay unlocked.
+A life always starts with an empty inventory and nothing unlocked, and is scored by the achievements unlocked within it. No task ends early: one good life is not a solved game.
 
-| Setting | Tasks | Map of each life | What it measures |
+| Setting | Tasks | Map of each life | What the run is for |
 |---|---|---|---|
-| Seeded | `crafter_s<seed>`, `problem.kwargs.seeds` (0 to 4) | the same map, at the same starting point | how far an agent gets in one world it can return to; a life replays exactly from its actions, so remembering action sequences pays |
-| Unseeded | `crafter_u<k>`, `problem.kwargs.unseeded` (0 to 4) | a new map every life (life `i` is map `1000 (k + 1) + i`) | what an agent learns about the game: the "training" setting |
-
-A seeded task is won when all 22 achievements are unlocked over its lives. An unseeded task is told that its main result is the final evaluation below.
+| Seeded | `crafter_s<seed>`, `problem.kwargs.seeds` | the same map, at the same starting point | playing one world the agent can return to; a life replays exactly from its actions, so remembering action sequences pays |
+| Unseeded | `crafter_u<k>`, `problem.kwargs.unseeded` | a new map every life (life `i` is map `1000 (k + 1) + i`) | playing while learning the game |
+| Controller synthesis | `crafter_c<k>`, `problem.kwargs.synthesis` | the maps of `crafter_u<k>` | producing a program, `final_controller.py`, scored without the agent on new maps |
 
 ## Observation and actions
 
-`frame` is a dictionary: `view` (7 rows of 9 names: terrain, creatures, `player` at the centre), `facing`, `inventory` (the four needs and the items), `sleeping`, `daylight`. `info["achievements"]` lists the task's unlocked achievements and `info["life_achievements"]` the current life's. The 17 actions are the game's own, as integers; the agent's prompt names neither the actions nor the achievements.
+`frame` is a dictionary: `view` (7 rows of 9 names: terrain, creatures, `player` at the centre), `facing`, `inventory` (the four needs and the items), `sleeping`, `daylight`. `info["achievements"]` lists the current life's achievements. An action is one of the game's 17 action names (`move_left`, `do`, `make_wood_pickaxe`, ...).
+
+The prompt gives what BALROG's gives its agent: the game's name, every action with BALROG's one-line description (recipes included), and the list of the 22 achievements.
 
 ## What is measured
 
-The x axis is the task's real actions, or its tool calls (the budget of a run).
+The x axis is the task's real actions, or its tool calls (the budget of a run); `resets` in `status.json` gives both at the end of each life.
 
 | | Measure | Setting | Metric |
 |---|---|---|---|
-| a | play in one world | seeded | `achievements` over the task, with the action and tool-call count at each new one; `lives` |
-| b | play while learning the game | unseeded | `lives`: achievements within each life against the actions played so far; `first_life_achievements` is the closest to a BALROG episode |
-| c | the controller the agent leaves, on new maps | unseeded | `eval_progress`, `eval_crafter_score`, `eval_success_rates` |
-| d | the CWM the agent leaves, on new maps | unseeded, CWM protocols | `eval_model_explained_rate`, `eval_model_bits_per_step` |
+| a | play in one world | seeded | per-life achievements: `lives`, first, best, mean, worst |
+| b | play while learning the game | unseeded | the same |
+| c | the controller the agent leaves, on new maps | synthesis | `eval_progress`, `eval_crafter_score`, `eval_success_rates` |
+| d | the CWM the agent leaves, on new maps | synthesis, CWM protocols | `eval_model_explained_rate`, `eval_model_bits_per_step` |
 
-**c: frozen controller.** When an unseeded task ends, `final_controller.py` (without one, the controller of the last `RunController` call) plays one life on each seed of `problem.kwargs.eval_seeds` (100 to 109, shown by no task), for at most `eval_max_actions` (2000) actions, with the accepted CWM and no agent. This is BALROG's setting: 10 episodes of at most 2000 steps. A frozen CWM that cannot explain an observation rebuilds its State from that observation alone and the life continues (`regrounded` counts these).
+**c: frozen controller.** When a synthesis task ends, `final_controller.py` (without one, the controller of the last `RunController` call) plays one life on each seed of `problem.kwargs.eval_seeds` (100 to 129, shown by no task), for at most `eval_max_actions` (2000) actions, with the accepted CWM and no agent. BALROG's setting is 10 such episodes. A frozen CWM that cannot explain an observation rebuilds its State from that observation alone and the life continues (`regrounded` counts these). A controller of uniformly random actions scores 11.4 % progress there.
 
-**d: frozen CWM alone.** The accepted CWM follows the action lists of `problems/crafter/data/reference_actions.json` on the same held-out maps: per map, one life of a hand-written controller played to the player's death and one of random actions, about 4,100 steps in all, the same for every run. `eval_model_explained_rate` is the share of these steps it explains. `eval_model_bits_per_step` is their cost, a step it does not explain being charged what a model-free coder pays for it (the coder of the validation report's `no_model` reference); `eval_no_model_bits_per_step` is that coder alone on the same steps, the scale to read it against.
+**d: frozen CWM alone.** The accepted CWM follows the action lists of `problems/crafter/data/reference_actions.json` on held-out maps 100 to 109: per map, one life of a hand-written controller played to the player's death and one of random actions, about 4,100 steps in all, the same for every run. `eval_model_explained_rate` is the share of these steps it explains. `eval_model_bits_per_step` is their cost, a step it does not explain being charged what a model-free coder pays for it (the coder of the validation report's `no_model` reference); `eval_no_model_bits_per_step` is that coder alone on the same steps, the scale to read it against.
 
-Both are written to `cwm/evaluation.json`; see `protocols/managed/evaluation.py`. A seeded task has neither: its agent learned one map, and other maps would be another distribution.
+Both are written to `cwm/evaluation.json`; see `protocols/managed/evaluation.py`.
 
 ## Metrics
 
 | Metric | Meaning |
 |---|---|
-| `achievements` | achievements unlocked over the task's lives (0 to 22) |
-| `actions_to_last` | real actions played when the last one was unlocked |
-| `first_life_achievements`, `best_life_achievements`, `lives` | achievements within one life; `lives` lists, per life, the task's action count at its end and its achievements |
+| `lives` | per life: the task's action count at its end, its achievements, whether the player died (a reset can abandon a life) |
+| `first_life_achievements`, `best_life_achievements` | achievements within the first life, and within the best one |
+| `mean_life_achievements`, `worst_life_achievements` | over the lives played to their death |
+| `achievements`, `actions_to_last` | achievements unlocked in at least one life of the task, and the real actions played when the last of them first was |
 | `eval_progress` | BALROG's progress: percent of the 22 achievements unlocked per held-out life, averaged |
 | `eval_crafter_score` | Hafner's score over the held-out lives: `exp(mean(ln(1 + s_i))) - 1`, `s_i` the percent of lives unlocking achievement `i` |
 | `eval_success_rates` | the `s_i` |
 | `eval_model_explained_rate`, `eval_model_bits_per_step`, `eval_no_model_bits_per_step` | the frozen CWM alone on the reference action lists |
 | `eval_time_limit_stops` | evaluation lives and replays cut by the submitted-code time limit (they then measure speed, not play) |
 
-Differences from BALROG that remain: its agent gets named actions and a text description of the surroundings; its worlds are unseeded.
+Differences from BALROG that remain: its agent reads a text description of the nearest objects where ours reads the map window as names; its agent has no learning phase and calls the model at every step, where the synthesis track evaluates a program written after one.
