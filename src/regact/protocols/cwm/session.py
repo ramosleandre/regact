@@ -162,9 +162,9 @@ class Coordinator(ManagedCoordinator):
             worker, state, action = self._pending
             self.next_state, advanced = self._advance(worker, state, action, obs)
             predicted = check_observation(worker.call("render", state=self.next_state))
-            if canonical(predicted) != canonical(obs):
-                evidence = {**evidence, **explanation_note(advanced)}
-        if canonical(predicted) != canonical(obs):
+            evidence = {**evidence, **explanation_note(advanced)}
+        unexplained = advanced is not None and not advanced["explained"]
+        if unexplained or canonical(predicted) != canonical(obs):
             states = {"state_before": self.current_state, "state": self.next_state}
             self.running = self.current_state = None
             raise ModelMismatch(

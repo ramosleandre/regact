@@ -454,6 +454,11 @@ def validate(
                     state = advanced["state"]
                     where = {**where, **explanation_note(advanced)}
                 ok = explains(state, observed, "prediction_mismatch", where, repeat, before_state)
+                if ok and loss is not None and not advanced["explained"]:
+                    # the right observation, through a choice the model gives probability 0
+                    states = {"state_before": before_state, "state": state}
+                    failure("prediction_mismatch", where, observed, observed, states=states)
+                    ok = False
                 if ok and loss is not None:
                     loss.add(advanced, where, store.observation(where["from_observation_id"]), observed)
                 if not reached(item["history_hash"], state, ok):

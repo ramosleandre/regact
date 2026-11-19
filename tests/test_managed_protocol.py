@@ -568,6 +568,29 @@ def test_frozen_evaluation_plays_the_final_controller_on_held_out_tasks(make_rig
     assert {k: status[k] for k in before} == before  # nothing recorded as experience
 
 
+def test_a_step_reached_through_an_impossible_choice_is_a_mismatch(make_rig, monkeypatch):
+    deterministic = model
+
+    def stochastic_model(root):
+        deterministic(root)
+        (root / "world_model/model_transition.py").write_text(
+            "from world_model.model_state import State\n"
+            "def step(s, a, choose):\n"
+            "    choose('k', {'one': 1.0})\n"
+            "    return State(s.n + 1)\n"
+        )
+
+    monkeypatch.setitem(globals(), "model", stochastic_model)
+    c = make_rig("cwm", stochastic=True)
+    package = c.workdir / "world_model"
+    (package / "model_explain.py").write_text("def explain(state, action, obs): return {'k': 'two'}\n")
+    result = c.tool("UpdateCodeWorldModel", {})
+    assert not result.get("accepted") and result.get("error_type") != "framework_failure", result
+    assert result["failures"] == {"prediction_mismatch": result["failures"]["prediction_mismatch"]}
+    note = result["counterexamples"][0]["explanation"]
+    assert note["choices_given_probability_0"] == ["k"]
+
+
 class UnseenNative(Native):
     def step(self, a):
         frame, *rest = super().step(a)
