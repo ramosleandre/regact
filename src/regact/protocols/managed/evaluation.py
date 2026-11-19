@@ -148,7 +148,7 @@ def _episode(
         milestone_detector=problem.milestone_detector(name),
     )
     out: dict[str, Any] = {"task": name, "actions": 0, "action_list": [], "info": {}}
-    regrounded, bits, explained, no_model = 0, 0.0, 0, 0.0
+    regrounded, ungrounded, bits, explained, no_model = 0, 0, 0.0, 0, 0.0
     lost = object()  # a replay's State when the CWM could not even represent the observation
     started = time.monotonic()
     try:
@@ -177,18 +177,23 @@ def _episode(
                     raise _Unexplained
                 return state
 
-            def ground_or_lose(obs: dict[str, Any]) -> Any:
-                """In a replay the steps go on whatever the CWM makes of them."""
-                if actions is None:
+            def ground_or_lose(obs: dict[str, Any], previous: Any = None) -> Any:
+                """The episode goes on whatever the CWM makes of an observation: a replay
+                without a State, a controller with the State it had (``previous``)."""
+                nonlocal ungrounded
+                if actions is None and previous is None:
                     return ground(obs)
                 try:
                     return ground(obs)
                 except _Unexplained:
-                    return lost
+                    pass
                 except WorkerError as exc:
                     if exc.kind == "operation_timeout":
                         raise
+                if actions is not None:
                     return lost
+                ungrounded += 1
+                return previous
 
             def follow(state: Any, action: Any, obs: dict[str, Any]) -> Any:
                 nonlocal regrounded, bits, explained
@@ -212,7 +217,7 @@ def _episode(
                         raise
                 # nobody can repair the model here: forget and carry on from what is visible
                 regrounded += 1
-                return ground_or_lose(obs)
+                return ground_or_lose(obs, state)
 
             if controller is not None:
                 controller.call("controller_init", module=module)
@@ -258,6 +263,8 @@ def _episode(
     out["submitted_code_seconds"] = round(clock.used, 2)
     if model is not None:
         out["regrounded"] = regrounded
+        if actions is None:
+            out["ungrounded"] = ungrounded
         out["explained"] = explained if stochastic else out["actions"] - regrounded
         if stochastic:
             out["bits"] = round(bits, 2)

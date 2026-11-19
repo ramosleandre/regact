@@ -568,6 +568,27 @@ def test_frozen_evaluation_plays_the_final_controller_on_held_out_tasks(make_rig
     assert {k: status[k] for k in before} == before  # nothing recorded as experience
 
 
+class UnseenNative(Native):
+    def step(self, a):
+        frame, *rest = super().step(a)
+        return [*frame[:-1], -1], *rest  # a frame the CWM cannot render
+
+
+def test_frozen_evaluation_keeps_the_state_a_cwm_cannot_rebuild(make_rig, monkeypatch):
+    held_out = lambda self, task: UnseenNative() if task.startswith("held") else Native()  # noqa: E731
+    monkeypatch.setattr(HeldOutProblem, "make_env", held_out)
+    c = make_rig("cwm", problem=HeldOutProblem())
+    exploration(c, (1,))
+    c.tool("RunController", {})
+    (c.workdir / "final_controller.py").write_text(
+        (c.workdir / "controller.py").read_text().replace("[1]", "[1, 1, 1]")
+    )
+    c.close("tool_call_limit")
+    episode = json.loads((c.root / "evaluation.json").read_text())["episodes"][0]
+    assert (episode["actions"], episode["stop_reason"]) == (2, "max_actions")
+    assert (episode["regrounded"], episode["ungrounded"]) == (2, 2)
+
+
 def test_frozen_evaluation_falls_back_and_skips_resumable_exits(make_rig):
     c = make_rig("vanilla", problem=HeldOutProblem())
     exploration(c, (1,))
