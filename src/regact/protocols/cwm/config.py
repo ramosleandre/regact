@@ -56,6 +56,7 @@ class CwmConfig:
     max_seconds_per_initial_collection: float | None = 30
     threshold_max_state_obs_size_ratio: float = 0.5
     max_state_bytes_always_allowed: int | None = 256  # a State this small passes whatever the ratio
+    allow_unknown_cells: bool = False  # render may leave parts of the frame unpredicted (unknown.py)
     max_actions_per_RunController: int | None = 100
     n_tmp_images_saved_per_exploration: int = 0
     workspace_helpers_enabled: bool = True
@@ -97,6 +98,7 @@ class CwmConfig:
                     "one_command_per_tool_call",
                     "enabled",
                     "stochastic",
+                    "allow_unknown_cells",
                 ):
                     if type(value) is not bool:
                         raise ValueError(f"{prefix}{key} must be a boolean")

@@ -37,7 +37,7 @@ Run `python framework/commands.py UpdateCodeWorldModel` with no arguments. It re
 2. **Every recorded action:** `state = step(state, action)`, and `render(state)` must equal the next recorded observation. An episode stops at its first divergence: the State after it is unreliable.
 3. **Repeatability:** callbacks give the same results on repeated identical inputs (checked on a sample of calls).
 4. **Compactness:** `sum(serialized State bytes) / sum(serialized observation bytes)` must be strictly below **__SIZE_RATIO__**, and so must each single State divided by the larger of its own observation and the average observation. States that grow along an episode (visited sets, action logs) fail.__STATE_ALLOWANCE__
-
+__UNKNOWN_CELLS__
 Submitting is the cheapest way to check your CWM against everything recorded: it costs one tool call and no game action, and a refusal costs nothing else. Prefer it to replaying recorded data with your own script.
 
 ## 3. Use the result
@@ -56,7 +56,7 @@ Counterexamples include evidence IDs and one of these failure types:
 - `prediction_mismatch`: the State carried by `step` stopped matching a recorded observation. It names the `episode_id` and `step` (actions applied in that episode). The real mistake can be earlier, when a hidden field went wrong before it showed on screen.
 - `compression_ratio`: States are too large on average or for one State; size feedback includes the smallest/largest State and their observation IDs.
 - `non_deterministic_model`: identical callback inputs produced different outputs.
-
+__UNKNOWN_CELLS_FAILURE__
 `failures` counts failed checks; one bug can cause several. Examples are limited to __COUNTEREXAMPLES__. They have the same fields as a contradiction during a controller call, described in "Reading a contradiction" in `docs/acting_phase.md`. Error text is limited to __ERROR_CHARS__ characters, retaining its beginning and end.
 
 To understand a counterexample, start with its `details` call, `data_api.describe_diagnostic(diagnostic_id)`: the differences, your model's State before the step and the State it predicted, all bounded. `data_api.load_diagnostic(diagnostic_id)` returns the whole record and can be very large. Use `load_observations` or `load_transitions` from `data_api` with the returned IDs, and `data_api.list_episodes()` and `data_api.load_history(episode_id)` to see what happened in order. Only when a hidden field may have gone wrong before the failing step, replay the episode locally: `observations, actions = data_api.load_history(episode_id)`, `state = get_initial_state(observations[0])`, then `state = step(state, action)` for each action, checking the field you suspect.__DIAGNOSTIC_IMAGES__

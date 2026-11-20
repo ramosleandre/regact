@@ -10,6 +10,7 @@ from regact.problems.base import BaseProblem
 from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.limits import describe
+from regact.protocols.cwm.unknown import MAX_UNKNOWN_SHARE, UNKNOWN, UNKNOWN_FRAMES
 from regact.protocols.managed.prompting import action_cap_sentence, reset_commands
 from regact.protocols.managed.prompting import build_prompt as build_managed_prompt
 from regact.workspace.templates import TemplateFile
@@ -66,6 +67,18 @@ _EVALUATION = """
 - **Final evaluation with the CWM.** The final evaluation described under Environment runs the controller with your accepted CWM, exactly as `RunController` does, except that nobody can repair the CWM there. When it cannot explain an observation, the State is rebuilt from that observation alone with `get_initial_state` and the life goes on: what the State remembered is lost. Nothing else stops the life early. Your accepted CWM is also scored by itself, on play recorded in other new worlds: the share of the steps it explains, and their cost in bits.
 """
 
+_UNKNOWN_CELLS = """
+**Unknown cells.** `render` may put the string `"__UNKNOWN__"` in place of any value inside `frame` (one cell, a row, a whole grid): that part is not compared with the real observation. Everything else must still match exactly, and `reward`, `is_done`, `available_actions` and `info` cannot be unknown. `render` decides this from the State alone. Use it for what you cannot predict yet or do not need (a counter you do not understand, the intermediate frames of an animation). The State is still carried by `step`: something you left unknown fails later as a normal mismatch if it shows in a cell you do predict, and your controller cannot rely on a part nobody checks.
+
+When `frame` is a list of frames, `"__UNKNOWN_FRAMES__"` as its first element stands for any number of leading frames: `["__UNKNOWN_FRAMES__", last_frame]` predicts only the last one, whatever their count.
+
+Two limits. Among the frame cells whose value changes at least once in the recorded observations, at most __UNKNOWN_SHARE__ % may be unknown; cells that never change cost nothing. The unknown parts of an observation are not counted in the observation bytes of the compactness check. An accepted validation reports `unknown_cells`.
+"""
+_UNKNOWN_CELLS_INTRO = """
+- **Unknown cells.** Your `render` may answer `"__UNKNOWN__"` for parts of the frame you do not predict: those parts are not checked, the rest must be exact. Read "Unknown cells" in `docs/modeling_phase.md`. A frame predicted by your CWM (`EnvCWM`, a plan) contains these markers as `render` wrote them.
+"""
+_UNKNOWN_CELLS_FAILURE = "- `unknown_cells`: too many of the changing frame cells are unknown; `share_of_changing_cells` must be at most `allowed_share`.\n"
+
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at the start of every call; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
 
 """
@@ -106,6 +119,12 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         else "",
         "INITIAL_TARGET": options.n_unique_observations_in_initial_collection,
         "SIZE_RATIO": options.threshold_max_state_obs_size_ratio,
+        "UNKNOWN_CELLS": _UNKNOWN_CELLS.replace("__UNKNOWN__", UNKNOWN)
+        .replace("__UNKNOWN_FRAMES__", UNKNOWN_FRAMES)
+        .replace("__UNKNOWN_SHARE__", f"{100 * MAX_UNKNOWN_SHARE:g}")
+        if options.allow_unknown_cells
+        else "",
+        "UNKNOWN_CELLS_FAILURE": _UNKNOWN_CELLS_FAILURE if options.allow_unknown_cells else "",
         "STATE_ALLOWANCE": f" A State of at most {options.max_state_bytes_always_allowed} serialized bytes always passes."
         if options.max_state_bytes_always_allowed is not None
         else "",
@@ -147,6 +166,8 @@ def _render(name: str, options: CwmConfig, *, vision: bool = False, **extra: str
         text = text.replace(f"__{key}__", str(value) if isinstance(value, str) else describe(value))
     if options.stochastic and name == "workflow.md":
         text = text.rstrip() + _STOCHASTIC_INTRO
+    if options.allow_unknown_cells and name == "workflow.md":
+        text = text.rstrip() + _UNKNOWN_CELLS_INTRO.replace("__UNKNOWN__", UNKNOWN)
     return text
 
 

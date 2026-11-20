@@ -10,3 +10,4 @@ max_surprise_bits_per_choice: 10  # probability below 1/1024
 # The State may hold what the agent remembers (a map), which grows past one observation.
 threshold_max_state_obs_size_ratio: 0.99
 max_state_bytes_always_allowed: 262144
+allow_unknown_cells: false  # render may answer UNKNOWN for parts of the frame

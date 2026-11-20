@@ -11,6 +11,7 @@ from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.config import CwmConfig
 from regact.protocols.cwm.differences import summarize
 from regact.protocols.cwm.store import ExperienceStore, canonical
+from regact.protocols.cwm.unknown import UnknownShare, leaves, resolve, unknown_bytes
 from regact.protocols.cwm.worker import Worker, WorkerError
 
 
@@ -58,13 +59,15 @@ def add_state_size(
     obs: Any,
     threshold: float,
     allowance: int | None = None,
+    unpredicted_bytes: int = 0,
 ) -> None:
     """Accumulate bytes and representative extremes without retaining extra states. A State of at
     most ``allowance`` bytes never becomes the largest-ratio State: it always passes. Of the States
     at or above ``threshold`` times their own observation, only the largest is kept: it alone
-    decides the per-State check (see compactness_failure)."""
+    decides the per-State check (see compactness_failure). ``unpredicted_bytes`` of the
+    observation were left unknown by render and are not counted."""
     state_bytes = len(canonical(state).encode())
-    observation_bytes = len(canonical(obs).encode())
+    observation_bytes = len(canonical(obs).encode()) - unpredicted_bytes
     summary["state_bytes"] = summary.get("state_bytes", 0) + state_bytes
     summary["observation_bytes"] = summary.get("observation_bytes", 0) + observation_bytes
     summary["n_states"] = summary.get("n_states", 0) + 1
@@ -137,7 +140,7 @@ def advance(
         first = first or run
         if run["possible"]:
             rendered = worker.call("render", state=run["state"])
-            if canonical(rendered) == target:
+            if canonical(resolve(rendered, obs, config.allow_unknown_cells)[0]) == target:
                 bits = sum(-math.log2(p) for _, _, p, _, _ in run["choices"])
                 return {**run, "explained": True, "bits": bits, "nodes": nodes}
         cost, k = 0.0, 0
@@ -188,8 +191,13 @@ class Loss:
         self.total += result["bits"]
         worst = None
         for name, value, p, _pinned, ranked in result["choices"]:
-            for other, q in ranked:  # reliability: do things given probability q happen q of the time?
-                bucket = self.calibration[min(len(_BUCKETS) - 1, sum(q > edge for edge in _BUCKETS[:-1]))]
+            for (
+                other,
+                q,
+            ) in ranked:  # reliability: do things given probability q happen q of the time?
+                bucket = self.calibration[
+                    min(len(_BUCKETS) - 1, sum(q > edge for edge in _BUCKETS[:-1]))
+                ]
                 bucket[0] += 1
                 bucket[1] += q
                 bucket[2] += other == value
@@ -221,8 +229,8 @@ class Loss:
 
     def no_model_bits(self, before: Any, after: Any) -> float:
         """What the model-free coder pays for one step, learning from it as it goes."""
-        old, bits = dict(_leaves(before)), 0.0
-        for path, value in _leaves(after):
+        old, bits = dict(leaves(before)), 0.0
+        for path, value in leaves(after):
             counts = self._contexts.setdefault((path, canonical(old.get(path))), {})
             key, n = canonical(value), sum(counts.values())
             bits -= math.log2((counts.get(key, 0) + 0.5) / (n + _ALPHABET / 2))
@@ -277,17 +285,6 @@ def _top(shares: dict[str, float], n: int = 6) -> dict[str, float]:
     return {key: round(value, 3) for key, value in ranked[:n]}
 
 
-def _leaves(value: Any, path: str = "") -> Any:
-    if isinstance(value, dict):
-        for key in sorted(value):
-            yield from _leaves(value[key], f"{path}.{key}")
-    elif isinstance(value, list):
-        for i, item in enumerate(value):
-            yield from _leaves(item, f"{path}[{i}]")
-    else:
-        yield path, value
-
-
 def validate(
     worker: Worker,
     store: ExperienceStore,
@@ -320,6 +317,8 @@ def validate(
     }
     sizes: dict[str, Any] = {}
     loss = Loss() if config.stochastic else None
+    share = UnknownShare() if config.allow_unknown_cells else None
+    checked: list[int] = []  # observations render was checked against, for the unknown share
     # a stochastic State depends on what happened before, not only on the episode's own history
     repeated = set() if config.stochastic else store.repeated_histories()
     previous_final: Any = None  # the State at the end of the previous episode, for reset()
@@ -376,9 +375,13 @@ def validate(
         state: Any, obs: Any, kind: str, where: dict[str, Any], repeat: bool, before: Any = None
     ) -> bool:
         rendered = check_observation(call("render", repeat, where, state=state))
+        rendered, unknown = resolve(rendered, obs, config.allow_unknown_cells)
         if canonical(rendered) != canonical(obs):
             failure(kind, where, rendered, obs, states={"state_before": before, "state": state})
             return False
+        if share is not None:
+            share.add(unknown)
+            checked.append(where["observation_id"])
         add_state_size(
             sizes,
             where["observation_id"],
@@ -386,6 +389,7 @@ def validate(
             obs,
             config.threshold_max_state_obs_size_ratio,
             config.max_state_bytes_always_allowed,
+            unknown_bytes(unknown),
         )
         return True
 
@@ -455,7 +459,9 @@ def validate(
                     where = {**where, **explanation_note(advanced)}
                 ok = explains(state, observed, "prediction_mismatch", where, repeat, before_state)
                 if ok and loss is not None:
-                    loss.add(advanced, where, store.observation(where["from_observation_id"]), observed)
+                    loss.add(
+                        advanced, where, store.observation(where["from_observation_id"]), observed
+                    )
                 if not reached(item["history_hash"], state, ok):
                     alive = False  # the rest of this episode cannot be predicted from here
                     break
@@ -475,6 +481,11 @@ def validate(
             sizes, config.threshold_max_state_obs_size_ratio, config.max_state_bytes_always_allowed
         ):
             failure("compression_ratio", size_failure)
+        if share is not None and share.cells:
+            report = share.report(store.observation(oid)["frame"] for oid in checked)
+            summary["unknown_cells"] = report
+            if report["share_of_changing_cells"] > report["allowed_share"]:
+                failure("unknown_cells", report)
     except WorkerError as exc:
         summary["error"] = budgets.truncate_error(str(exc), config.feedback.max_error_chars)
         summary["error_type"] = exc.kind

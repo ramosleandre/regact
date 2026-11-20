@@ -16,6 +16,7 @@ from regact.envclient.errors import InvalidActionError
 from regact.protocols.cwm import limits as budgets
 from regact.protocols.cwm.bundle import snapshot
 from regact.protocols.cwm.store import atomic_json, canonical
+from regact.protocols.cwm.unknown import resolve
 from regact.protocols.cwm.validation import Loss, advance, check_observation
 from regact.protocols.cwm.worker import WorkerError
 
@@ -165,15 +166,18 @@ def _episode(
             explainer = open_worker(model) if model is not None and stochastic else None
             controller = open_worker(controller_bundle) if actions is None else None
 
+            def matches(rendered: Any, obs: dict[str, Any]) -> bool:
+                rendered = check_observation(rendered)
+                rendered, _ = resolve(rendered, obs, options.allow_unknown_cells)
+                return canonical(rendered) == canonical(obs)
+
             def ground(obs: dict[str, Any]) -> Any:
                 """A State built from one observation alone, as at the start of an episode."""
                 if worker is None:
                     return obs
                 op = "start_state" if stochastic else "get_initial_state"
                 state = worker.call(op, obs=obs)
-                if canonical(check_observation(worker.call("render", state=state))) != canonical(
-                    obs
-                ):
+                if not matches(worker.call("render", state=state), obs):
                     raise _Unexplained
                 return state
 
@@ -204,8 +208,7 @@ def _episode(
                             return advanced["state"]
                     else:
                         after = worker.call("step", state=state, action=action)
-                        rendered = check_observation(worker.call("render", state=after))
-                        if canonical(rendered) == canonical(obs):
+                        if matches(worker.call("render", state=after), obs):
                             return after
                 except WorkerError as exc:
                     if exc.kind == "operation_timeout":

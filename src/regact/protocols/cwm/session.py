@@ -14,6 +14,7 @@ from regact.protocols.cwm.bundle import description, require_unchanged_model, sn
 from regact.protocols.cwm.commands import enabled_commands
 from regact.protocols.cwm.planner import plan
 from regact.protocols.cwm.store import canonical
+from regact.protocols.cwm.unknown import Unknown, resolve, unknown_bytes
 from regact.protocols.cwm.validation import (
     SIZE_KEYS,
     add_state_size,
@@ -162,9 +163,10 @@ class Coordinator(ManagedCoordinator):
             worker, state, action = self._pending
             self.next_state, advanced = self._advance(worker, state, action, obs)
             predicted = check_observation(worker.call("render", state=self.next_state))
-            if canonical(predicted) != canonical(obs):
-                evidence = {**evidence, **explanation_note(advanced)}
+        predicted, unknown = resolve(predicted, obs, self.options.allow_unknown_cells)
         if canonical(predicted) != canonical(obs):
+            if advanced is not None:
+                evidence = {**evidence, **explanation_note(advanced)}
             states = {"state_before": self.current_state, "state": self.next_state}
             self.running = self.current_state = None
             raise ModelMismatch(
@@ -173,7 +175,7 @@ class Coordinator(ManagedCoordinator):
         self.current_state = self.next_state
         if "explained_until" in self.accepted:
             self.accepted["explained_until"] = evidence["event_id"]
-        self._check_size(self.current_state, obs, evidence["after_obs_id"])
+        self._check_size(self.current_state, obs, evidence["after_obs_id"], unknown)
         if self.single_instance:
             self.running = {"state": self.current_state, "hash": evidence["history_hash"]}
         if advanced is not None:
@@ -230,6 +232,7 @@ class Coordinator(ManagedCoordinator):
 
     def _explained(self, worker: Worker, state: Any, obs: dict[str, Any], oid: int) -> Any:
         rendered = check_observation(worker.call("render", state=state))
+        rendered, unknown = resolve(rendered, obs, self.options.allow_unknown_cells)
         if canonical(rendered) != canonical(obs):
             self.running = None
             raise ModelMismatch(
@@ -239,13 +242,15 @@ class Coordinator(ManagedCoordinator):
                 {"observation_id": oid},
                 {"state_before": None, "state": state},
             )
-        self._check_size(state, obs, oid)
+        self._check_size(state, obs, oid, unknown)
         return state
 
-    def _check_size(self, state: Any, obs: dict[str, Any], oid: int) -> None:
+    def _check_size(self, state: Any, obs: dict[str, Any], oid: int, unknown: Unknown) -> None:
         allowance = self.options.max_state_bytes_always_allowed
         threshold = self.options.threshold_max_state_obs_size_ratio
-        add_state_size(self.state_sizes, oid, state, obs, threshold, allowance)
+        add_state_size(
+            self.state_sizes, oid, state, obs, threshold, allowance, unknown_bytes(unknown)
+        )
         failure = compactness_failure(self.state_sizes, threshold, allowance)
         if failure is not None:
             self.running = None

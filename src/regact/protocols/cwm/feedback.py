@@ -14,6 +14,7 @@ FAILURES = {
     "prediction_mismatch": "the State carried by step stopped matching a recorded observation",
     "compression_ratio": "the serialized states are too large, on average or for one state",
     "non_deterministic_model": "a callback returned different outputs for identical input",
+    "unknown_cells": "render leaves too many of the changing frame cells UNKNOWN",
 }
 ENDINGS = {
     "solved": "The full game is solved; the task has ended.",
@@ -218,7 +219,7 @@ def present(name: str, r: dict[str, Any], c: CwmConfig, limits: LimitsConfig) ->
                     out["state_size"][key] = {
                         k: round(v, 3) if k == "ratio" else v for k, v in r[key].items()
                     }
-        for key in ("failures", "counterexamples", "counterexamples_omitted"):
+        for key in ("unknown_cells", "failures", "counterexamples", "counterexamples_omitted"):
             if r.get(key):
                 out[key] = r[key]
         if status == "Accepted" and r.get("bits"):
