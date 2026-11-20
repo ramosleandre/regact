@@ -72,12 +72,12 @@ _UNKNOWN_CELLS = """
 
 When `frame` is a list of frames, `"__UNKNOWN_FRAMES__"` as its first element stands for any number of leading frames: `["__UNKNOWN_FRAMES__", last_frame]` predicts only the last one, whatever their count.
 
-Two limits. Among the frame cells whose value changes at least once in the recorded observations, at most __UNKNOWN_SHARE__ % may be unknown; cells that never change cost nothing. The unknown parts of an observation are not counted in the observation bytes of the compactness check. An accepted validation reports `unknown_cells`.
+Two limits. Among the frame cells whose value changes at least once in the recorded observations, at most __UNKNOWN_SHARE__ % may be unknown; cells that never change cost nothing. While no cell has changed yet in the recorded observations, the limit applies to all the cells of the frame (`share_of_all_cells`). The unknown parts of an observation are not counted in the observation bytes of the compactness check. An accepted validation reports `unknown_cells`.
 """
 _UNKNOWN_CELLS_INTRO = """
 - **Unknown cells.** Your `render` may answer `"__UNKNOWN__"` for parts of the frame you do not predict: those parts are not checked, the rest must be exact. Read "Unknown cells" in `docs/modeling_phase.md`. A frame predicted by your CWM (`EnvCWM`, a plan) contains these markers as `render` wrote them.
 """
-_UNKNOWN_CELLS_FAILURE = "- `unknown_cells`: too many of the changing frame cells are unknown; `share_of_changing_cells` must be at most `allowed_share`.\n"
+_UNKNOWN_CELLS_FAILURE = "- `unknown_cells`: too many of the changing frame cells are unknown; `share_of_changing_cells` (or `share_of_all_cells`, while no cell has changed yet) must be at most `allowed_share`.\n"
 
 _IMAGE_PREVIEWS = """Up to __IMAGE_COUNT__ PNG previews are saved in `tmp/images/obs_id_<ID>.png`, selected from the first and last distinct observations encountered. `observation_images` lists the saved paths. Read them with your image tool. This folder is emptied at the start of every call; copy images elsewhere if needed. The dataset itself remains available regardless of preview cleanup.
 

@@ -79,7 +79,8 @@ def leaves(value: Any, path: str = "") -> Iterator[tuple[str, Any]]:
 class UnknownShare:
     """How much of what changes in the recordings a CWM left unknown. A cell is a leaf of the
     frame; only the cells whose value changes at least once in the checked observations count,
-    on both sides: static background costs nothing to leave unknown and earns nothing known."""
+    on both sides: static background costs nothing to leave unknown and earns nothing known.
+    While no cell has changed yet, the share is over every cell of the frame."""
 
     def __init__(self) -> None:
         self.cells: Counter[str] = Counter()
@@ -100,9 +101,12 @@ class UnknownShare:
                     changing.add(path)
         total = sum(seen[path] for path in changing)
         unknown = sum(self.cells[path] for path in changing)
-        return {
+        report = {
             "cells": sum(self.cells.values()),
             "changing_cells": unknown,
             "share_of_changing_cells": round(unknown / total, 4) if total else 0.0,
             "allowed_share": MAX_UNKNOWN_SHARE,
         }
+        if not changing and seen:
+            report["share_of_all_cells"] = round(report["cells"] / sum(seen.values()), 4)
+        return report

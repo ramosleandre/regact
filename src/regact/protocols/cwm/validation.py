@@ -484,7 +484,8 @@ def validate(
         if share is not None and share.cells:
             report = share.report(store.observation(oid)["frame"] for oid in checked)
             summary["unknown_cells"] = report
-            if report["share_of_changing_cells"] > report["allowed_share"]:
+            worst = max(report["share_of_changing_cells"], report.get("share_of_all_cells", 0.0))
+            if worst > report["allowed_share"]:
                 failure("unknown_cells", report)
     except WorkerError as exc:
         summary["error"] = budgets.truncate_error(str(exc), config.feedback.max_error_chars)

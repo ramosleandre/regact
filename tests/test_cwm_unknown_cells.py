@@ -53,6 +53,15 @@ def test_only_cells_that_change_are_charged():
     assert share.report(frames)["share_of_changing_cells"] == 0.25
 
 
+def test_with_no_changing_cell_every_cell_is_charged():
+    share = UnknownShare()
+    frames = [[0, 7, 3]]  # one observation: nothing has changed yet
+    share.add([("frame", frames[0])])
+    report = share.report(frames)
+    assert report["share_of_changing_cells"] == 0.0 and report["share_of_all_cells"] == 1.0
+    assert "share_of_all_cells" not in share.report([[0, 7, 3], [0, 7, 4]])
+
+
 def test_unknown_bytes_earn_no_state_size():
     sizes = {}
     add_state_size(sizes, 1, {"n": 1}, obs([1] * 50), 0.5, None, unpredicted_bytes=40)
@@ -111,6 +120,15 @@ def test_too_many_unknown_cells_are_refused(hidden_rig):  # noqa: F811
     refused = c.tool("UpdateCodeWorldModel", {})
     assert not refused["accepted"] and refused["failures"] == {"unknown_cells": 1}, refused
     assert refused["unknown_cells"]["share_of_changing_cells"] == 1.0
+
+
+def test_a_wholly_unknown_first_frame_is_refused(hidden_rig):  # noqa: F811
+    c = hidden_rig(target=1, allow_unknown_cells=True)
+    hidden_model(c.workdir)
+    (c.workdir / "world_model" / "model_render.py").write_text(render(f'"{UNKNOWN}"'))
+    refused = c.tool("UpdateCodeWorldModel", {})
+    assert not refused["accepted"] and refused["failures"] == {"unknown_cells": 1}, refused
+    assert refused["unknown_cells"]["share_of_all_cells"] == 1.0
 
 
 def test_the_docs_describe_unknown_cells_only_when_allowed(hidden_rig):  # noqa: F811
