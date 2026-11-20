@@ -16,5 +16,5 @@ An action is one of these names, as a string:
 
 These are the achievements of the game: {achievements}.
 
-{score} A life ends when the player dies or after 10000 actions. A reset then starts a new life {reset}, with an empty inventory and nothing unlocked.
+{score} A life ends when the player dies or after {life} actions. A reset then starts a new life {reset}, with an empty inventory and nothing unlocked.
 {evaluation}

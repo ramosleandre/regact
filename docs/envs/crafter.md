@@ -13,7 +13,7 @@ The open-world survival game of [Hafner (ICLR 2022)](https://arxiv.org/abs/2109.
 |---|---|---|
 | Deterministic | no for the agent; yes given the seed and the actions | the same actions on the same seed give the same frames once `_balance_chunk` iterates in a fixed order (upstream iterates a set) |
 | Fully observable | no: map window, no position, hidden need counters | read in `crafter/engine.py` and `objects.py` |
-| Episode length | a life ends at death or after 10000 actions (the package's own limit) | `crafter.Env(length=10000)` |
+| Episode length | a life ends at death or after `problem.kwargs.life_max_actions` actions (2000, BALROG's limit; the package's own is 10000) | `crafter.Env(length=...)` |
 | Reset | the `ResetEnvironment` command starts a new life: same map (seeded) or a new one (unseeded) | `tests/test_crafter.py` |
 
 ## Tasks: three settings
@@ -55,7 +55,7 @@ Both are written to `cwm/evaluation.json`; see `protocols/managed/evaluation.py`
 |---|---|
 | `lives` | per life: the task's action count at its end, its achievements, whether the player died (a reset can abandon a life) |
 | `first_life_achievements`, `best_life_achievements` | achievements within the first life, and within the best one |
-| `mean_life_achievements`, `worst_life_achievements` | over the lives played to their death |
+| `mean_life_achievements`, `worst_life_achievements` | over every life started (died, reached the action limit, or abandoned by a reset) |
 | `achievements`, `actions_to_last` | achievements unlocked in at least one life of the task, and the real actions played when the last of them first was |
 | `eval_progress` | BALROG's progress: percent of the 22 achievements unlocked per held-out life, averaged |
 | `eval_crafter_score` | Hafner's score over the held-out lives: `exp(mean(ln(1 + s_i))) - 1`, `s_i` the percent of lives unlocking achievement `i` |

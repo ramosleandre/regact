@@ -84,7 +84,7 @@ _FACING = {(-1, 0): "left", (1, 0): "right", (0, -1): "up", (0, 1): "down"}
 _UNIT = 48  # px per tile in pictures
 _VITALS = ("health", "food", "drink", "energy")
 _DIED = "the player died"
-_SCORE = "Your score in a life is the number of different achievements unlocked in it: play each life to unlock as many as you can."
+_SCORE = "Your score in a life is the number of different achievements unlocked in it: play each life to unlock as many as you can. Every life you start counts, also one you leave by a reset, and the result of the task is read against the total number of actions you have played."
 _SCORE_SYNTHESIS = "A life is scored by the number of different achievements unlocked in it."
 _RESET = (
     "at the starting point of the same world",
@@ -106,9 +106,12 @@ _HELPER = (
 class CrafterEnv:
     """One Crafter task behind the gym-like interface the env server drives."""
 
-    def __init__(self, seed: int, *, new_map_each_life: bool = False) -> None:
+    def __init__(
+        self, seed: int, *, new_map_each_life: bool = False, life_max_actions: int = 10000
+    ) -> None:
         self._seed = seed
         self._new_map_each_life = new_map_each_life
+        self._life_max_actions = life_max_actions
         self._lives = 0  # started so far
         self._env = self._world()
 
@@ -121,7 +124,8 @@ class CrafterEnv:
                 ordered = sorted(objs, key=lambda o: (type(o).__name__, *map(int, o.pos)))
                 super()._balance_chunk(chunk, ordered)
 
-        return Env(seed=self._seed + self._lives if self._new_map_each_life else self._seed)
+        seed = self._seed + self._lives if self._new_map_each_life else self._seed
+        return Env(seed=seed, length=self._life_max_actions)
 
     def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
         self._env = self._world()
@@ -225,6 +229,7 @@ class CrafterProblem(BaseProblem):
         seeds: list[int] | None = None,
         eval_seeds: list[int] | None = None,
         eval_max_actions: int | None = 2000,
+        life_max_actions: int = 2000,
         unseeded: list[int] | None = None,
         synthesis: list[int] | None = None,
     ) -> None:
@@ -233,6 +238,7 @@ class CrafterProblem(BaseProblem):
         self._synthesis = [int(k) for k in synthesis or []]
         self._eval_seeds = [int(s) for s in eval_seeds or []]
         self._eval_max_actions = eval_max_actions
+        self._life_max_actions = int(life_max_actions)
 
     def make_env(self, task_name: str) -> Any:
         prefix = next((p for p in (_UNSEEDED, _SYNTHESIS) if task_name.startswith(p)), _TASK)
@@ -240,8 +246,12 @@ class CrafterProblem(BaseProblem):
         if not task_name.startswith(prefix) or not number.isdigit():
             raise RegactError(ErrorCategory.EVAL_HARNESS, f"unknown crafter task {task_name!r}")
         if prefix != _TASK:
-            return CrafterEnv((int(number) + 1) * _STREAM, new_map_each_life=True)
-        return CrafterEnv(int(number))
+            return CrafterEnv(
+                (int(number) + 1) * _STREAM,
+                new_map_each_life=True,
+                life_max_actions=self._life_max_actions,
+            )
+        return CrafterEnv(int(number), life_max_actions=self._life_max_actions)
 
     def get_task_names(self) -> list[str]:
         return [
@@ -304,6 +314,7 @@ class CrafterProblem(BaseProblem):
             .replace("{actions}", actions)
             .replace("{achievements}", ", ".join(f"`{name}`" for name in ACHIEVEMENTS))
             .replace("{score}", _SCORE_SYNTHESIS if evaluated else _SCORE)
+            .replace("{life}", str(self._life_max_actions))
             .replace("{reset}", _RESET[not task_name.startswith(_TASK)])
             .replace("{evaluation}", evaluation if evaluated else "")
             .strip()
@@ -453,8 +464,8 @@ class CrafterProblem(BaseProblem):
         self, task_name: str, trace: list[tuple[int, dict[str, Any]]]
     ) -> dict[str, Any]:
         """``lives``: per life, the task's real actions when it ended, the achievements unlocked
-        within it and whether the player died (a life can also be abandoned by a reset). The mean
-        and the worst are over the lives played to their death, when there are any.
+        within it and whether the player died (a life can also end at the action limit or be
+        abandoned by a reset). The mean and the worst are over every life started.
         ``achievements`` counts those unlocked in at least one life, ``actions_to_last`` the real
         actions played when the last of them first was."""
         seen: set[str] = set()
@@ -472,7 +483,7 @@ class CrafterProblem(BaseProblem):
             previous = actions
         out: dict[str, Any] = {"achievements": len(seen), "actions_to_last": at}
         if lives:
-            ended = [n for _, n, died in lives if died] or [n for _, n, _ in lives]
+            ended = [n for _, n, _ in lives]
             out.update(
                 lives=lives,
                 first_life_achievements=lives[0][1],
@@ -518,6 +529,7 @@ class CrafterProblem(BaseProblem):
             "synthesis": self._synthesis,
             "eval_seeds": self._eval_seeds,
             "eval_max_actions": self._eval_max_actions,
+            "life_max_actions": self._life_max_actions,
         }
 
 

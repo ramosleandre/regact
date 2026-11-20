@@ -66,7 +66,7 @@ def test_crafter_metrics_per_life_and_on_held_out_worlds():
         "lives": [[2, 1, 1], [5, 1, 0], [8, 2, 1]],
         "first_life_achievements": 1,
         "best_life_achievements": 2,
-        "mean_life_achievements": 1.5,
+        "mean_life_achievements": 1.33,
         "worst_life_achievements": 1,
     }
     assert not problem.is_perfect({"success_rate": 1.0})  # one good life is not a solved game
@@ -108,6 +108,13 @@ def test_an_unseeded_task_gives_each_life_a_new_map():
     assert problem.make_env("crafter_u1").reset()[0]["view"] != first["view"]
 
 
+def test_a_crafter_life_ends_at_the_action_limit():
+    env = build_problem("crafter", {"unseeded": [0], "life_max_actions": 3}).make_env("crafter_u0")
+    env.reset()
+    ends = [env.step("noop")[2:4] for _ in range(3)]
+    assert ends == [(False, False), (False, False), (False, True)]
+
+
 def test_crafter_prompts_state_its_own_rules():
     problem = build_problem("crafter", {"unseeded": [0], "synthesis": [0], "eval_seeds": [100, 101]})
     section = problem.environment_prompt(cr.TASK)
@@ -118,6 +125,8 @@ def test_crafter_prompts_state_its_own_rules():
     assert "final_controller.py" not in problem.objective_prompt(cr.TASK)
     unseeded = problem.environment_prompt("crafter_u0")
     assert "in a new world" in unseeded and "final_controller.py" not in unseeded
+    assert "after 2000 actions" in unseeded and "Every life you start counts" in unseeded
+    assert "Every life you start counts" not in problem.environment_prompt("crafter_c0")
     assert "final_controller.py" not in problem.continue_reminder("crafter_u0")
     synthesis = problem.environment_prompt("crafter_c0")
     assert "in a new world" in synthesis and "{" not in synthesis
