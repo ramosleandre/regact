@@ -3,11 +3,12 @@ tasks: []               # every task below
 lifecycle: single_instance
 obs_mode: raw
 info_mode: informative
-seed: null              # ignored: a task's maps come from its name
+seed: null              # ignored: a task's maps come from its name and map_stream
 kwargs:
   seeds: [0, 1, 2, 3, 4]      # seeded tasks crafter_s<seed>: every life on that map
-  unseeded: [0, 1, 2, 3, 4]   # unseeded tasks crafter_u<k>: every life on a new map
-  synthesis: [0, 1, 2, 3, 4]  # crafter_c<k>: the maps of crafter_u<k>, scored by the final controller
+  # crafter_u (every life on a new map) and crafter_c (the same maps, scored by the final
+  # controller) draw their maps from this stream: give each attempt of the task its own.
+  map_stream: 0
   life_max_actions: 2000      # a life ends at the player's death or after this many actions
   # Frozen evaluation when a synthesis task ends: its final controller plays one life per map
   # below, of at most eval_max_actions actions (BALROG: 10 episodes of 2000 steps).

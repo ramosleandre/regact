@@ -23,8 +23,10 @@ A life always starts with an empty inventory and nothing unlocked, and is scored
 | Setting | Tasks | Map of each life | What the run is for |
 |---|---|---|---|
 | Seeded | `crafter_s<seed>`, `problem.kwargs.seeds` | the same map, at the same starting point | playing one world the agent can return to; a life replays exactly from its actions, so remembering action sequences pays |
-| Unseeded | `crafter_u<k>`, `problem.kwargs.unseeded` | a new map every life (life `i` is map `1000 (k + 1) + i`) | playing while learning the game |
-| Controller synthesis | `crafter_c<k>`, `problem.kwargs.synthesis` | the maps of `crafter_u<k>` | producing a program, `final_controller.py`, scored without the agent on new maps |
+| Unseeded | `crafter_u` | a new map every life, from the stream `problem.kwargs.map_stream` (life `i` of stream `k` is map `1000 (k + 1) + i`) | playing while learning the game |
+| Controller synthesis | `crafter_c` | the maps of `crafter_u` | producing a program, `final_controller.py`, scored without the agent on new maps |
+
+`crafter_u` and `crafter_c` are one task each: its attempts differ by the stream of maps, so a launcher passes `problem.kwargs.map_stream=<attempt>`. Attempts repeated inside one launch (`n_attempts_per_task`) play the same stream.
 
 ## Observation and actions
 

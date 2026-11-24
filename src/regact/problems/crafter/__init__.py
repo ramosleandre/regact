@@ -10,9 +10,10 @@ score is the number of achievements unlocked within it.
 
 - seeded (``crafter_s3``): every life starts on the same map, seed 3. It measures how far an
   agent gets in one world it can come back to.
-- unseeded (``crafter_u3``): every life is on a new map, drawn from the task's own stream. It
-  measures how an agent plays while it learns the game.
-- controller synthesis (``crafter_c3``): the maps of ``crafter_u3``, but the result is a program.
+- unseeded (``crafter_u``): every life is on a new map, drawn from the stream ``map_stream``:
+  an attempt of the task is run on a stream of its own. It measures how an agent plays while it
+  learns the game.
+- controller synthesis (``crafter_c``): the maps of ``crafter_u``, but the result is a program.
   When the task ends, its final controller plays one life on each of ``eval_seeds``, maps no
   task ever shows, for at most ``eval_max_actions`` actions (BALROG's setting is 10 episodes of
   2000 steps), and its CWM is replayed alone on the reference action lists of
@@ -39,10 +40,10 @@ from regact.workspace.templates import TemplateFile
 _PROMPT = Path(__file__).parents[1] / "prompts" / "crafter.md"
 _ENVIRONMENT = Path(__file__).parents[1] / "prompts" / "crafter_environment.md"
 _TASK = "crafter_s"  # + the map seed
-_UNSEEDED = "crafter_u"  # + the index of a stream of maps
-_SYNTHESIS = "crafter_c"  # + the same index: the same maps, scored by the final controller
+_UNSEEDED = "crafter_u"  # every life on a new map of the problem's stream
+_SYNTHESIS = "crafter_c"  # the same maps, scored by the final controller
 TASK = _TASK + "0"
-_STREAM = 1000  # life i of crafter_u<k> is map (k + 1) * _STREAM + i, away from the other seeds
+_STREAM = 1000  # life i of stream k is map (k + 1) * _STREAM + i, away from the other seeds
 _REFERENCE = Path(__file__).parent / "data" / "reference_actions.json"
 ACTIONS = (
     "noop", "move_left", "move_right", "move_up", "move_down", "do", "sleep",
@@ -235,38 +236,31 @@ class CrafterProblem(BaseProblem):
         eval_seeds: list[int] | None = None,
         eval_max_actions: int | None = 2000,
         life_max_actions: int = 2000,
-        unseeded: list[int] | None = None,
-        synthesis: list[int] | None = None,
+        map_stream: int = 0,
     ) -> None:
         self._seeds = [0] if seeds is None else [int(s) for s in seeds]
-        self._unseeded = [int(k) for k in unseeded or []]
-        self._synthesis = [int(k) for k in synthesis or []]
+        self._map_stream = int(map_stream)
         self._eval_seeds = [int(s) for s in eval_seeds or []]
         self._eval_max_actions = eval_max_actions
         self._life_max_actions = int(life_max_actions)
 
     def make_env(self, task_name: str) -> Any:
-        prefix = next((p for p in (_UNSEEDED, _SYNTHESIS) if task_name.startswith(p)), _TASK)
-        number = task_name.removeprefix(prefix)
-        if not task_name.startswith(prefix) or not number.isdigit():
-            raise RegactError(ErrorCategory.EVAL_HARNESS, f"unknown crafter task {task_name!r}")
-        if prefix != _TASK:
+        if task_name in (_UNSEEDED, _SYNTHESIS):
             return CrafterEnv(
-                (int(number) + 1) * _STREAM,
+                (self._map_stream + 1) * _STREAM,
                 new_map_each_life=True,
                 life_max_actions=self._life_max_actions,
             )
-        return CrafterEnv(int(number), life_max_actions=self._life_max_actions)
+        seed = task_name.removeprefix(_TASK)
+        if not task_name.startswith(_TASK) or not seed.isdigit():
+            raise RegactError(ErrorCategory.EVAL_HARNESS, f"unknown crafter task {task_name!r}")
+        return CrafterEnv(int(seed), life_max_actions=self._life_max_actions)
 
     def get_task_names(self) -> list[str]:
-        return [
-            *(f"{_TASK}{seed}" for seed in self._seeds),
-            *(f"{_UNSEEDED}{k}" for k in self._unseeded),
-            *(f"{_SYNTHESIS}{k}" for k in self._synthesis),
-        ]
+        return [*(f"{_TASK}{seed}" for seed in self._seeds), _UNSEEDED, _SYNTHESIS]
 
     def evaluation_tasks(self, task_name: str) -> list[str]:
-        if not task_name.startswith(_SYNTHESIS):
+        if task_name != _SYNTHESIS:
             return []
         return [f"{_TASK}{seed}" for seed in self._eval_seeds]
 
@@ -561,8 +555,7 @@ class CrafterProblem(BaseProblem):
     def config_kwargs(self) -> dict[str, Any]:
         return {
             "seeds": self._seeds,
-            "unseeded": self._unseeded,
-            "synthesis": self._synthesis,
+            "map_stream": self._map_stream,
             "eval_seeds": self._eval_seeds,
             "eval_max_actions": self._eval_max_actions,
             "life_max_actions": self._life_max_actions,

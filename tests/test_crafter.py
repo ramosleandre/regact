@@ -6,6 +6,7 @@ import pytest
 
 from regact.config.schema import InfoMode, ObsMode
 from regact.envclient.errors import InvalidActionError
+from regact.obs.errors import RegactError
 from regact.problems.base import build_problem
 
 pytest.importorskip("crafter")
@@ -40,15 +41,13 @@ def test_crafter_observation_and_actions():
 
 
 def test_crafter_metrics_per_life_and_on_held_out_worlds():
-    problem = build_problem(
-        "crafter", {"seeds": [0, 7], "unseeded": [2], "synthesis": [2], "eval_seeds": [100, 101]}
-    )
-    assert problem.get_task_names() == ["crafter_s0", "crafter_s7", "crafter_u2", "crafter_c2"]
-    for played in ("crafter_s0", "crafter_u2"):  # only a synthesis task is scored by a program
+    problem = build_problem("crafter", {"seeds": [0, 7], "eval_seeds": [100, 101]})
+    assert problem.get_task_names() == ["crafter_s0", "crafter_s7", "crafter_u", "crafter_c"]
+    for played in ("crafter_s0", "crafter_u"):  # only a synthesis task is scored by a program
         assert problem.evaluation_tasks(played) == []
         assert problem.evaluation_trajectories(played) == []
-    assert problem.evaluation_tasks("crafter_c2") == ["crafter_s100", "crafter_s101"]
-    replays = problem.evaluation_trajectories("crafter_c2")
+    assert problem.evaluation_tasks("crafter_c") == ["crafter_s100", "crafter_s101"]
+    replays = problem.evaluation_trajectories("crafter_c")
     assert [name for name, _ in replays] == ["crafter_s100"] * 2 + ["crafter_s101"] * 2
     assert set(replays[0][1]) <= set(cr.ACTIONS)
     wood, both = ["collect_wood"], ["collect_wood", "wake_up"]
@@ -105,41 +104,46 @@ def test_crafter_lives_share_the_map_and_start_with_nothing():
 
 
 def test_an_unseeded_task_gives_each_life_a_new_map():
-    problem = build_problem("crafter", {"unseeded": [0, 1], "synthesis": [0]})
-    env = problem.make_env("crafter_u0")
+    problem = build_problem("crafter", {"map_stream": 2})
+    env = problem.make_env("crafter_u")
     first, _ = env.reset()
     second, _ = env.reset()
     assert second["view"] != first["view"]
-    for same_maps in ("crafter_u0", "crafter_c0"):  # the stream of maps is the index's own
-        again = problem.make_env(same_maps)
-        assert again.reset()[0] == first and again.reset()[0] == second
-    assert problem.make_env("crafter_u1").reset()[0]["view"] != first["view"]
+    synthesis = problem.make_env("crafter_c")  # the same stream of maps
+    assert synthesis.reset()[0] == first and synthesis.reset()[0] == second
+    # life i of stream k is map 1000 (k + 1) + i; an attempt on another stream meets other maps
+    assert problem.make_env("crafter_s3001").reset()[0] == second
+    other = build_problem("crafter", {"map_stream": 3}).make_env("crafter_u")
+    assert other.reset()[0]["view"] != first["view"]
+    assert problem.config_kwargs()["map_stream"] == 2
+    with pytest.raises(RegactError):
+        problem.make_env("crafter_u2")
 
 
 def test_a_crafter_life_ends_at_the_action_limit():
-    env = build_problem("crafter", {"unseeded": [0], "life_max_actions": 3}).make_env("crafter_u0")
+    env = build_problem("crafter", {"life_max_actions": 3}).make_env("crafter_u")
     env.reset()
     ends = [env.step("noop")[2:4] for _ in range(3)]
     assert ends == [(False, False), (False, False), (False, True)]
 
 
 def test_crafter_prompts_state_its_own_rules():
-    problem = build_problem("crafter", {"unseeded": [0], "synthesis": [0], "eval_seeds": [100, 101]})
+    problem = build_problem("crafter", {"eval_seeds": [100, 101]})
     section = problem.environment_prompt(cr.TASK)
     assert "stochastic" in section and "{" not in section
     assert "- `make_iron_sword`: craft an iron sword" in section
     assert all(f"`{name}`" in section for name in cr.ACHIEVEMENTS)
     assert "same world" in section and "final_controller.py" not in section
     assert "final_controller.py" not in problem.objective_prompt(cr.TASK)
-    unseeded = problem.environment_prompt("crafter_u0")
+    unseeded = problem.environment_prompt("crafter_u")
     assert "in a new world" in unseeded and "final_controller.py" not in unseeded
     assert "after 2000 actions" in unseeded and "Every life you start counts" in unseeded
-    assert "Every life you start counts" not in problem.environment_prompt("crafter_c0")
-    assert "final_controller.py" not in problem.continue_reminder("crafter_u0")
-    synthesis = problem.environment_prompt("crafter_c0")
+    assert "Every life you start counts" not in problem.environment_prompt("crafter_c")
+    assert "final_controller.py" not in problem.continue_reminder("crafter_u")
+    synthesis = problem.environment_prompt("crafter_c")
     assert "in a new world" in synthesis and "{" not in synthesis
     assert "in 2 more new worlds" in synthesis and "`final_controller.py`" in synthesis
-    assert problem.objective_prompt("crafter_c0").startswith("Produce a program")
-    assert "`final_controller.py`" in problem.continue_reminder("crafter_c0")
+    assert problem.objective_prompt("crafter_c").startswith("Produce a program")
+    assert "`final_controller.py`" in problem.continue_reminder("crafter_c")
     prompt = problem.build_prompt(cr.TASK, info_mode=InfoMode.INFORMATIVE)
     assert "`do`" in prompt and "{" not in prompt
