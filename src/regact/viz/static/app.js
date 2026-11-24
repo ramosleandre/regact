@@ -291,7 +291,7 @@ async function loadSettings(scope) {
 function currentSettings() {
   return {
     version: 1, agg: _graph.agg, err: _graph.err, mask: _graph.mask, barScale: _graph.barScale,
-    order: _graph.order, colors: _graph.colors, curveX: _graph.curveX, lineStyles: _graph.lineStyles,
+    order: _graph.order, colors: _graph.colors, curveX: _graph.curveX, curveY: _graph.curveY, lineStyles: _graph.lineStyles,
     gamma: _graph.gamma, comparable: _graph.comparable,
     hidden: [..._graph.hidden], active: [..._graph.active], known: _graph.known,
     perRun: [..._graph.perRun], muted: [..._graph.muted],
@@ -321,6 +321,7 @@ function modelName(exp) {
 const _graph = {
   agg: "mean", err: "none", mask: false, barScale: 1,   // barScale: x-axis bar-width zoom (persisted)
   curveX: "env actions",   // x axis of the progress curves (a CURVE_X key)
+  curveY: null,   // reading of the progress drawn (a key of progress.curves; null: best so far)
   active: new Set(),  // set by applySettings: saved selection, else the Main metrics
   hidden: new Set(), colors: {}, order: [],
   known: [],   // metric keys offered when the selection was saved; a Main one added since is shown
@@ -342,6 +343,7 @@ function applySettings(s, specs) {
   _graph.mask = !!s.mask;
   _graph.barScale = typeof s.barScale === "number" ? s.barScale : 1;
   _graph.curveX = CURVE_X[s.curveX] ? s.curveX : "env actions";
+  _graph.curveY = typeof s.curveY === "string" ? s.curveY : null;
   _graph.order = Array.isArray(s.order) ? s.order : [];
   _graph.colors = (s.colors && typeof s.colors === "object") ? s.colors : {};
   _graph.lineStyles = (s.lineStyles && typeof s.lineStyles === "object") ? s.lineStyles : {};
@@ -609,12 +611,16 @@ const CURVE_X = {
   "tool calls": { point: "tool_calls", end: (m) => m.n_tool_calls, fmt: fmt },
   "time": { point: "seconds", end: (m) => m.duration_s, fmt: dur },
 };
+// The readings of the progress the shown runs offer; without one chosen, the best value so far.
+const BEST_SO_FAR = "best so far";
+const groupRuns = (group) => group.experiments.flatMap((exp) => [...(group.byExp.get(exp) || new Map()).values()].flat());
+const curveReadings = (group) => [...new Set(groupRuns(group).flatMap((m) => Object.keys((m.progress || {}).curves || {})))];
 function curveRuns(exp, task, group, mask, X) {
   const runs = [];
   for (const m of (group.byExp.get(exp) && group.byExp.get(exp).get(task)) || []) {
     const done = isValidRun(m);
     if (!m.progress || (mask && !done)) continue;
-    const pts = m.progress.points.map((q) => [q[X.point], q.value]);
+    const pts = ((m.progress.curves || {})[_graph.curveY] || m.progress.points).map((q) => [q[X.point], q.value]);
     if (pts.some((q) => q[0] == null)) continue;   // no such measure recorded for this run
     const levels = (m.progress.reference || []).length;   // the levels to win, when known
     const won = levels > 0 && Math.max(0, ...pts.map((q) => q[1])) >= levels;
@@ -1112,10 +1118,26 @@ async function graphsView(games, onlyExp, scope) {
         const setZoom = (span) => { if (span) _graph.zoom[_graph.curveX] = span; else delete _graph.zoom[_graph.curveX]; redraw(); };
         const reset = h("button", "aggbtn", "show all");
         reset.onclick = () => setZoom(null);
-        card.append(h("div", "zoomrow",
+        const row = h("div", "zoomrow",
           segBtns("x:", Object.keys(CURVE_X), _graph.curveX, (n) => { _graph.curveX = n; redraw(); }),
-          zoomed ? reset : h("span", "muted zoomhint", "drag across a chart to zoom")));
+          zoomed ? reset : h("span", "muted zoomhint", "drag across a chart to zoom"));
+        const readings = curveReadings(g2);
+        if (readings.length) {
+          const what = spec.label.split(" ")[0];
+          card.firstChild.textContent = what + " over the run";
+          const pick = segBtns(what.toLowerCase() + ":", readings.includes(BEST_SO_FAR) ? readings : [BEST_SO_FAR, ...readings],
+            readings.includes(_graph.curveY) ? _graph.curveY : BEST_SO_FAR, (n) => { _graph.curveY = n; redraw(); });
+          pick.classList.add("readings");
+          row.append(pick);
+        }
+        card.append(row);
         let hasRef = false;
+        // Tasks without a reference player read on one scale: their runs are first drawn together.
+        if (g2.tasks.length > 1 && !groupRuns(g2).some((m) => ((m.progress || {}).reference || []).length)) {
+          const pooled = { ...g2, byExp: new Map(g2.experiments.map((exp) => [exp, new Map([[_AVG_COL, groupRuns({ ...g2, experiments: [exp] })]])])) };
+          const drawn = progressChart(_AVG_COL, pooled, expColor, _graph.agg, _graph.err, _graph.mask, _graph.curveX, setZoom);
+          if (drawn) scroll.append(h("div", "muted", shortTask(_AVG_COL)), drawn.chart);
+        }
         for (const task of g2.tasks) {
           const drawn = progressChart(task, g2, expColor, _graph.agg, _graph.err, _graph.mask, _graph.curveX, setZoom);
           if (!drawn) continue;

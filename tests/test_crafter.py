@@ -69,6 +69,14 @@ def test_crafter_metrics_per_life_and_on_held_out_worlds():
         "mean_life_achievements": 1.33,
         "worst_life_achievements": 1,
     }
+    curves = problem.progress_curves(trace)  # (step of the trace, value) at each change
+    assert list(curves) == ["current", "per life", "best so far", "cumulative"]
+    assert curves == {
+        "current": [(1, 0), (2, 1), (6, 2)],  # the later lives start on the count of the last one
+        "per life": [(1, 1), (3, 1), (5, 2)],
+        "best so far": [(2, 1), (6, 2)],
+        "cumulative": [(2, 1), (3, 2)],
+    }
     assert not problem.is_perfect({"success_rate": 1.0})  # one good life is not a solved game
     scores = problem.evaluation_metrics([{"info": {"achievements": both}}, {"info": {}}])
     assert scores["eval_progress"] == pytest.approx(100 / 22)

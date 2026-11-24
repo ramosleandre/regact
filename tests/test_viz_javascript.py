@@ -112,6 +112,16 @@ vm.runInContext(String.raw`
   const [f, k] = byActions;
   if (curveAt(f, 9) !== 0 || curveAt(f, 10) !== 1 || curveAt(f, 500) !== 2) throw Error('steps');
   if (!f.done || k.done || k.end !== 25 || f.end !== 40) throw Error('where a run stops');
+  // Another reading of the progress, where a run offers it: the chosen one is drawn.
+  if (curveReadings(group).length) throw Error('no other reading here');
+  if (groupRuns(group).length !== 3) throw Error('every run of the group');
+  finished.progress.curves = {current: [pt(3, 10, 2), pt(0, 30, 5)]};
+  if (String(curveReadings(group)) !== 'current') throw Error('readings offered');
+  _graph.curveY = 'current';
+  const [c, same] = curveRuns('e', 't', group, false, CURVE_X['env actions']);
+  if (curveAt(c, 10) !== 3 || curveAt(c, 30) !== 0) throw Error('the chosen reading');
+  if (curveAt(same, 20) !== 1) throw Error('a run without that reading keeps its best so far');
+  _graph.curveY = null;
 `, sandbox);
 """
     subprocess.run([node, "-e", script, str(source)], check=True, timeout=10)

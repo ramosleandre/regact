@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import io
+import itertools
 import json
 import sqlite3
 import threading
@@ -129,17 +130,25 @@ def info_trace(task: Path, problem: BaseProblem) -> list[tuple[int, dict[str, An
 
 
 def progress(
-    task: Path, problem: BaseProblem, task_name: str, recorded: list[dict[str, Any]] | None
+    task: Path,
+    problem: BaseProblem,
+    task_name: str,
+    recorded: list[dict[str, Any]] | None,
+    trace: list[tuple[int, dict[str, Any]]] | None = None,
 ) -> dict[str, Any] | None:
     """A run's progress points (see ``BaseProblem.progress_value``) with the problem's label and
-    reference player. A run recorded before the points were tracked gets them from its logs."""
+    reference player. A run recorded before the points were tracked gets them from its logs.
+    ``curves``: the problem's other readings of ``trace`` (``BaseProblem.progress_curves``)."""
     if problem.progress_label is None:
         return None
-    return {
+    out: dict[str, Any] = {
         "label": problem.progress_label,
         "points": recorded if recorded is not None else _progress_from_logs(task, problem),
         "reference": problem.progress_reference(task_name),
     }
+    if trace and (curves := problem.progress_curves(trace)):
+        out["curves"] = _placed(task, trace, curves)
+    return out
 
 
 def _timestamps(
@@ -213,6 +222,39 @@ def _progress_from_logs(task: Path, problem: BaseProblem) -> list[dict[str, Any]
             }
         )
     return points
+
+
+def _placed(
+    task: Path,
+    trace: list[tuple[int, dict[str, Any]]],
+    curves: dict[str, list[tuple[int, float]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Progress readings as points on the run's x axes. A step is placed where the RunController
+    call that played it ended (the last call, for a step no call accounts for)."""
+    with database(task) as db:
+        played = db.execute(
+            """SELECT json_extract(payload,'$.real_actions'),
+                COALESCE(json_extract(payload,'$.finished_at'),
+                    json_extract(payload,'$.created_at'))
+            FROM records WHERE kind='exploration' ORDER BY id"""
+        ).fetchall()
+    ends = list(itertools.accumulate(int(n or 0) for n, _ in played))
+    calls = [
+        at
+        for at, _ in _timestamps(task / "logs/transcript.jsonl", "type", ("ToolCall",), "synthetic")
+    ]
+    clock = active_clock(task)
+
+    def point(step: int, value: float) -> dict[str, Any]:
+        at = played[min(bisect.bisect_left(ends, step), len(played) - 1)][1] if played else None
+        return {
+            "value": value,
+            "env_actions": trace[step - 1][0],
+            "tool_calls": None if at is None else bisect.bisect_right(calls, at),
+            "seconds": None if at is None else round(clock(float(at)), 1),
+        }
+
+    return {name: [point(step, value) for step, value in pts] for name, pts in curves.items()}
 
 
 def _obs(db: sqlite3.Connection, oid: int) -> dict[str, Any]:

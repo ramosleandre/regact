@@ -500,6 +500,17 @@ def test_a_run_records_where_it_was_at_each_progress(make_rig, monkeypatch):
     assert all(p["env_actions"] == 2 * p["value"] for p in shown["points"])
     assert viewer.progress(c.output, c.problem, c.task, points)["points"] is points
 
+    # The problem's other readings are placed on the same axes, step by step of the trace.
+    trace = viewer.info_trace(c.output, c.problem)
+    assert "curves" not in viewer.progress(c.output, c.problem, c.task, points, trace)
+    monkeypatch.setattr(
+        type(c.problem), "progress_curves", lambda self, trace: {"now": [(1, 0), (len(trace), 3)]}
+    )
+    first, last = viewer.progress(c.output, c.problem, c.task, points, trace)["curves"]["now"]
+    assert (first["value"], first["env_actions"]) == (0, trace[0][0])
+    assert (last["value"], last["env_actions"]) == (3, trace[-1][0])
+    assert first["tool_calls"] <= last["tool_calls"] and first["seconds"] <= last["seconds"]
+
 
 @pytest.mark.parametrize("protocol_name", ["vanilla", "cwm"])
 def test_workers_without_an_os_sandbox_need_an_explicit_opt_in(protocol_name):

@@ -130,13 +130,13 @@ def build_app(experiment_dir: str, only: set[str] | None = None) -> FastAPI:
                 )
                 problem = reader.problem_of(view.config)
                 task = reader.task_name(name, view.state)
+                trace: list[tuple[int, dict[str, Any]]] = []
                 with contextlib.suppress(Exception):  # a viewer renders without them
-                    result["derived_metrics"] = problem.derived_trace_metrics(
-                        task, cwm_viewer.info_trace(root / name, problem)
-                    )
+                    trace = cwm_viewer.info_trace(root / name, problem)
+                    result["derived_metrics"] = problem.derived_trace_metrics(task, trace)
                 with contextlib.suppress(Exception):
                     result["progress"] = cwm_viewer.progress(
-                        root / name, problem, task, state.get("progress")
+                        root / name, problem, task, state.get("progress"), trace
                     )
                 if protocol_name == "cwm":
                     with contextlib.suppress(Exception), cwm_viewer.database(root / name) as db:

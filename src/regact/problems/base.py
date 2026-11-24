@@ -49,6 +49,13 @@ class BaseProblem(ABC):
         """A reference player's ``(env actions, progress value)`` points, when one exists."""
         return []
 
+    def progress_curves(
+        self, trace: list[tuple[int, dict[str, Any]]]
+    ) -> dict[str, list[tuple[int, float]]]:
+        """Readings of the progress over a run for the viewer to offer, by name and in that
+        order: ``(step of the trace, counted from 1, value)`` each time the value changes."""
+        return {}
+
     def reset_commands(self) -> dict[str, str]:
         """Explicit reset capabilities for externally managed controller protocols."""
         return {"ResetEnvironment": "Reset the whole environment from its initial state."}

@@ -63,4 +63,13 @@ Both are written to `cwm/evaluation.json`; see `protocols/managed/evaluation.py`
 | `eval_model_explained_rate`, `eval_model_bits_per_step`, `eval_no_model_bits_per_step` | the frozen CWM alone on the reference action lists |
 | `eval_time_limit_stops` | evaluation lives and replays cut by the submitted-code time limit (they then measure speed, not play) |
 
+The viewer draws the achievements over a run (against env actions, tool calls or time) in four readings, `problem.progress_curves`:
+
+| Reading | Value at a point of the run |
+|---|---|
+| current | the achievements of the life in progress: it falls to 0 when a life starts |
+| per life | the achievements the life in progress ends with |
+| best so far | the most achievements any one life had reached by then |
+| cumulative | the achievements unlocked in at least one life by then |
+
 Differences from BALROG that remain: its agent reads a text description of the nearest objects where ours reads the map window as names; its agent has no learning phase and calls the model at every step, where the synthesis track evaluates a program written after one.

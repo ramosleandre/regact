@@ -195,6 +195,11 @@ def _unlocked(info: dict[str, Any] | None) -> list[str]:
     return list((info or {}).get("achievements") or [])
 
 
+def _new_life(previous: int | None, actions: int) -> bool:
+    # a reset is counted as one action, so a step right after one is two further on
+    return previous is None or actions > previous + 1
+
+
 def _milestones(env: Any) -> list[str]:
     last, prev = getattr(env, "last_obs", None), getattr(env, "prev_obs", None)
     if last is None:
@@ -476,8 +481,7 @@ class CrafterProblem(BaseProblem):
             if not seen.issuperset(_unlocked(info)):
                 seen.update(_unlocked(info))
                 at = actions
-            # a reset is counted as one action, so a step right after one is two further on
-            if previous is None or actions > previous + 1:
+            if _new_life(previous, actions):
                 lives.append([actions, 0, 0])
             lives[-1] = [actions, len(_unlocked(info)), int(_DIED in (info.get("milestones") or []))]
             previous = actions
@@ -492,6 +496,38 @@ class CrafterProblem(BaseProblem):
                 worst_life_achievements=min(ended),
             )
         return out
+
+    def progress_curves(
+        self, trace: list[tuple[int, dict[str, Any]]]
+    ) -> dict[str, list[tuple[int, float]]]:
+        """``current``: the achievements of the life in progress. ``per life``: those the life
+        in progress ends with. ``best so far``: the most a life has reached. ``cumulative``:
+        those unlocked in at least one life so far."""
+        current: list[tuple[int, float]] = []
+        per_life: list[tuple[int, float]] = []
+        best: list[tuple[int, float]] = []
+        cumulative: list[tuple[int, float]] = []
+        seen: set[str] = set()
+        previous = None
+        for step, (actions, info) in enumerate(trace, start=1):
+            unlocked = _unlocked(info)
+            if _new_life(previous, actions):
+                per_life.append((step, 0))
+            per_life[-1] = (per_life[-1][0], len(unlocked))
+            if not current or current[-1][1] != len(unlocked):
+                current.append((step, len(unlocked)))
+            if len(unlocked) > (best[-1][1] if best else 0):
+                best.append((step, len(unlocked)))
+            if not seen.issuperset(unlocked):
+                seen.update(unlocked)
+                cumulative.append((step, len(seen)))
+            previous = actions
+        return {
+            "current": current,
+            "per life": per_life,
+            "best so far": best,
+            "cumulative": cumulative,
+        }
 
     def build_prompt(
         self,
